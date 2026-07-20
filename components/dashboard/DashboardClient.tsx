@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { PriorityAccountsTable } from "@/components/dashboard/PriorityAccountsTable";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
-import { Target, TrendingDown, TrendingUp, Users, AlertTriangle, Crown } from "lucide-react";
+import { Target, TrendingDown, TrendingUp, Users, AlertTriangle, Crown, PhoneMissed, UserX, Package } from "lucide-react";
 import type { Account } from "@/types/database";
 import Link from "next/link";
 
@@ -26,13 +26,23 @@ interface MonthlySale {
   ca: number;
 }
 
+interface ProductRow {
+  account_id: string;
+  brand: string;
+  sales_value_ly: number | null;
+  sales_value_cy: number | null;
+  growth_rate_pct: number | null;
+}
+
 export function DashboardClient({
   accounts,
   monthlySales,
+  products,
   lastImportLabel,
 }: {
   accounts: Account[];
   monthlySales: MonthlySale[];
+  products: ProductRow[];
   lastImportLabel: string;
 }) {
   const [year, setYear] = useState(2026);
@@ -102,6 +112,31 @@ export function DashboardClient({
     .filter((a) => a.evolution_pct !== null)
     .sort((a, b) => (a.evolution_pct ?? 0) - (b.evolution_pct ?? 0))
     .slice(0, 5);
+
+  const lostAccounts = [...accounts]
+    .filter((a) => a.status === "lost")
+    .sort((a, b) => (b.ca_2025 ?? 0) - (a.ca_2025 ?? 0))
+    .slice(0, 10);
+
+  const overdueCallAccounts = [...accounts]
+    .filter((a) => a.status === "actif" && (a.days_since_last_call ?? 0) > 60)
+    .sort((a, b) => (b.days_since_last_call ?? 0) - (a.days_since_last_call ?? 0))
+    .slice(0, 10);
+
+  const salesByBrand = useMemo(() => {
+    const totals = new Map<string, { cy: number; ly: number }>();
+    for (const p of products) {
+      const cur = totals.get(p.brand) ?? { cy: 0, ly: 0 };
+      cur.cy += p.sales_value_cy ?? 0;
+      cur.ly += p.sales_value_ly ?? 0;
+      totals.set(p.brand, cur);
+    }
+    return Array.from(totals.entries())
+      .map(([brand, v]) => ({ brand, ...v }))
+      .sort((a, b) => b.cy - a.cy)
+      .slice(0, 8);
+  }, [products]);
+  const hasProductData = products.length > 0;
 
   const priorityAccounts = [...accounts]
     .sort((a, b) => {
@@ -258,6 +293,104 @@ export function DashboardClient({
           <MoversCard title="Top 5 croissance (Évol. 25→26)" accounts={topCroissance} tone="positive" />
           <MoversCard title="Top 5 déclin (Évol. 25→26)" accounts={topDeclin} tone="negative" />
         </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Comptes perdus</CardTitle>
+                <CardDescription>Statut Lost, triés par CA 2025 (le plus à regagner en premier)</CardDescription>
+              </div>
+              <UserX size={18} className="text-danger" />
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {lostAccounts.length === 0 && <p className="text-sm text-muted-foreground">Aucun compte perdu 🎉</p>}
+              {lostAccounts.map((a) => (
+                <div key={a.id} className="flex items-center justify-between text-sm">
+                  <div>
+                    <Link href={`/comptes/${a.id}`} className="text-foreground hover:text-primary">
+                      {a.name}
+                    </Link>
+                    {a.last_order_date && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        dernière commande {new Date(a.last_order_date).toLocaleDateString("fr-FR")}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-muted-foreground">{formatEUR(a.ca_2025)}</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Relances en retard</CardTitle>
+                <CardDescription>Comptes actifs sans appel depuis plus de 60 jours</CardDescription>
+              </div>
+              <PhoneMissed size={18} className="text-warning" />
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {overdueCallAccounts.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {accounts.some((a) => a.days_since_last_call !== null)
+                    ? "Rien en retard, bien joué."
+                    : "Importez le fichier Appels pour activer ce suivi."}
+                </p>
+              )}
+              {overdueCallAccounts.map((a) => (
+                <div key={a.id} className="flex items-center justify-between text-sm">
+                  <Link href={`/comptes/${a.id}`} className="text-foreground hover:text-primary">
+                    {a.name}
+                  </Link>
+                  <span className="text-warning">{a.days_since_last_call} j</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle>CA par marque</CardTitle>
+              <CardDescription>Année en cours vs année précédente, toutes marques confondues</CardDescription>
+            </div>
+            <Package size={18} className="text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            {!hasProductData ? (
+              <p className="text-sm text-muted-foreground">Importez le fichier Croissance par marque pour activer cette vue.</p>
+            ) : (
+              <div className="space-y-3">
+                {salesByBrand.map((b) => {
+                  const max = Math.max(...salesByBrand.map((s) => s.cy), 1);
+                  const growth = b.ly > 0 ? (b.cy - b.ly) / b.ly : null;
+                  return (
+                    <div key={b.brand}>
+                      <div className="mb-1 flex items-center justify-between text-sm">
+                        <span className="text-foreground">{b.brand}</span>
+                        <span className="text-muted-foreground">
+                          {formatEUR(b.cy)}
+                          {growth !== null && (
+                            <span className={`ml-2 ${growth >= 0 ? "text-success" : "text-danger"}`}>
+                              {growth > 0 ? "+" : ""}
+                              {formatPct(growth)}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="h-2 rounded-full bg-surface-muted">
+                        <div className="h-2 rounded-full bg-primary" style={{ width: `${(b.cy / max) * 100}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </main>
     </div>
   );

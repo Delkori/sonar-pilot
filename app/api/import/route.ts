@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { parseKpiWorkbook, parseMonthlySalesWorkbook, parsePasWorkbook } from "@/lib/import/parser";
-import { mapKpiRow, mapPasRow, normalizeName } from "@/lib/import/mapping";
+import {
+  parseCallsWorkbook,
+  parseGrowthByBrandWorkbook,
+  parseKpiDataSheet,
+  parseKpiWorkbook,
+  parseMonthlySalesWorkbook,
+  parsePasWorkbook,
+} from "@/lib/import/parser";
+import {
+  mapCallsRow,
+  mapGrowthByBrandRow,
+  mapKpiDataRow,
+  mapKpiRow,
+  mapPasRow,
+  normalizeName,
+} from "@/lib/import/mapping";
 import { validateKpiRows, validatePasRows } from "@/lib/import/validator";
 import type { ImportLogEntry } from "@/lib/import/validator";
 
@@ -12,14 +26,17 @@ export const runtime = "nodejs";
  * - upsert par external_ref (CODE SAP / Code client), jamais delete+insert
  * - un import raté ou partiel est journalisé dans `imports`, ne bloque pas
  *   les comptes déjà en base
- * - le fichier PAS (SUIVI COMPTES) est la source principale ; le fichier KPI
- *   optionnel vient compléter ville/CP/statut/owner sur les mêmes comptes
+ * - seul le fichier PAS (SUIVI COMPTES) est obligatoire ; tous les autres
+ *   (KPI, ventes mensuelles, appels, croissance par marque) sont optionnels
+ *   et viennent enrichir les mêmes comptes
  */
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const pasFile = formData.get("pas") as File | null;
   const kpiFile = formData.get("kpi") as File | null;
   const monthlyFile = formData.get("monthly") as File | null;
+  const callsFile = formData.get("calls") as File | null;
+  const growthFile = formData.get("growth") as File | null;
   const importedBy = (formData.get("importedBy") as string) || null;
 
   if (!pasFile) {
@@ -44,6 +61,16 @@ export async function POST(req: NextRequest) {
       const { _row, _comment, ...patch } = row as typeof row & { _comment?: string | null };
       accountsByRef.set(patch.external_ref!, { ...patch, _comment });
     }
+
+    // 1b) DATA KPI 2026 sheet — embedded in the same PAS file, no extra
+    // upload needed. Only source with real first/last order dates.
+    const kpiDataRows = parseKpiDataSheet(pasBuffer);
+    for (const row of kpiDataRows) {
+      const { externalRef, patch } = mapKpiDataRow(row);
+      const existing = accountsByRef.get(externalRef);
+      if (existing) Object.assign(existing, patch, { owner: existing.owner ?? patch.owner });
+    }
+    rowsTotal += kpiDataRows.length;
 
     if (kpiFile) {
       const kpiBuffer = await kpiFile.arrayBuffer();
@@ -96,7 +123,7 @@ export async function POST(req: NextRequest) {
     const { data: upserted, error: upsertError } = await supabase
       .from("accounts")
       .upsert(accountsPayload, { onConflict: "external_ref" })
-      .select("id, external_ref");
+      .select("id, external_ref, name");
 
     if (upsertError) {
       throw new Error(upsertError.message);
@@ -119,15 +146,16 @@ export async function POST(req: NextRequest) {
       await supabase.from("account_actions").insert(comments);
     }
 
+    // all accounts (post-upsert) needed for name-matching the file-based
+    // sources below, which don't carry a stable account code
+    const { data: allAccounts } = await supabase.from("accounts").select("id, name");
+    const idByName = new Map((allAccounts ?? []).map((a) => [normalizeName(a.name), a.id] as const));
+
     // 3b) optional monthly sales file — matched by normalized account name
-    // since this export has no code column, only "Customer Name"
     if (monthlyFile) {
       const monthlyBuffer = await monthlyFile.arrayBuffer();
       const monthlyRows = parseMonthlySalesWorkbook(monthlyBuffer);
       rowsTotal += monthlyRows.length;
-
-      const { data: allAccounts } = await supabase.from("accounts").select("id, name");
-      const idByName = new Map((allAccounts ?? []).map((a) => [normalizeName(a.name), a.id] as const));
 
       const monthlyPayload = [];
       let monthlyMatched = 0;
@@ -148,6 +176,57 @@ export async function POST(req: NextRequest) {
         if (monthlyError) allErrors.push({ row: 0, message: `Ventes mensuelles : ${monthlyError.message}` });
       }
       rowsSuccess += monthlyMatched;
+    }
+
+    // 3c) optional calls file — last call date / days since last call
+    if (callsFile) {
+      const callsBuffer = await callsFile.arrayBuffer();
+      const rawCallsRows = parseCallsWorkbook(callsBuffer);
+      rowsTotal += rawCallsRows.length;
+
+      let callsMatched = 0;
+      for (const row of rawCallsRows) {
+        const { name, patch } = mapCallsRow(row);
+        const accountId = idByName.get(name);
+        if (!accountId) {
+          allErrors.push({ row: 0, message: `Compte "${patch.name}" introuvable — appel ignoré` });
+          continue;
+        }
+        const { error } = await supabase
+          .from("accounts")
+          .update({ last_call_date: patch.last_call_date, days_since_last_call: patch.days_since_last_call })
+          .eq("id", accountId);
+        if (!error) callsMatched++;
+      }
+      rowsSuccess += callsMatched;
+    }
+
+    // 3d) optional growth-by-brand file — per-brand CA/qty LY vs CY
+    if (growthFile) {
+      const growthBuffer = await growthFile.arrayBuffer();
+      const rawGrowthRows = parseGrowthByBrandWorkbook(growthBuffer);
+      rowsTotal += rawGrowthRows.length;
+
+      const productsPayload = [];
+      let growthMatched = 0;
+      for (const row of rawGrowthRows) {
+        const { name, product } = mapGrowthByBrandRow(row);
+        const accountId = idByName.get(name);
+        if (!accountId) {
+          allErrors.push({ row: 0, message: `Compte "${row["Customer Name"]}" introuvable — croissance marque ignorée` });
+          continue;
+        }
+        growthMatched++;
+        productsPayload.push({ account_id: accountId, ...product });
+      }
+
+      if (productsPayload.length > 0) {
+        const { error: productsError } = await supabase
+          .from("account_products")
+          .upsert(productsPayload, { onConflict: "account_id,brand,period" });
+        if (productsError) allErrors.push({ row: 0, message: `Croissance par marque : ${productsError.message}` });
+      }
+      rowsSuccess += growthMatched;
     }
 
     // 4) finalize import log

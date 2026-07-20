@@ -138,3 +138,61 @@ export function parseMonthlySalesWorkbook(buffer: ArrayBuffer): MonthlySalesRow[
     return { customerName, year: Number(year), month: Number(month), ca };
   });
 }
+
+export interface RawGrowthByBrandRow {
+  Territory: string;
+  "Customer Name": string;
+  Brand_Ml: string;
+  "Sales Value LY": number | null;
+  "Sales Value CY": number | null;
+  "Sales Growth Rate %": number | null;
+  "Sales Qty Ordered  LY": number | null;
+  "Sales Qty Ordered CY ": number | null;
+  "Qty Ordered Rate %": number | null;
+}
+
+/**
+ * "Customer Growth By Brand" export: one row per Customer × Brand, with
+ * CA/quantités LY vs CY et taux de croissance déjà calculé par Teoxane.
+ * Alimente la fiche compte (onglet "Données produit") et le classement
+ * marque du Dashboard.
+ */
+export function parseGrowthByBrandWorkbook(buffer: ArrayBuffer): RawGrowthByBrandRow[] {
+  const wb = XLSX.read(buffer, { type: "array" });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json<RawGrowthByBrandRow>(sheet, { defval: null });
+  return rows.filter((r) => r["Customer Name"] && r.Brand_Ml);
+}
+
+export interface RawKpiDataRow {
+  "Code client": string;
+  "Nom du Client": string;
+  "Date première commande": number | string | null; // Excel serial date
+  "Date dernière commande": number | string | null;
+  "Nom du commercial": string;
+}
+
+/**
+ * "DATA KPI 2026" sheet, embedded in the PAS workbook itself (no separate
+ * upload needed) — the only source with real first/last order dates.
+ */
+export function parseKpiDataSheet(buffer: ArrayBuffer): RawKpiDataRow[] {
+  const wb = XLSX.read(buffer, { type: "array" });
+  const sheet = wb.Sheets["DATA KPI 2026"];
+  if (!sheet) return [];
+  const rows = XLSX.utils.sheet_to_json<RawKpiDataRow>(sheet, { defval: null });
+  return rows.filter((r) => r["Code client"]);
+}
+
+/** Converts an Excel date serial number to an ISO date string (YYYY-MM-DD). */
+export function excelSerialToISODate(value: number | string | null): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "string") {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  }
+  // Excel epoch is 1899-12-30
+  const ms = Math.round((value - 25569) * 86400 * 1000);
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}

@@ -12,23 +12,62 @@ interface ImportResult {
   status: "success" | "partial" | "failed";
 }
 
+const FILE_FIELDS = [
+  {
+    key: "pas",
+    required: true,
+    title: "Fichier PAS",
+    description: 'Le fichier "PAS Q3 2026 - RHONE ALPES.xlsx" — onglets SUIVI COMPTES et DATA KPI 2026 lus automatiquement (segments, CA, objectifs, dates de commande).',
+  },
+  {
+    key: "kpi",
+    required: false,
+    title: "Fichier KPI",
+    description: '"KPI RHONE ALPES ....xlsx" — complète ville, code postal, statut et commercial.',
+  },
+  {
+    key: "monthly",
+    required: false,
+    title: "Ventes mensuelles",
+    description: '"Products Purchased By Customers...xlsx" — seul fichier avec un vrai détail mois par mois, alimente le sélecteur année/mois du Dashboard.',
+  },
+  {
+    key: "calls",
+    required: false,
+    title: "Appels",
+    description: '"Calls By Customer.xlsx" — date du dernier appel et nombre de jours depuis, pour repérer les comptes à relancer.',
+  },
+  {
+    key: "growth",
+    required: false,
+    title: "Croissance par marque",
+    description: '"Customer Growth By Brand...xlsx" — CA et quantités par marque, LY vs CY, alimente la fiche compte et le classement produit.',
+  },
+] as const;
+
+type FileKey = (typeof FILE_FIELDS)[number]["key"];
+
 export function ImportForm() {
-  const [pasFile, setPasFile] = useState<File | null>(null);
-  const [kpiFile, setKpiFile] = useState<File | null>(null);
-  const [monthlyFile, setMonthlyFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<Record<FileKey, File | null>>({
+    pas: null,
+    kpi: null,
+    monthly: null,
+    calls: null,
+    growth: null,
+  });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | { error: string } | null>(null);
   const [geocoding, setGeocoding] = useState(false);
   const [geocodeResult, setGeocodeResult] = useState<{ geocoded: number; failed: number } | null>(null);
 
   async function handleImport() {
-    if (!pasFile) return;
+    if (!files.pas) return;
     setLoading(true);
     setResult(null);
     const formData = new FormData();
-    formData.append("pas", pasFile);
-    if (kpiFile) formData.append("kpi", kpiFile);
-    if (monthlyFile) formData.append("monthly", monthlyFile);
+    for (const [key, file] of Object.entries(files)) {
+      if (file) formData.append(key, file);
+    }
 
     const res = await fetch("/api/import", { method: "POST", body: formData });
     const json = await res.json();
@@ -47,27 +86,34 @@ export function ImportForm() {
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-border bg-surface p-6">
-        <h3 className="mb-1 text-sm font-semibold text-foreground">1. Fichier PAS (obligatoire)</h3>
-        <p className="mb-3 text-sm text-muted-foreground">
-          Le fichier &quot;PAS Q3 2026 - RHONE ALPES.xlsx&quot; — onglet SUIVI COMPTES lu automatiquement.
+        <p className="mb-4 text-xs text-muted-foreground">
+          Seul le fichier <strong>PAS</strong> est obligatoire — les autres sont facultatifs et viennent simplement enrichir les mêmes comptes.
         </p>
-        <FileInput file={pasFile} onChange={setPasFile} />
-
-        <h3 className="mt-6 mb-1 text-sm font-semibold text-foreground">2. Fichier KPI (optionnel)</h3>
-        <p className="mb-3 text-sm text-muted-foreground">
-          &quot;KPI RHONE ALPES ....xlsx&quot; — complète ville, code postal, statut et commercial.
-        </p>
-        <FileInput file={kpiFile} onChange={setKpiFile} />
-
-        <h3 className="mt-6 mb-1 text-sm font-semibold text-foreground">3. Fichier ventes mensuelles (optionnel)</h3>
-        <p className="mb-3 text-sm text-muted-foreground">
-          &quot;Products Purchased By Customers...xlsx&quot; — seul fichier avec un vrai détail mois par mois, alimente le sélecteur année/mois du Dashboard.
-        </p>
-        <FileInput file={monthlyFile} onChange={setMonthlyFile} />
+        <div className="space-y-4">
+          {FILE_FIELDS.map((field) => (
+            <div key={field.key}>
+              <div className="mb-1 flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-foreground">{field.title}</h3>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
+                    field.required ? "bg-primary-100 text-primary-700" : "bg-surface-muted text-muted-foreground"
+                  }`}
+                >
+                  {field.required ? "Obligatoire" : "Optionnel"}
+                </span>
+              </div>
+              <p className="mb-2 text-xs text-muted-foreground">{field.description}</p>
+              <FileInput
+                file={files[field.key]}
+                onChange={(f) => setFiles((prev) => ({ ...prev, [field.key]: f }))}
+              />
+            </div>
+          ))}
+        </div>
 
         <button
           onClick={handleImport}
-          disabled={!pasFile || loading}
+          disabled={!files.pas || loading}
           className="mt-6 flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-600 disabled:opacity-50"
         >
           {loading ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
@@ -109,7 +155,7 @@ export function ImportForm() {
       )}
 
       <div className="rounded-xl border border-border bg-surface p-6">
-        <h3 className="mb-1 text-sm font-semibold text-foreground">4. Géocodage (carte Mapping)</h3>
+        <h3 className="mb-1 text-sm font-semibold text-foreground">Géocodage (carte Mapping)</h3>
         <p className="mb-3 text-sm text-muted-foreground">
           Convertit ville + code postal en latitude/longitude pour les comptes qui n&apos;en ont pas encore, stocke le résultat en base.
         </p>

@@ -112,7 +112,7 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
                         <td className="py-2">{p.brand}</td>
                         <td className="py-2 text-right text-muted-foreground">{formatEUR(p.sales_value_ly)}</td>
                         <td className="py-2 text-right">{formatEUR(p.sales_value_cy)}</td>
-                        <td className="py-2 text-right">{formatPct(p.growth_rate_pct ? p.growth_rate_pct / 100 : null)}</td>
+                        <td className="py-2 text-right">{formatPct(p.growth_rate_pct)}</td>
                       </tr>
                     ))}
                   </tbody>

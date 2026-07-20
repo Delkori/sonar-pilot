@@ -1,5 +1,6 @@
 import type { AccountStatus, Segment } from "@/types/database";
-import type { RawCallsRow, RawKpiRow, RawPasRow } from "./parser";
+import { excelSerialToISODate } from "./parser";
+import type { RawCallsRow, RawGrowthByBrandRow, RawKpiDataRow, RawKpiRow, RawPasRow } from "./parser";
 
 export function normalizeSegment(value: unknown): Segment | null {
   const s = String(value ?? "").trim().toUpperCase();
@@ -62,6 +63,8 @@ export interface AccountPatch {
   department_code?: string | null;
   last_call_date?: string | null;
   days_since_last_call?: number | null;
+  first_order_date?: string | null;
+  last_order_date?: string | null;
 }
 
 export function mapPasRow(row: RawPasRow): AccountPatch {
@@ -118,6 +121,43 @@ export function mapCallsRow(row: RawCallsRow): { name: string; patch: AccountPat
       name: String(row["Customer Name"]).trim(),
       last_call_date: iso,
       days_since_last_call: toNumber(row["Days Since Last Call"]),
+    },
+  };
+}
+
+export interface ProductPatch {
+  brand: string;
+  sales_value_ly: number | null;
+  sales_value_cy: number | null;
+  qty_ordered_ly: number | null;
+  qty_ordered_cy: number | null;
+  growth_rate_pct: number | null;
+  period: string;
+}
+
+export function mapGrowthByBrandRow(row: RawGrowthByBrandRow): { name: string; product: ProductPatch } {
+  return {
+    name: normalizeName(String(row["Customer Name"])),
+    product: {
+      brand: String(row.Brand_Ml).trim(),
+      sales_value_ly: toNumber(row["Sales Value LY"]),
+      sales_value_cy: toNumber(row["Sales Value CY"]),
+      qty_ordered_ly: toNumber(row["Sales Qty Ordered  LY"]),
+      qty_ordered_cy: toNumber(row["Sales Qty Ordered CY "]),
+      growth_rate_pct: toNumber(row["Sales Growth Rate %"]),
+      period: "YTD 2026 vs 2025",
+    },
+  };
+}
+
+export function mapKpiDataRow(row: RawKpiDataRow): { externalRef: string; patch: AccountPatch } {
+  return {
+    externalRef: String(row["Code client"]).trim(),
+    patch: {
+      name: String(row["Nom du Client"] ?? "").trim(),
+      first_order_date: excelSerialToISODate(row["Date première commande"]),
+      last_order_date: excelSerialToISODate(row["Date dernière commande"]),
+      owner: row["Nom du commercial"] ? String(row["Nom du commercial"]).trim() : null,
     },
   };
 }
