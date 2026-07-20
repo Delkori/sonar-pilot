@@ -3,9 +3,10 @@ import { TopBar } from "@/components/layout/TopBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
 import { AccountActionsPanel } from "@/components/comptes/AccountActionsPanel";
+import { ForecastPanel } from "@/components/comptes/ForecastPanel";
 import { createClient } from "@/lib/supabase/server";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
-import type { Account, AccountAction, AccountProduct } from "@/types/database";
+import type { Account, AccountAction, AccountForecast, AccountProduct } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,9 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
 
   const { data: productsRaw } = await supabase.from("account_products").select("*").eq("account_id", id);
   const products = (productsRaw ?? []) as AccountProduct[];
+
+  const { data: forecastsRaw } = await supabase.from("account_forecasts").select("*").eq("account_id", id);
+  const forecasts = (forecastsRaw ?? []) as AccountForecast[];
 
   const ecart = (acc.realise_boites ?? 0) - (acc.objectif_boites ?? 0);
   const atteinte = acc.objectif_boites ? (acc.realise_boites ?? 0) / acc.objectif_boites : 0;
@@ -91,6 +95,13 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
           <Card className="overflow-hidden">
             <CardHeader><CardTitle>Commentaires &amp; plan d&apos;action</CardTitle></CardHeader>
             <AccountActionsPanel accountId={id} initialActions={actions} />
+          </Card>
+
+          <Card className="overflow-hidden">
+            <CardHeader>
+              <CardTitle>Prévisionnel mensuel</CardTitle>
+            </CardHeader>
+            <ForecastPanel accountId={id} initialForecasts={forecasts} />
           </Card>
 
           {products.length > 0 && (

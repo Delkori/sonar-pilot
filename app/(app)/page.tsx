@@ -20,6 +20,11 @@ export default async function DashboardPage() {
     .select("account_id, brand, sales_value_ly, sales_value_cy, growth_rate_pct");
   const products = productsRaw ?? [];
 
+  const { data: forecastsRaw } = await supabase
+    .from("account_forecasts")
+    .select("account_id, year, month, boites_prevues, ca_prevu");
+  const forecasts = forecastsRaw ?? [];
+
   const lastImport = await supabase
     .from("imports")
     .select("imported_at, filename")
@@ -34,7 +39,13 @@ export default async function DashboardPage() {
   return (
     <div>
       <TopBar title="Dashboard — Secteur Auvergne-Rhône-Alpes" />
-      <DashboardClient accounts={accounts} monthlySales={monthlySales} products={products} lastImportLabel={lastImportLabel} />
+      <DashboardClient
+        accounts={accounts}
+        monthlySales={monthlySales}
+        products={products}
+        forecasts={forecasts}
+        lastImportLabel={lastImportLabel}
+      />
     </div>
   );
 }

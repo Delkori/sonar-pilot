@@ -106,6 +106,19 @@ export type AccountMonthlySale = {
   updated_at: string;
 };
 
+export type AccountForecast = {
+  id: string;
+  account_id: string;
+  year: number;
+  month: number;
+  boites_prevues: number | null;
+  ca_prevu: number | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // Minimal Database type for the Supabase client generics. Run
 // `supabase gen types typescript` against the real project to replace this
 // with a fully generated definition once the schema is applied.
@@ -120,6 +133,7 @@ export type Database = {
       account_products: Table<AccountProduct>;
       territory_objectives: Table<TerritoryObjective>;
       account_monthly_sales: Table<AccountMonthlySale>;
+      account_forecasts: Table<AccountForecast>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

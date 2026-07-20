@@ -34,15 +34,25 @@ interface ProductRow {
   growth_rate_pct: number | null;
 }
 
+interface ForecastRow {
+  account_id: string;
+  year: number;
+  month: number;
+  boites_prevues: number | null;
+  ca_prevu: number | null;
+}
+
 export function DashboardClient({
   accounts,
   monthlySales,
   products,
+  forecasts,
   lastImportLabel,
 }: {
   accounts: Account[];
   monthlySales: MonthlySale[];
   products: ProductRow[];
+  forecasts: ForecastRow[];
   lastImportLabel: string;
 }) {
   const [year, setYear] = useState(2026);
@@ -88,6 +98,19 @@ export function DashboardClient({
     }
     return arr;
   }, [monthlySales, year]);
+
+  const forecastByMonthOfYear = useMemo(() => {
+    const boites = new Array(12).fill(0);
+    const ca = new Array(12).fill(0);
+    for (const f of forecasts) {
+      if (f.year === year) {
+        boites[f.month - 1] += f.boites_prevues ?? 0;
+        ca[f.month - 1] += f.ca_prevu ?? 0;
+      }
+    }
+    return { boites, ca };
+  }, [forecasts, year]);
+  const hasForecastData = forecasts.some((f) => f.year === year);
 
   const clientsActifs = accounts.filter((a) => a.status === "actif").length;
   const clientsAlerte = accounts.filter(
@@ -253,6 +276,46 @@ export function DashboardClient({
                     </div>
                   );
                 })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {month === null && hasForecastData && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Prévisionnel vs Réalisé — {year}</CardTitle>
+              <CardDescription>
+                CA prévu (saisi dans les fiches comptes) comparé au CA réel importé. Ajoutez/éditez vos prévisions depuis une fiche compte.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-end gap-2" style={{ height: 120 }}>
+                {forecastByMonthOfYear.ca.map((prevu, i) => {
+                  const realise = caByMonthOfYear[i];
+                  const max = Math.max(...forecastByMonthOfYear.ca, ...caByMonthOfYear, 1);
+                  return (
+                    <div key={i} className="flex flex-1 flex-col items-center gap-1">
+                      <div className="flex h-[90px] w-full items-end gap-0.5">
+                        <div
+                          className="flex-1 rounded-t bg-slate-300"
+                          style={{ height: `${Math.max((prevu / max) * 90, prevu > 0 ? 4 : 0)}px` }}
+                          title={`Prévu : ${formatEUR(prevu)}`}
+                        />
+                        <div
+                          className="flex-1 rounded-t bg-primary"
+                          style={{ height: `${Math.max((realise / max) * 90, realise > 0 ? 4 : 0)}px` }}
+                          title={`Réalisé : ${formatEUR(realise)}`}
+                        />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">{MONTH_LABELS[i]}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-3 flex gap-4 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-slate-300" /> Prévu</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-primary" /> Réalisé</span>
               </div>
             </CardContent>
           </Card>
