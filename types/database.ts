@@ -97,6 +97,15 @@ export type TerritoryObjective = {
   updated_at: string;
 };
 
+export type AccountMonthlySale = {
+  id: string;
+  account_id: string;
+  year: number;
+  month: number;
+  ca: number;
+  updated_at: string;
+};
+
 // Minimal Database type for the Supabase client generics. Run
 // `supabase gen types typescript` against the real project to replace this
 // with a fully generated definition once the schema is applied.
@@ -110,6 +119,7 @@ export type Database = {
       account_actions: Table<AccountAction>;
       account_products: Table<AccountProduct>;
       territory_objectives: Table<TerritoryObjective>;
+      account_monthly_sales: Table<AccountMonthlySale>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

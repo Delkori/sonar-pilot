@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { parseKpiWorkbook, parsePasWorkbook } from "@/lib/import/parser";
-import { mapKpiRow, mapPasRow } from "@/lib/import/mapping";
+import { parseKpiWorkbook, parseMonthlySalesWorkbook, parsePasWorkbook } from "@/lib/import/parser";
+import { mapKpiRow, mapPasRow, normalizeName } from "@/lib/import/mapping";
 import { validateKpiRows, validatePasRows } from "@/lib/import/validator";
 import type { ImportLogEntry } from "@/lib/import/validator";
 
@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const pasFile = formData.get("pas") as File | null;
   const kpiFile = formData.get("kpi") as File | null;
+  const monthlyFile = formData.get("monthly") as File | null;
   const importedBy = (formData.get("importedBy") as string) || null;
 
   if (!pasFile) {
@@ -116,6 +117,37 @@ export async function POST(req: NextRequest) {
 
     if (comments.length > 0) {
       await supabase.from("account_actions").insert(comments);
+    }
+
+    // 3b) optional monthly sales file — matched by normalized account name
+    // since this export has no code column, only "Customer Name"
+    if (monthlyFile) {
+      const monthlyBuffer = await monthlyFile.arrayBuffer();
+      const monthlyRows = parseMonthlySalesWorkbook(monthlyBuffer);
+      rowsTotal += monthlyRows.length;
+
+      const { data: allAccounts } = await supabase.from("accounts").select("id, name");
+      const idByName = new Map((allAccounts ?? []).map((a) => [normalizeName(a.name), a.id] as const));
+
+      const monthlyPayload = [];
+      let monthlyMatched = 0;
+      for (const row of monthlyRows) {
+        const accountId = idByName.get(normalizeName(row.customerName));
+        if (!accountId) {
+          allErrors.push({ row: 0, message: `Compte "${row.customerName}" introuvable — vente mensuelle ignorée` });
+          continue;
+        }
+        monthlyMatched++;
+        monthlyPayload.push({ account_id: accountId, year: row.year, month: row.month, ca: row.ca });
+      }
+
+      if (monthlyPayload.length > 0) {
+        const { error: monthlyError } = await supabase
+          .from("account_monthly_sales")
+          .upsert(monthlyPayload, { onConflict: "account_id,year,month" });
+        if (monthlyError) allErrors.push({ row: 0, message: `Ventes mensuelles : ${monthlyError.message}` });
+      }
+      rowsSuccess += monthlyMatched;
     }
 
     // 4) finalize import log

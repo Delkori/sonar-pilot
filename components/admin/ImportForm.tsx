@@ -15,6 +15,7 @@ interface ImportResult {
 export function ImportForm() {
   const [pasFile, setPasFile] = useState<File | null>(null);
   const [kpiFile, setKpiFile] = useState<File | null>(null);
+  const [monthlyFile, setMonthlyFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | { error: string } | null>(null);
   const [geocoding, setGeocoding] = useState(false);
@@ -27,6 +28,7 @@ export function ImportForm() {
     const formData = new FormData();
     formData.append("pas", pasFile);
     if (kpiFile) formData.append("kpi", kpiFile);
+    if (monthlyFile) formData.append("monthly", monthlyFile);
 
     const res = await fetch("/api/import", { method: "POST", body: formData });
     const json = await res.json();
@@ -56,6 +58,12 @@ export function ImportForm() {
           &quot;KPI RHONE ALPES ....xlsx&quot; — complète ville, code postal, statut et commercial.
         </p>
         <FileInput file={kpiFile} onChange={setKpiFile} />
+
+        <h3 className="mt-6 mb-1 text-sm font-semibold text-foreground">3. Fichier ventes mensuelles (optionnel)</h3>
+        <p className="mb-3 text-sm text-muted-foreground">
+          &quot;Products Purchased By Customers...xlsx&quot; — seul fichier avec un vrai détail mois par mois, alimente le sélecteur année/mois du Dashboard.
+        </p>
+        <FileInput file={monthlyFile} onChange={setMonthlyFile} />
 
         <button
           onClick={handleImport}
@@ -101,7 +109,7 @@ export function ImportForm() {
       )}
 
       <div className="rounded-xl border border-border bg-surface p-6">
-        <h3 className="mb-1 text-sm font-semibold text-foreground">3. Géocodage (carte Mapping)</h3>
+        <h3 className="mb-1 text-sm font-semibold text-foreground">4. Géocodage (carte Mapping)</h3>
         <p className="mb-3 text-sm text-muted-foreground">
           Convertit ville + code postal en latitude/longitude pour les comptes qui n&apos;en ont pas encore, stocke le résultat en base.
         </p>

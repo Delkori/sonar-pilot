@@ -86,3 +86,55 @@ export function parseCallsWorkbook(buffer: ArrayBuffer): RawCallsRow[] {
   const rows = XLSX.utils.sheet_to_json<RawCallsRow>(sheet, { defval: null });
   return rows.filter((r) => r["Customer Name"]);
 }
+
+export interface MonthlySalesRow {
+  customerName: string;
+  year: number;
+  month: number; // 1-12
+  ca: number;
+}
+
+const MONTHS: Record<string, number> = {
+  Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6,
+  Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12,
+};
+
+/**
+ * "Products Purchased By Customers" export: a 3-row header pivot
+ * (Year / MonthNameShort / Brand+Customer Name), one column per
+ * year+month, one row per Brand×Customer. This is the only source file
+ * with real month-level granularity — used to populate
+ * account_monthly_sales, aggregated across brands per customer per month.
+ */
+export function parseMonthlySalesWorkbook(buffer: ArrayBuffer): MonthlySalesRow[] {
+  const wb = XLSX.read(buffer, { type: "array" });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+
+  const [yearRow, monthRow] = rows as [unknown[], unknown[]];
+  const columns: { index: number; year: number; month: number }[] = [];
+  for (let i = 2; i < yearRow.length; i++) {
+    const year = yearRow[i];
+    const monthName = monthRow[i] ? String(monthRow[i]).trim() : null;
+    if (typeof year === "number" && monthName && MONTHS[monthName]) {
+      columns.push({ index: i, year, month: MONTHS[monthName] });
+    }
+  }
+
+  const totals = new Map<string, number>(); // "customer|year|month" -> ca
+  for (const row of rows.slice(3)) {
+    const customerName = row[1] ? String(row[1]).trim() : null;
+    if (!customerName || customerName === "Total") continue;
+    for (const col of columns) {
+      const value = row[col.index];
+      if (typeof value !== "number" || value === 0) continue;
+      const key = `${customerName}|${col.year}|${col.month}`;
+      totals.set(key, (totals.get(key) ?? 0) + value);
+    }
+  }
+
+  return Array.from(totals.entries()).map(([key, ca]) => {
+    const [customerName, year, month] = key.split("|");
+    return { customerName, year: Number(year), month: Number(month), ca };
+  });
+}
