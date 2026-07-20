@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Map, UploadCloud, Radar } from "lucide-react";
+import { LayoutDashboard, Users, Map, UploadCloud, Radar, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
@@ -36,6 +36,15 @@ export function Sidebar() {
           </Link>
         );
       })}
+      <form action="/auth/signout" method="post" className="mt-auto">
+        <button
+          type="submit"
+          title="Se déconnecter"
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger"
+        >
+          <LogOut size={18} />
+        </button>
+      </form>
     </aside>
   );
 }
