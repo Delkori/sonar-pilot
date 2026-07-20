@@ -125,14 +125,17 @@ export function ImportForm() {
 
 function FileInput({ file, onChange }: { file: File | null; onChange: (f: File | null) => void }) {
   return (
-    <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:border-primary hover:text-primary">
+    <label className="relative flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground hover:border-primary hover:text-primary">
       <UploadCloud size={16} />
       {file ? file.name : "Choisir un fichier .xlsx"}
       <input
         type="file"
         accept=".xlsx"
-        className="hidden"
-        onChange={(e) => onChange(e.target.files?.[0] ?? null)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        onChange={(e) => {
+          const selected = e.target.files?.[0] ?? null;
+          onChange(selected);
+        }}
       />
     </label>
   );
