@@ -5,7 +5,21 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { PriorityAccountsTable } from "@/components/dashboard/PriorityAccountsTable";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
-import { Target, TrendingDown, TrendingUp, Users, AlertTriangle, Crown, PhoneMissed, UserX, Package } from "lucide-react";
+import { suggestMonthlyForecast } from "@/lib/forecast";
+import { createClient } from "@/lib/supabase/client";
+import {
+  Target,
+  TrendingDown,
+  TrendingUp,
+  Users,
+  AlertTriangle,
+  Crown,
+  PhoneMissed,
+  UserX,
+  Package,
+  Sparkles,
+  Loader2,
+} from "lucide-react";
 import type { Account } from "@/types/database";
 import Link from "next/link";
 
@@ -168,6 +182,49 @@ export function DashboardClient({
       return ecartA - ecartB;
     })
     .slice(0, 8);
+
+  const [generatingForecasts, setGeneratingForecasts] = useState(false);
+  const [forecastGenerationResult, setForecastGenerationResult] = useState<string | null>(null);
+
+  function generatePriorityForecasts() {
+    setGeneratingForecasts(true);
+    setForecastGenerationResult(null);
+    const now = new Date();
+    const targetMonths: { year: number; month: number }[] = [];
+    let y = now.getFullYear();
+    let m = now.getMonth() + 1;
+    for (let i = 0; i < 3; i++) {
+      targetMonths.push({ year: y, month: m });
+      m++;
+      if (m > 12) { m = 1; y++; }
+    }
+
+    const existingKeys = new Set(forecasts.map((f) => `${f.account_id}|${f.year}|${f.month}`));
+    const rows = priorityAccounts.flatMap((account) =>
+      suggestMonthlyForecast(account, targetMonths)
+        .filter((s) => !existingKeys.has(`${account.id}|${s.year}|${s.month}`))
+        .map((s) => ({ account_id: account.id, ...s }))
+    );
+
+    if (rows.length === 0) {
+      setGeneratingForecasts(false);
+      setForecastGenerationResult("Ces comptes ont déjà un prévisionnel sur les 3 prochains mois.");
+      return;
+    }
+
+    const supabase = createClient();
+    supabase
+      .from("account_forecasts")
+      .insert(rows)
+      .then(({ error }) => {
+        setGeneratingForecasts(false);
+        setForecastGenerationResult(
+          error
+            ? `Erreur : ${error.message}`
+            : `${rows.length} prévision(s) générée(s) sur ${priorityAccounts.length} comptes — ouvrez une fiche compte pour ajuster.`
+        );
+      });
+  }
 
   const displayedCa = month !== null ? caMonth : caYear;
   const displayedCaLabel = month !== null ? `CA ${MONTH_LABELS[month - 1]} ${year}` : `CA ${year}`;
@@ -344,10 +401,24 @@ export function DashboardClient({
           </Card>
 
           <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>Comptes prioritaires</CardTitle>
-              <CardDescription>Écart le plus critique entre objectif et réalisé</CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between">
+              <div>
+                <CardTitle>Comptes prioritaires</CardTitle>
+                <CardDescription>Écart le plus critique entre objectif et réalisé</CardDescription>
+              </div>
+              <button
+                onClick={generatePriorityForecasts}
+                disabled={generatingForecasts}
+                title="Propose un prévisionnel 3 mois pour ces comptes prioritaires, basé sur leur objectif restant"
+                className="flex shrink-0 items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
+              >
+                {generatingForecasts ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                Générer le prévisionnel
+              </button>
             </CardHeader>
+            {forecastGenerationResult && (
+              <p className="px-5 pb-2 text-xs text-muted-foreground">{forecastGenerationResult}</p>
+            )}
             <PriorityAccountsTable accounts={priorityAccounts} />
           </Card>
         </div>

@@ -3,12 +3,21 @@
 import { useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatEUR, formatNumber } from "@/lib/utils";
-import type { AccountForecast } from "@/types/database";
-import { Plus, Trash2, Loader2 } from "lucide-react";
+import { suggestMonthlyForecast } from "@/lib/forecast";
+import type { Account, AccountForecast } from "@/types/database";
+import { Plus, Trash2, Loader2, Sparkles } from "lucide-react";
 
 const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"];
 
-export function ForecastPanel({ accountId, initialForecasts }: { accountId: string; initialForecasts: AccountForecast[] }) {
+export function ForecastPanel({
+  accountId,
+  account,
+  initialForecasts,
+}: {
+  accountId: string;
+  account: Account;
+  initialForecasts: AccountForecast[];
+}) {
   const [forecasts, setForecasts] = useState(
     [...initialForecasts].sort((a, b) => a.year - b.year || a.month - b.month)
   );
@@ -28,6 +37,32 @@ export function ForecastPanel({ accountId, initialForecasts }: { accountId: stri
         .single();
       if (!error && data) {
         setForecasts((prev) => [...prev, data as AccountForecast].sort((a, b) => a.year - b.year || a.month - b.month));
+      }
+    });
+  }
+
+  function suggestNext3Months() {
+    const targetMonths: { year: number; month: number }[] = [];
+    let y = now.getFullYear();
+    let m = now.getMonth() + 1;
+    for (let i = 0; i < 3; i++) {
+      if (!forecasts.some((f) => f.year === y && f.month === m)) targetMonths.push({ year: y, month: m });
+      m++;
+      if (m > 12) { m = 1; y++; }
+    }
+    if (targetMonths.length === 0) return;
+
+    const suggestions = suggestMonthlyForecast(account, targetMonths);
+    const supabase = createClient();
+    startTransition(async () => {
+      const { data, error } = await supabase
+        .from("account_forecasts")
+        .insert(suggestions.map((s) => ({ account_id: accountId, ...s })))
+        .select();
+      if (!error && data) {
+        setForecasts((prev) =>
+          [...prev, ...(data as AccountForecast[])].sort((a, b) => a.year - b.year || a.month - b.month)
+        );
       }
     });
   }
@@ -74,7 +109,15 @@ export function ForecastPanel({ accountId, initialForecasts }: { accountId: stri
           disabled={isPending}
           className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-600 disabled:opacity-50"
         >
-          <Plus size={14} /> Ajouter une prévision
+          <Plus size={14} /> Ajouter
+        </button>
+        <button
+          onClick={suggestNext3Months}
+          disabled={isPending}
+          title="Propose une répartition basée sur l'objectif restant, le score et le rythme réel du compte"
+          className="flex items-center gap-1 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-sm font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
+        >
+          <Sparkles size={14} /> Suggérer 3 mois
         </button>
         {isPending && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
         <span className="ml-auto text-xs text-muted-foreground">
@@ -84,7 +127,7 @@ export function ForecastPanel({ accountId, initialForecasts }: { accountId: stri
 
       {forecasts.length === 0 ? (
         <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-          Aucune prévision — ajoutez un mois ci-dessus pour construire votre plan d&apos;action.
+          Aucune prévision — cliquez &quot;Suggérer 3 mois&quot; pour une proposition basée sur ce compte, ou ajoutez un mois manuellement.
         </p>
       ) : (
         <table className="w-full text-sm">

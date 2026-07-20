@@ -101,7 +101,7 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
             <CardHeader>
               <CardTitle>Prévisionnel mensuel</CardTitle>
             </CardHeader>
-            <ForecastPanel accountId={id} initialForecasts={forecasts} />
+            <ForecastPanel accountId={id} account={acc} initialForecasts={forecasts} />
           </Card>
 
           {products.length > 0 && (
