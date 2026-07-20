@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Map, UploadCloud, Radar, LogOut, Grid3x3 } from "lucide-react";
+import { LayoutDashboard, Users, Map, UploadCloud, Radar, LogOut, Grid3x3, Gamepad2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/pilotage", label: "Pilotage", icon: Gamepad2 },
   { href: "/comptes", label: "Comptes", icon: Users },
   { href: "/matrice", label: "Matrice Produit", icon: Grid3x3 },
   { href: "/mapping", label: "Mapping AURA", icon: Map },
