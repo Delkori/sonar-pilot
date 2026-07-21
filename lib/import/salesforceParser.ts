@@ -20,6 +20,8 @@ export interface RawSalesforceRow {
   telephone: string | null;
   email2: string | null;
   website: string | null;
+  /** ex. "PREMIUM 70 boîtes à faire" — tier + objectif, colonne ajoutée par l'utilisateur */
+  accountPartners: string | null;
 }
 
 function stripTags(html: string): string {
@@ -31,38 +33,134 @@ function stripTags(html: string): string {
     .trim();
 }
 
+// En-têtes attendus (accents/casse tolérés) — on retrouve la colonne par
+// son nom plutôt que sa position, pour ne pas casser si l'utilisateur
+// ajoute/déplace des colonnes comme "Account Partners".
+const HEADER_ALIASES: Record<string, string[]> = {
+  name: ["nom du compte"],
+  segment: ["segmentation"],
+  competitor: ["nom concurrent"],
+  potentielBoites: ["nb de boites d", "nb de bo"], // "Nb de boîtes d'injectables / An"
+  address: ["adresse principale"],
+  postalCode: ["code postal principal"],
+  city: ["ville principale"],
+  externalRef: ["id sap compte"],
+  email: ["email"],
+  mobile: ["mobile hco"],
+  telephone: ["telephone", "téléphone"],
+  email2: ["adresse e-mail n"],
+  website: ["site web"],
+  accountPartners: ["account partners"],
+};
+
+function normalizeHeader(h: string): string {
+  return h
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, ""); // strip accents
+}
+
 export function parseSalesforceReport(buffer: ArrayBuffer): RawSalesforceRow[] {
   const html = new TextDecoder("iso-8859-1").decode(buffer);
   const rowMatches = html.match(/<tr>[\s\S]*?<\/tr>/g) ?? [];
+  const headerRow = rowMatches[0];
+  if (!headerRow) return [];
+
+  const headerCells = (headerRow.match(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g) ?? []).map((c) =>
+    normalizeHeader(stripTags(c))
+  );
+
+  const indexOf = (field: keyof typeof HEADER_ALIASES): number => {
+    const aliases = HEADER_ALIASES[field];
+    return headerCells.findIndex((h) => aliases.some((a) => h.includes(a)));
+  };
+
+  const idx = {
+    name: indexOf("name"),
+    segment: indexOf("segment"),
+    competitor: indexOf("competitor"),
+    potentielBoites: indexOf("potentielBoites"),
+    address: indexOf("address"),
+    postalCode: indexOf("postalCode"),
+    city: indexOf("city"),
+    externalRef: indexOf("externalRef"),
+    email: indexOf("email"),
+    mobile: indexOf("mobile"),
+    telephone: indexOf("telephone"),
+    email2: indexOf("email2"),
+    website: indexOf("website"),
+    accountPartners: indexOf("accountPartners"),
+  };
+
   const rows: RawSalesforceRow[] = [];
+  const cell = (cells: string[], i: number) => (i >= 0 ? cells[i]?.trim() || null : null);
 
   for (const rowHtml of rowMatches.slice(1)) {
-    // skip header row
     const cellMatches = rowHtml.match(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g) ?? [];
     const cells = cellMatches.map((c) => stripTags(c));
-    if (cells.length < 13 || !cells[0]) continue;
+    const name = cell(cells, idx.name);
+    if (!name) continue;
 
-    const potentielRaw = cells[3]?.replace(/[^\d.,-]/g, "").replace(",", ".");
-    const externalRefRaw = cells[7]?.trim() || null;
+    const potentielRaw = cell(cells, idx.potentielBoites)?.replace(/[^\d.,-]/g, "").replace(",", ".");
+    const externalRefRaw = cell(cells, idx.externalRef);
 
     rows.push({
-      name: cells[0].trim(),
-      segment: cells[1]?.trim() || null,
-      competitor: cells[2]?.trim() || null,
+      name,
+      segment: cell(cells, idx.segment),
+      competitor: cell(cells, idx.competitor),
       potentielBoites: potentielRaw ? Number(potentielRaw) : null,
-      address: cells[4]?.trim() || null,
-      postalCode: cells[5]?.trim() || null,
-      city: cells[6]?.trim() || null,
+      address: cell(cells, idx.address),
+      postalCode: cell(cells, idx.postalCode),
+      city: cell(cells, idx.city),
       externalRef: externalRefRaw ? externalRefRaw.replace(/^FR-/, "") : null,
-      email: cells[8]?.trim() || null,
-      mobile: cells[9]?.trim() || null,
-      telephone: cells[10]?.trim() || null,
-      email2: cells[11]?.trim() || null,
-      website: cells[12]?.trim() || null,
+      email: cell(cells, idx.email),
+      mobile: cell(cells, idx.mobile),
+      telephone: cell(cells, idx.telephone),
+      email2: cell(cells, idx.email2),
+      website: cell(cells, idx.website),
+      accountPartners: cell(cells, idx.accountPartners),
     });
   }
 
   return rows;
+}
+
+export interface AccountPartnersInfo {
+  tier: string | null; // "Start" | "Pro" | "Pro+" | "Premium" | tel quel si non reconnu
+  objectifBoites: number | null;
+}
+
+/**
+ * Objectif fixe par tier, confirmé par l'utilisateur (cohérent avec
+ * l'ancien PAS : "Pro+ — objectif 300 boîtes", "Premium — objectif 70
+ * boîtes"). Start n'a pas de valeur fixe — trop variable selon le
+ * potentiel de chaque compte.
+ */
+const TIER_OBJECTIVES: Record<string, number> = {
+  Premium: 70,
+  Pro: 150,
+  "Pro+": 300,
+};
+
+/**
+ * Parse une valeur du type "PREMIUM", "PRO 150 boites" ou "PRO+ 300
+ * boîtes à faire". Si un nombre de boîtes est explicitement présent dans
+ * la cellule, il prime ; sinon on retombe sur l'objectif fixe du tier.
+ */
+export function parseAccountPartners(value: string | null): AccountPartnersInfo {
+  if (!value) return { tier: null, objectifBoites: null };
+  const upper = value.toUpperCase();
+
+  let tier: string | null = null;
+  if (upper.includes("PRO+") || upper.includes("PRO PLUS")) tier = "Pro+";
+  else if (upper.includes("PREMIUM")) tier = "Premium";
+  else if (upper.includes("PRO")) tier = "Pro";
+  else if (upper.includes("START")) tier = "Start";
+
+  const qtyMatch = value.match(/(\d+)\s*bo[iî]tes?/i);
+  const objectifBoites = qtyMatch ? Number(qtyMatch[1]) : tier ? TIER_OBJECTIVES[tier] ?? null : null;
+
+  return { tier, objectifBoites };
 }
 
 export interface RawInvoiceRow {

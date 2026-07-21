@@ -21,6 +21,7 @@ import {
 import {
   canonicalizeBrand,
   parseAccountDetail,
+  parseAccountPartners,
   parseInvoiceProducts,
   parseSalesforceReport,
 } from "@/lib/import/salesforceParser";
@@ -108,6 +109,7 @@ export async function POST(req: NextRequest) {
       for (const row of rawSfRows) {
         if (!row.name) continue;
         const externalRef = row.externalRef || `NAME:${normalizeName(row.name)}`;
+        const { tier, objectifBoites } = parseAccountPartners(row.accountPartners);
         const patch: Record<string, unknown> = {
           external_ref: externalRef,
           name: row.name,
@@ -122,6 +124,8 @@ export async function POST(req: NextRequest) {
           telephone: row.telephone || row.mobile,
           nom_concurrent: row.competitor || null,
         };
+        if (tier) patch.price_list = tier;
+        if (objectifBoites !== null) patch.objectif_boites = objectifBoites;
         const existing = accountsByRef.get(externalRef);
         if (existing) Object.assign(existing, patch);
         else accountsByRef.set(externalRef, patch);
