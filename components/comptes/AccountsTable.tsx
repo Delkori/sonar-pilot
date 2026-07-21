@@ -3,27 +3,39 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
-import { formatEUR, formatNumber } from "@/lib/utils";
+import { formatEUR } from "@/lib/utils";
+import { ACTION_META, computeTargetingScore } from "@/lib/scoring";
 import type { Account, AccountStatus, Segment } from "@/types/database";
+
+type SortKey = "score" | "ca_non_capte" | "name";
 
 export function AccountsTable({ accounts }: { accounts: Account[] }) {
   const [segment, setSegment] = useState<Segment | "all">("all");
   const [status, setStatus] = useState<AccountStatus | "all">("all");
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<SortKey>("score");
+
+  const scored = useMemo(() => accounts.map((a) => ({ account: a, score: computeTargetingScore(a) })), [accounts]);
 
   const filtered = useMemo(() => {
-    return accounts.filter((a) => {
-      if (segment !== "all" && a.segment !== segment) return false;
-      if (status !== "all" && a.status !== status) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        if (!a.name.toLowerCase().includes(q) && !(a.city ?? "").toLowerCase().includes(q) && !(a.postal_code ?? "").includes(q)) {
-          return false;
+    return scored
+      .filter(({ account: a }) => {
+        if (segment !== "all" && a.segment !== segment) return false;
+        if (status !== "all" && a.status !== status) return false;
+        if (search) {
+          const q = search.toLowerCase();
+          if (!a.name.toLowerCase().includes(q) && !(a.city ?? "").toLowerCase().includes(q) && !(a.postal_code ?? "").includes(q)) {
+            return false;
+          }
         }
-      }
-      return true;
-    });
-  }, [accounts, segment, status, search]);
+        return true;
+      })
+      .sort((r1, r2) => {
+        if (sortBy === "score") return r2.score.total - r1.score.total;
+        if (sortBy === "ca_non_capte") return r2.score.caNonCapte - r1.score.caNonCapte;
+        return r1.account.name.localeCompare(r2.account.name);
+      });
+  }, [scored, segment, status, search, sortBy]);
 
   return (
     <div>
@@ -57,6 +69,15 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
           <option value="a_risque">À risque</option>
           <option value="a_suivre">À suivre</option>
         </select>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortKey)}
+          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+        >
+          <option value="score">Trier : Score</option>
+          <option value="ca_non_capte">Trier : CA non capté</option>
+          <option value="name">Trier : Nom</option>
+        </select>
         <span className="ml-auto text-xs text-muted-foreground">{filtered.length} compte(s)</span>
       </div>
 
@@ -68,33 +89,41 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
               <th className="px-3 py-3 font-medium">Seg</th>
               <th className="px-3 py-3 font-medium">Statut</th>
               <th className="px-3 py-3 font-medium">Ville</th>
-              <th className="px-3 py-3 font-medium">CP</th>
-              <th className="px-3 py-3 font-medium text-right">Potentiel</th>
-              <th className="px-3 py-3 font-medium text-right">CA 2026 YTD</th>
-              <th className="px-5 py-3 font-medium">Prochaine action</th>
+              <th className="px-3 py-3 font-medium text-right">Score</th>
+              <th className="px-3 py-3 font-medium text-right">CA non capté</th>
+              <th className="px-5 py-3 font-medium">Action recommandée</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((a) => (
-              <tr key={a.id} className="border-b border-border last:border-0 hover:bg-surface-muted">
-                <td className="px-5 py-3">
-                  <Link href={`/comptes/${a.id}`} className="font-medium text-foreground hover:text-primary">
-                    {a.name}
-                  </Link>
-                  <p className="text-xs text-muted-foreground">{a.external_ref}</p>
-                </td>
-                <td className="px-3 py-3"><SegmentBadge segment={a.segment} /></td>
-                <td className="px-3 py-3"><StatusBadge status={a.status} /></td>
-                <td className="px-3 py-3 text-muted-foreground">{a.city ?? "—"}</td>
-                <td className="px-3 py-3 text-muted-foreground">{a.postal_code ?? "—"}</td>
-                <td className="px-3 py-3 text-right text-muted-foreground">{formatNumber(a.potentiel_boites)}</td>
-                <td className="px-3 py-3 text-right text-foreground">{formatEUR(a.ca_2026_ytd)}</td>
-                <td className="px-5 py-3 text-muted-foreground max-w-64 truncate">{a.action_recommandee ?? "—"}</td>
-              </tr>
-            ))}
+            {filtered.map(({ account: a, score }) => {
+              const meta = ACTION_META[score.action];
+              return (
+                <tr key={a.id} className="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td className="px-5 py-3">
+                    <Link href={`/comptes/${a.id}`} className="font-medium text-foreground hover:text-primary">
+                      {a.name}
+                    </Link>
+                    <p className="text-xs text-muted-foreground">{a.external_ref}</p>
+                  </td>
+                  <td className="px-3 py-3"><SegmentBadge segment={a.segment} /></td>
+                  <td className="px-3 py-3"><StatusBadge status={a.status} /></td>
+                  <td className="px-3 py-3 text-muted-foreground">{a.city ?? "—"}</td>
+                  <td className="px-3 py-3 text-right font-medium text-foreground">{score.total}/100</td>
+                  <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(score.caNonCapte)}</td>
+                  <td className="px-5 py-3">
+                    <span
+                      className="rounded-full px-2 py-0.5 text-xs font-medium text-white"
+                      style={{ backgroundColor: meta.color }}
+                    >
+                      {meta.label}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-5 py-10 text-center text-muted-foreground">
+                <td colSpan={7} className="px-5 py-10 text-center text-muted-foreground">
                   Aucun compte ne correspond à ces filtres.
                 </td>
               </tr>

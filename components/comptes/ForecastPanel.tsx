@@ -4,8 +4,8 @@ import { useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import { suggestMonthlyForecast } from "@/lib/forecast";
-import type { Account, AccountForecast } from "@/types/database";
-import { Plus, Trash2, Loader2, Sparkles } from "lucide-react";
+import type { Account, AccountForecast, ForecastKind } from "@/types/database";
+import { Plus, Trash2, Loader2, Sparkles, CalendarRange } from "lucide-react";
 
 const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"];
 
@@ -13,18 +13,21 @@ export function ForecastPanel({
   accountId,
   account,
   initialForecasts,
+  kind,
 }: {
   accountId: string;
   account: Account;
   initialForecasts: AccountForecast[];
+  kind: ForecastKind;
 }) {
   const [forecasts, setForecasts] = useState(
-    [...initialForecasts].sort((a, b) => a.year - b.year || a.month - b.month)
+    initialForecasts.filter((f) => f.kind === kind).sort((a, b) => a.year - b.year || a.month - b.month)
   );
   const [isPending, startTransition] = useTransition();
   const now = new Date();
   const [newYear, setNewYear] = useState(now.getFullYear());
   const [newMonth, setNewMonth] = useState(now.getMonth() + 1);
+  const [annualTotal, setAnnualTotal] = useState("");
 
   function addForecast() {
     if (forecasts.some((f) => f.year === newYear && f.month === newMonth)) return;
@@ -32,7 +35,7 @@ export function ForecastPanel({
     startTransition(async () => {
       const { data, error } = await supabase
         .from("account_forecasts")
-        .insert({ account_id: accountId, year: newYear, month: newMonth, boites_prevues: 0, ca_prevu: 0 })
+        .insert({ account_id: accountId, year: newYear, month: newMonth, kind, boites_prevues: 0, ca_prevu: 0 })
         .select()
         .single();
       if (!error && data) {
@@ -57,12 +60,37 @@ export function ForecastPanel({
     startTransition(async () => {
       const { data, error } = await supabase
         .from("account_forecasts")
-        .insert(suggestions.map((s) => ({ account_id: accountId, ...s })))
+        .insert(suggestions.map((s) => ({ account_id: accountId, kind, ...s })))
         .select();
       if (!error && data) {
         setForecasts((prev) =>
           [...prev, ...(data as AccountForecast[])].sort((a, b) => a.year - b.year || a.month - b.month)
         );
+      }
+    });
+  }
+
+  function splitAnnualObjective() {
+    const total = Number(annualTotal);
+    if (!total || total <= 0) return;
+    const perMonth = Math.round(total / 12);
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      account_id: accountId,
+      year: newYear,
+      month: i + 1,
+      kind,
+      boites_prevues: perMonth,
+      ca_prevu: 0,
+    })).filter((r) => !forecasts.some((f) => f.year === r.year && f.month === r.month));
+    if (rows.length === 0) return;
+    const supabase = createClient();
+    startTransition(async () => {
+      const { data, error } = await supabase.from("account_forecasts").insert(rows).select();
+      if (!error && data) {
+        setForecasts((prev) =>
+          [...prev, ...(data as AccountForecast[])].sort((a, b) => a.year - b.year || a.month - b.month)
+        );
+        setAnnualTotal("");
       }
     });
   }
@@ -111,31 +139,53 @@ export function ForecastPanel({
         >
           <Plus size={14} /> Ajouter
         </button>
-        <button
-          onClick={suggestNext3Months}
-          disabled={isPending}
-          title="Propose une répartition basée sur l'objectif restant, le score et le rythme réel du compte"
-          className="flex items-center gap-1 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-sm font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
-        >
-          <Sparkles size={14} /> Suggérer 3 mois
-        </button>
+        {kind === "prevision" ? (
+          <button
+            onClick={suggestNext3Months}
+            disabled={isPending}
+            title="Propose une répartition basée sur l'objectif restant, le score et le rythme réel du compte"
+            className="flex items-center gap-1 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-sm font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
+          >
+            <Sparkles size={14} /> Suggérer 3 mois
+          </button>
+        ) : (
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              value={annualTotal}
+              onChange={(e) => setAnnualTotal(e.target.value)}
+              placeholder="Objectif annuel (boîtes)"
+              className="w-40 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+            />
+            <button
+              onClick={splitAnnualObjective}
+              disabled={isPending || !annualTotal}
+              title="Répartit l'objectif annuel à parts égales sur les 12 mois de l'année sélectionnée"
+              className="flex items-center gap-1 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-sm font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
+            >
+              <CalendarRange size={14} /> Répartir sur l&apos;année
+            </button>
+          </div>
+        )}
         {isPending && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
         <span className="ml-auto text-xs text-muted-foreground">
-          Total prévu : {formatNumber(totalBoites)} boîtes · {formatEUR(totalCa)}
+          Total : {formatNumber(totalBoites)} boîtes · {formatEUR(totalCa)}
         </span>
       </div>
 
       {forecasts.length === 0 ? (
         <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-          Aucune prévision — cliquez &quot;Suggérer 3 mois&quot; pour une proposition basée sur ce compte, ou ajoutez un mois manuellement.
+          {kind === "objectif"
+            ? "Aucun objectif défini — saisissez un objectif annuel ci-dessus pour le répartir sur les 12 mois, ou ajoutez un mois manuellement."
+            : "Aucune prévision — cliquez \"Suggérer 3 mois\" pour une proposition basée sur ce compte, ou ajoutez un mois manuellement."}
         </p>
       ) : (
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
               <th className="px-4 py-2 font-medium">Mois</th>
-              <th className="px-3 py-2 font-medium text-right">Boîtes prévues</th>
-              <th className="px-3 py-2 font-medium text-right">CA prévu</th>
+              <th className="px-3 py-2 font-medium text-right">Boîtes</th>
+              <th className="px-3 py-2 font-medium text-right">CA</th>
               <th className="px-3 py-2 font-medium">Note</th>
               <th className="w-8" />
             </tr>
@@ -164,7 +214,7 @@ export function ForecastPanel({
                   <input
                     type="text"
                     defaultValue={f.note ?? ""}
-                    placeholder="ex. offre prévue, RDV programmé..."
+                    placeholder={kind === "objectif" ? "ex. objectif révisé..." : "ex. offre prévue, RDV programmé..."}
                     onBlur={(e) => updateForecast(f.id, { note: e.target.value || null })}
                     className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-border focus:border-primary focus:outline-none"
                   />

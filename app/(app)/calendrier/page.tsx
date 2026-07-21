@@ -34,6 +34,7 @@ export default async function CalendrierPage() {
   const { data: forecastsRaw } = await supabase
     .from("account_forecasts")
     .select("*, accounts(id, name)")
+    .eq("kind", "prevision")
     .eq("year", currentYear)
     .eq("month", currentMonth)
     .order("ca_prevu", { ascending: false });

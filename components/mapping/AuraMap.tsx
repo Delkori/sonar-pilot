@@ -67,11 +67,12 @@ export function AuraMap({
         account_id: account.id,
         year: y,
         month: m,
+        kind: "prevision",
         boites_prevues: suggestion.boites_prevues,
         ca_prevu: suggestion.ca_prevu,
         note: opp ? `${opp.label} — ${opp.reason}` : suggestion.note,
       },
-      { onConflict: "account_id,year,month" }
+      { onConflict: "account_id,year,month,kind" }
     );
     setPlanning(false);
     setPlanned((prev) => new Set(prev).add(account.id));
@@ -325,11 +326,6 @@ export function AuraMap({
             label="% Atteinte"
             value={formatPct(selectedAccount.objectif_boites ? (selectedAccount.realise_boites ?? 0) / selectedAccount.objectif_boites : null)}
           />
-          {selectedAccount.action_recommandee && (
-            <div className="mt-3 rounded-lg bg-primary-50 px-3 py-2 text-sm text-primary-700">
-              {selectedAccount.action_recommandee}
-            </div>
-          )}
           {(() => {
             const opp = opportunityByAccount.get(selectedAccount.id);
             if (!opp) return null;

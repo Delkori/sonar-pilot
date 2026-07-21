@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
-import { formatNumber } from "@/lib/utils";
+import { formatEUR, formatNumber } from "@/lib/utils";
+import { ACTION_META, computeTargetingScore } from "@/lib/scoring";
 import type { Account } from "@/types/database";
 
 export function PriorityAccountsTable({ accounts }: { accounts: Account[] }) {
@@ -15,15 +16,15 @@ export function PriorityAccountsTable({ accounts }: { accounts: Account[] }) {
           <th className="px-5 py-3 font-medium">Compte</th>
           <th className="px-3 py-3 font-medium">Seg</th>
           <th className="px-3 py-3 font-medium">Statut</th>
-          <th className="px-3 py-3 font-medium text-right">Objectif</th>
-          <th className="px-3 py-3 font-medium text-right">Réalisé</th>
-          <th className="px-3 py-3 font-medium text-right">Écart</th>
+          <th className="px-3 py-3 font-medium text-right">Score</th>
+          <th className="px-3 py-3 font-medium text-right">CA non capté</th>
           <th className="px-5 py-3 font-medium">Action recommandée</th>
         </tr>
       </thead>
       <tbody>
         {accounts.map((a) => {
-          const ecart = (a.realise_boites ?? 0) - (a.objectif_boites ?? 0);
+          const score = computeTargetingScore(a);
+          const meta = ACTION_META[score.action];
           return (
             <tr key={a.id} className="border-b border-border last:border-0 hover:bg-surface-muted">
               <td className="px-5 py-3">
@@ -34,12 +35,16 @@ export function PriorityAccountsTable({ accounts }: { accounts: Account[] }) {
               </td>
               <td className="px-3 py-3"><SegmentBadge segment={a.segment} /></td>
               <td className="px-3 py-3"><StatusBadge status={a.status} /></td>
-              <td className="px-3 py-3 text-right text-muted-foreground">{formatNumber(a.objectif_boites)}</td>
-              <td className="px-3 py-3 text-right text-foreground">{formatNumber(a.realise_boites)}</td>
-              <td className={`px-3 py-3 text-right font-medium ${ecart < 0 ? "text-danger" : "text-success"}`}>
-                {ecart > 0 ? "+" : ""}{formatNumber(ecart)}
+              <td className="px-3 py-3 text-right font-medium text-foreground">{score.total}/100</td>
+              <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(score.caNonCapte)}</td>
+              <td className="px-5 py-3">
+                <span
+                  className="rounded-full px-2 py-0.5 text-xs font-medium text-white"
+                  style={{ backgroundColor: meta.color }}
+                >
+                  {meta.label}
+                </span>
               </td>
-              <td className="px-5 py-3 text-muted-foreground">{a.action_recommandee ?? "—"}</td>
             </tr>
           );
         })}

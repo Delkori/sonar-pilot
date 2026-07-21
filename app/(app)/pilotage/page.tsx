@@ -11,7 +11,7 @@ export default async function PilotagePage() {
   const { data: accountsRaw } = await supabase.from("accounts").select("*");
   const accounts = (accountsRaw ?? []) as Account[];
 
-  const { data: forecastsRaw } = await supabase.from("account_forecasts").select("*");
+  const { data: forecastsRaw } = await supabase.from("account_forecasts").select("*").eq("kind", "prevision");
   const forecasts = (forecastsRaw ?? []) as AccountForecast[];
 
   const { data: monthlyRaw } = await supabase

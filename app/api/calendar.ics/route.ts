@@ -51,7 +51,8 @@ export async function GET(req: NextRequest) {
 
   const { data: forecasts } = await supabase
     .from("account_forecasts")
-    .select("id, account_id, year, month, boites_prevues, ca_prevu, note");
+    .select("id, account_id, year, month, boites_prevues, ca_prevu, note")
+    .eq("kind", "prevision");
 
   for (const f of forecasts ?? []) {
     const accountName = nameById.get(f.account_id) ?? "Compte";
