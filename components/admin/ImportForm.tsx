@@ -31,13 +31,6 @@ const PRIMARY_FIELDS = [
     title: "Invoice Number et Product",
     description: '"INVOICE NUMBER ET PRODUCT.xlsx" — le détail produit de chaque facture (nécessite Account Detail pour retrouver le compte) : ventes mensuelles réelles et données produit.',
   },
-  {
-    key: "nexora",
-    required: false,
-    title: "Sponsoring Nexora",
-    description:
-      "Export Nexora du sponsoring : quel laboratoire sponsorise quel médecin et pour quel montant. Colonnes attendues (souples) : RPPS ou nom du médecin, laboratoire, montant, année, type. Rattaché aux médecins via le RPPS — peut être importé seul.",
-  },
 ] as const;
 
 const LEGACY_FIELDS = [
@@ -75,7 +68,6 @@ export function ImportForm() {
     salesforce: null,
     accountDetail: null,
     invoiceProducts: null,
-    nexora: null,
     pas: null,
     kpi: null,
     monthly: null,
@@ -89,8 +81,10 @@ export function ImportForm() {
   const [geocodeResult, setGeocodeResult] = useState<{ geocoded: number; failed: number } | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [cleanupResult, setCleanupResult] = useState<{ cleaned: number } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ synced: number } | { error: string } | null>(null);
 
-  const canImport = Boolean(files.pas || files.salesforce || files.nexora);
+  const canImport = Boolean(files.pas || files.salesforce);
 
   async function handleImport() {
     if (!canImport) return;
@@ -117,6 +111,15 @@ export function ImportForm() {
     const json = await res.json();
     setCleanupResult(json);
     setCleaning(false);
+  }
+
+  async function handleSyncNexora() {
+    setSyncing(true);
+    setSyncResult(null);
+    const res = await fetch("/api/sync-nexora", { method: "POST" });
+    const json = await res.json();
+    setSyncResult(json);
+    setSyncing(false);
   }
 
   async function handleGeocode() {
@@ -239,6 +242,30 @@ export function ImportForm() {
         </button>
         {cleanupResult && (
           <p className="mt-3 text-sm text-muted-foreground">{cleanupResult.cleaned} compte(s) nettoyé(s).</p>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-border bg-surface p-6">
+        <h3 className="mb-1 text-sm font-semibold text-foreground">Sponsoring Nexora</h3>
+        <p className="mb-3 text-sm text-muted-foreground">
+          Récupère depuis Nexora quel laboratoire sponsorise quel médecin et pour quel montant, puis rapproche via le
+          RPPS. Visible ensuite dans la fiche compte (carte « Sponsoring »). Nécessite que les médecins (Rapport
+          Salesforce) soient importés pour le rapprochement.
+        </p>
+        <button
+          onClick={handleSyncNexora}
+          disabled={syncing}
+          className="flex items-center gap-2 rounded-lg border border-primary-100 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
+        >
+          {syncing ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+          Synchroniser le sponsoring Nexora
+        </button>
+        {syncResult && (
+          <p className={`mt-3 text-sm ${"error" in syncResult ? "text-danger" : "text-muted-foreground"}`}>
+            {"error" in syncResult
+              ? syncResult.error
+              : `${syncResult.synced} lien(s) de sponsoring synchronisé(s).`}
+          </p>
         )}
       </div>
 
