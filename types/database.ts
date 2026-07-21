@@ -144,6 +144,11 @@ export type NameMatchCandidate = {
   updated_at: string;
 };
 
+export type CalendarFeedToken = {
+  token: string;
+  created_at: string;
+};
+
 // Minimal Database type for the Supabase client generics. Run
 // `supabase gen types typescript` against the real project to replace this
 // with a fully generated definition once the schema is applied.
@@ -161,6 +166,7 @@ export type Database = {
       account_forecasts: Table<AccountForecast>;
       name_aliases: Table<NameAlias>;
       name_match_candidates: Table<NameMatchCandidate>;
+      calendar_feed_tokens: Table<CalendarFeedToken>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
