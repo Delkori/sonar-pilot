@@ -28,6 +28,7 @@ import {
 import { validateKpiRows, validatePasRows } from "@/lib/import/validator";
 import type { ImportLogEntry } from "@/lib/import/validator";
 import { bestMatch, HIGH_CONFIDENCE } from "@/lib/import/nameResolver";
+import type { Hcp } from "@/types/database";
 
 export const runtime = "nodejs";
 
@@ -102,13 +103,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Le Rapport Salesforce mélange deux niveaux : les lignes sans "Parent
+    // principal" sont des structures (HCO = accounts), celles qui en ont un
+    // sont des médecins (HCP) rattachés à cette structure — traités après
+    // l'upsert des comptes, une fois le nom de la structure résolvable.
+    let rawHcpRows: ReturnType<typeof parseSalesforceReport> = [];
+
     if (salesforceFile) {
       const sfBuffer = await salesforceFile.arrayBuffer();
       const rawSfRows = parseSalesforceReport(sfBuffer);
       rowsTotal += rawSfRows.length;
+      rawHcpRows = rawSfRows.filter((r) => r.parentPrincipal);
 
       for (const row of rawSfRows) {
-        if (!row.name) continue;
+        if (!row.name || row.parentPrincipal) continue;
         const externalRef = row.externalRef || `NAME:${normalizeName(row.name)}`;
         const { tier, objectifBoites } = parseAccountPartners(row.accountPartners);
         const patch: Record<string, unknown> = {
@@ -240,6 +248,48 @@ export async function POST(req: NextRequest) {
       knownCandidateNames.add(rawName);
       pendingReviewCount++;
       return null;
+    }
+
+    // Lignes HCP (médecins) du Rapport Salesforce — rattachées à leur
+    // structure (HCO) via "Parent principal", résolu par le même moteur de
+    // rapprochement flou que les factures.
+    if (rawHcpRows.length > 0) {
+      rowsTotal += rawHcpRows.length;
+      let hcpMatched = 0;
+      const hcpPayload: Partial<Hcp>[] = [];
+      for (const row of rawHcpRows) {
+        const accountId = await resolveAccountId(row.parentPrincipal!);
+        if (!accountId) {
+          allErrors.push({
+            row: 0,
+            message: `Structure "${row.parentPrincipal}" en attente de validation — médecin "${row.name}" ignoré pour l'instant`,
+          });
+          continue;
+        }
+        hcpMatched++;
+        const externalRef = row.rpps || `NAME:${normalizeName(row.name)}`;
+        hcpPayload.push({
+          external_ref: externalRef,
+          account_id: accountId,
+          name: row.name,
+          rpps: row.rpps || null,
+          segment: (["A", "B", "C", "D", "E"] as const).includes(row.segment as never)
+            ? (row.segment as Hcp["segment"])
+            : null,
+          potentiel_boites: row.potentielBoites,
+          address: row.address,
+          postal_code: row.postalCode,
+          city: row.city,
+          email: row.email || row.email2,
+          telephone: row.telephone || row.mobile,
+          nom_concurrent: row.competitor || null,
+        });
+      }
+      if (hcpPayload.length > 0) {
+        const { error } = await supabase.from("hcps").upsert(hcpPayload, { onConflict: "external_ref" });
+        if (error) allErrors.push({ row: 0, message: `Médecins (HCP) : ${error.message}` });
+      }
+      rowsSuccess += hcpMatched;
     }
 
     if (monthlyFile) {

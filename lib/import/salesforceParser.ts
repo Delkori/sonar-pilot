@@ -22,6 +22,10 @@ export interface RawSalesforceRow {
   website: string | null;
   /** ex. "PREMIUM 70 boîtes à faire" — tier + objectif, colonne ajoutée par l'utilisateur */
   accountPartners: string | null;
+  /** Nom de la structure (HCO) — rempli uniquement sur les lignes médecin (HCP) */
+  parentPrincipal: string | null;
+  rpps: string | null;
+  taxId: string | null;
 }
 
 function stripTags(html: string): string {
@@ -51,6 +55,9 @@ const HEADER_ALIASES: Record<string, string[]> = {
   email2: ["adresse e-mail n"],
   website: ["site web"],
   accountPartners: ["account partners"],
+  parentPrincipal: ["parent principal"],
+  rpps: ["rpps"],
+  taxId: ["tax id"],
 };
 
 function normalizeHeader(h: string): string {
@@ -90,6 +97,9 @@ export function parseSalesforceReport(buffer: ArrayBuffer): RawSalesforceRow[] {
     email2: indexOf("email2"),
     website: indexOf("website"),
     accountPartners: indexOf("accountPartners"),
+    parentPrincipal: indexOf("parentPrincipal"),
+    rpps: indexOf("rpps"),
+    taxId: indexOf("taxId"),
   };
 
   const rows: RawSalesforceRow[] = [];
@@ -119,6 +129,9 @@ export function parseSalesforceReport(buffer: ArrayBuffer): RawSalesforceRow[] {
       email2: cell(cells, idx.email2),
       website: cell(cells, idx.website),
       accountPartners: cell(cells, idx.accountPartners),
+      parentPrincipal: cell(cells, idx.parentPrincipal),
+      rpps: cell(cells, idx.rpps),
+      taxId: cell(cells, idx.taxId),
     });
   }
 

@@ -147,6 +147,24 @@ export type NameMatchCandidate = {
   updated_at: string;
 };
 
+export type Hcp = {
+  id: string;
+  account_id: string | null;
+  external_ref: string;
+  name: string;
+  rpps: string | null;
+  segment: Segment | null;
+  potentiel_boites: number | null;
+  address: string | null;
+  postal_code: string | null;
+  city: string | null;
+  email: string | null;
+  telephone: string | null;
+  nom_concurrent: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type CalendarFeedToken = {
   token: string;
   created_at: string;
@@ -170,6 +188,7 @@ export type Database = {
       name_aliases: Table<NameAlias>;
       name_match_candidates: Table<NameMatchCandidate>;
       calendar_feed_tokens: Table<CalendarFeedToken>;
+      hcps: Table<Hcp>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
