@@ -2,8 +2,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { ACTION_META, computeTargetingScore } from "@/lib/scoring";
 import type { Account } from "@/types/database";
 
-export function TargetingScoreCard({ account }: { account: Account }) {
-  const score = computeTargetingScore(account);
+export function TargetingScoreCard({ account, refsAcheteesCount }: { account: Account; refsAcheteesCount?: number }) {
+  const score = computeTargetingScore(account, { refsAcheteesCount });
   const meta = ACTION_META[score.action];
   const scoreColor = score.total >= 70 ? "#dc2626" : score.total >= 45 ? "#d97706" : "#16a34a";
 

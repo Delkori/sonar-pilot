@@ -243,6 +243,68 @@ export function AuraMap({
         )}
       </div>
 
+      <div className="rounded-xl border border-border bg-surface lg:col-span-2">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <p className="text-sm font-semibold text-foreground">
+            {selectedDept
+              ? `Comptes — ${geo.features.find((f) => f.properties.code === selectedDept)?.properties.nom ?? selectedDept}`
+              : "Tous les comptes filtrés"}
+          </p>
+          <span className="text-xs text-muted-foreground">{filtered.length} compte(s)</span>
+        </div>
+        <div className="max-h-96 overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-2 font-medium">Compte</th>
+                <th className="px-2 py-2 font-medium">Seg</th>
+                <th className="px-2 py-2 font-medium">Ville</th>
+                <th className="px-2 py-2 font-medium">Statut</th>
+                <th className="px-2 py-2 font-medium">Opportunité</th>
+                <th className="px-4 py-2 font-medium text-right">CA YTD</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((a) => {
+                const opp = opportunityByAccount.get(a.id);
+                return (
+                  <tr
+                    key={a.id}
+                    className="cursor-pointer border-b border-border last:border-0 hover:bg-surface-muted"
+                    onClick={() => setSelectedAccount(a)}
+                  >
+                    <td className="px-4 py-2 font-medium text-foreground">{a.name}</td>
+                    <td className="px-2 py-2"><SegmentBadge segment={a.segment} /></td>
+                    <td className="px-2 py-2 text-muted-foreground">{a.city ?? "—"}</td>
+                    <td className="px-2 py-2"><StatusBadge status={a.status} /></td>
+                    <td className="px-2 py-2">
+                      {opp ? (
+                        <span
+                          className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
+                          style={{ backgroundColor: OPPORTUNITY_META[opp.type].color }}
+                        >
+                          {opp.label}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right text-muted-foreground">{formatEUR(a.ca_2026_ytd)}</td>
+                  </tr>
+                );
+              })}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    Aucun compte ne correspond à ces filtres.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {selectedAccount && (
         <div className="fixed inset-y-0 right-0 z-30 w-96 overflow-y-auto border-l border-border bg-surface p-5 shadow-xl">
           <button onClick={() => setSelectedAccount(null)} className="mb-4 text-muted-foreground hover:text-foreground">

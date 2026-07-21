@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
 import { TopBar } from "@/components/layout/TopBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
 import { AccountActionsPanel } from "@/components/comptes/AccountActionsPanel";
 import { ForecastPanel } from "@/components/comptes/ForecastPanel";
 import { TargetingScoreCard } from "@/components/comptes/TargetingScoreCard";
 import { ObjectivesCard } from "@/components/comptes/ObjectivesCard";
+import { EditableAccountCard } from "@/components/comptes/EditableAccountCard";
 import { createClient } from "@/lib/supabase/server";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import type { Account, AccountAction, AccountForecast, AccountProduct } from "@/types/database";
@@ -33,38 +33,32 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
   const { data: forecastsRaw } = await supabase.from("account_forecasts").select("*").eq("account_id", id);
   const forecasts = (forecastsRaw ?? []) as AccountForecast[];
 
+  const refsAcheteesCount = products.filter((p) => (p.qty_ordered_cy ?? 0) > 0 || (p.sales_value_cy ?? 0) > 0).length;
+
   return (
     <div>
       <TopBar title={acc.name} subtitle={`${acc.external_ref} · ${acc.city ?? "Ville inconnue"} ${acc.postal_code ?? ""}`} />
 
       <main className="grid grid-cols-1 gap-6 px-8 py-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-1">
-          <TargetingScoreCard account={acc} />
+          <TargetingScoreCard account={acc} refsAcheteesCount={products.length > 0 ? refsAcheteesCount : undefined} />
 
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Compte</CardTitle>
-              <div className="flex gap-2">
-                <SegmentBadge segment={acc.segment} />
-                <StatusBadge status={acc.status} />
-              </div>
-            </CardHeader>
+            <CardHeader><CardTitle>Compte</CardTitle></CardHeader>
+            <CardContent>
+              <EditableAccountCard account={acc} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Autres informations</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
               <Row label="Liste de prix" value={acc.price_list ?? "—"} />
-              <Row label="Commercial" value={acc.owner ?? "—"} />
               <Row label="Type" value={acc.hco_type ?? "—"} />
               <Row label="Potentiel (boîtes)" value={formatNumber(acc.potentiel_boites)} />
-              <Row label="Score" value={formatNumber(acc.score)} />
               <Row label="Silence (jours)" value={formatNumber(acc.jours_silence)} />
               <Row label="Dernier appel" value={acc.last_call_date ? new Date(acc.last_call_date).toLocaleDateString("fr-FR") : "—"} />
-              {acc.email && <Row label="Email" value={acc.email} />}
-              {acc.telephone && <Row label="Téléphone" value={acc.telephone} />}
               {acc.nom_concurrent && <Row label="Concurrent" value={acc.nom_concurrent} />}
-              {acc.action_recommandee && (
-                <div className="mt-3 rounded-lg bg-primary-50 px-3 py-2 text-primary-700">
-                  {acc.action_recommandee}
-                </div>
-              )}
             </CardContent>
           </Card>
 
@@ -78,8 +72,6 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
           <Card>
             <CardHeader><CardTitle>Historique CA</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <Row label="CA 2022" value={formatEUR(acc.ca_2022)} />
-              <Row label="CA 2023" value={formatEUR(acc.ca_2023)} />
               <Row label="CA 2024" value={formatEUR(acc.ca_2024)} />
               <Row label="CA 2025" value={formatEUR(acc.ca_2025)} />
               <Row label="CA 2026 YTD" value={formatEUR(acc.ca_2026_ytd)} />
@@ -125,13 +117,6 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
                   </tbody>
                 </table>
               </CardContent>
-            </Card>
-          )}
-
-          {acc.refs_manquantes && (
-            <Card>
-              <CardHeader><CardTitle>Références manquantes</CardTitle></CardHeader>
-              <CardContent className="text-sm text-muted-foreground">{acc.refs_manquantes}</CardContent>
             </Card>
           )}
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { UploadCloud, CheckCircle2, AlertCircle, Loader2, ChevronDown } from "lucide-react";
+import { UploadCloud, CheckCircle2, AlertCircle, Loader2, ChevronDown, Trash2 } from "lucide-react";
 
 interface ImportResult {
   importId?: string;
@@ -79,6 +79,8 @@ export function ImportForm() {
   const [result, setResult] = useState<ImportResult | { error: string } | null>(null);
   const [geocoding, setGeocoding] = useState(false);
   const [geocodeResult, setGeocodeResult] = useState<{ geocoded: number; failed: number } | null>(null);
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<{ cleaned: number } | null>(null);
 
   const canImport = Boolean(files.pas || files.salesforce);
 
@@ -95,6 +97,18 @@ export function ImportForm() {
     const json = await res.json();
     setResult(json);
     setLoading(false);
+  }
+
+  async function handleCleanupPas() {
+    const confirmed = window.confirm(
+      "Ceci efface définitivement CA 2022/2023, l'action recommandée et les références manquantes issues de l'ancien PAS sur tous les comptes (données non remplacées par une autre source). Confirmer ?"
+    );
+    if (!confirmed) return;
+    setCleaning(true);
+    const res = await fetch("/api/cleanup-pas", { method: "POST" });
+    const json = await res.json();
+    setCleanupResult(json);
+    setCleaning(false);
   }
 
   async function handleGeocode() {
@@ -199,6 +213,26 @@ export function ImportForm() {
           )}
         </div>
       )}
+
+      <div className="rounded-xl border border-danger/30 bg-surface p-6">
+        <h3 className="mb-1 text-sm font-semibold text-foreground">Nettoyer les anciennes données PAS</h3>
+        <p className="mb-3 text-sm text-muted-foreground">
+          Efface CA 2022/2023, l&apos;action recommandée et les références manquantes issues du PAS — ces champs ne sont
+          plus alimentés par le nouveau pipeline et faussent le dashboard s&apos;ils restent figés. Le score de ciblage
+          n&apos;est pas affecté, il est recalculé en direct.
+        </p>
+        <button
+          onClick={handleCleanupPas}
+          disabled={cleaning}
+          className="flex items-center gap-2 rounded-lg border border-danger/40 px-4 py-2 text-sm font-medium text-danger hover:bg-danger/5 disabled:opacity-50"
+        >
+          {cleaning ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+          Nettoyer les données PAS
+        </button>
+        {cleanupResult && (
+          <p className="mt-3 text-sm text-muted-foreground">{cleanupResult.cleaned} compte(s) nettoyé(s).</p>
+        )}
+      </div>
 
       <div className="rounded-xl border border-border bg-surface p-6">
         <h3 className="mb-1 text-sm font-semibold text-foreground">Géocodage (carte Mapping)</h3>

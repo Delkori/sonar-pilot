@@ -61,19 +61,27 @@ function silenceEnSemaines(account: Account): number | null {
   return null;
 }
 
-function refsManquantesCount(account: Account): number | null {
-  // source principale : DATA PRODUITS 2025 (comptage exact par code client)
+function refsManquantesCount(account: Account, refsAcheteesCount?: number): number | null {
+  // source principale, la plus fiable : marques réellement achetées d'après
+  // les factures/croissance par marque importées (account_products)
+  if (refsAcheteesCount !== undefined) {
+    return Math.max(NB_REFS_FILLERS - refsAcheteesCount, 0);
+  }
+  // repli historique : comptage PAS (peut être obsolète si le PAS n'est
+  // plus réimporté)
   if (account.nb_refs_achetees_2025 !== null && account.nb_refs_achetees_2025 !== undefined) {
     return NB_REFS_FILLERS - account.nb_refs_achetees_2025;
   }
-  // repli : colonne texte "RÉFS MANQUANTES 2025" du SUIVI COMPTES
   if (account.refs_manquantes) {
     return account.refs_manquantes.split("/").filter((s) => s.trim()).length;
   }
   return null;
 }
 
-export function computeTargetingScore(account: Account): TargetingScore {
+export function computeTargetingScore(
+  account: Account,
+  options?: { refsAcheteesCount?: number }
+): TargetingScore {
   const criteria: CriterionScore[] = [];
 
   // 1. Segment — 25 pts
@@ -110,7 +118,7 @@ export function computeTargetingScore(account: Account): TargetingScore {
   });
 
   // 4. Références manquantes — 15 pts
-  const refsManquantes = refsManquantesCount(account);
+  const refsManquantes = refsManquantesCount(account, options?.refsAcheteesCount);
   const refsPts =
     refsManquantes === null ? 1 : refsManquantes >= 9 ? 15 : refsManquantes >= 7 ? 10 : refsManquantes >= 5 ? 6 : 1;
   criteria.push({
