@@ -2,16 +2,21 @@ import "server-only";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 /**
- * Client en lecture du projet Supabase "nexora" (distinct de sonar-pilot).
- * Sert uniquement à synchroniser les données de sponsoring vers notre table
- * hcp_sponsorships. Nécessite les variables d'environnement :
+ * Client du projet Supabase "nexora" (base Transparence Santé, ~230k
+ * médecins). Sert à interroger les fonctions RPC sonar_* en lecture seule.
+ * Les RPC sont accessibles avec la clé anon (droits accordés à anon), donc
+ * une clé anon suffit ; la service role est acceptée aussi.
+ * Variables d'environnement (Vercel) :
  *   NEXORA_SUPABASE_URL
- *   NEXORA_SUPABASE_SERVICE_ROLE_KEY   (service role : contourne la RLS)
- * Renvoie null si non configuré — l'appelant affiche alors un message clair.
+ *   NEXORA_SUPABASE_ANON_KEY   (ou NEXORA_SUPABASE_SERVICE_ROLE_KEY)
+ * Renvoie null si non configuré.
  */
 export function createNexoraClient() {
   const url = process.env.NEXORA_SUPABASE_URL;
-  const key = process.env.NEXORA_SUPABASE_SERVICE_ROLE_KEY;
+  const key =
+    process.env.NEXORA_SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.NEXORA_SUPABASE_ANON_KEY ||
+    process.env.NEXORA_SUPABASE_KEY;
   if (!url || !key) return null;
   return createSupabaseClient(url, key, { auth: { persistSession: false } });
 }

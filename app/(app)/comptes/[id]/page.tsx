@@ -12,9 +12,10 @@ import { OrderHistoryCard } from "@/components/comptes/OrderHistoryCard";
 import { SponsorshipCard } from "@/components/comptes/SponsorshipCard";
 import type { SponsorshipRow } from "@/components/comptes/SponsorshipCard";
 import { allocateToHcps } from "@/lib/forecast";
+import { getLabsByRpps } from "@/lib/nexora/queries";
 import { createClient } from "@/lib/supabase/server";
 import { formatEUR, formatNumber } from "@/lib/utils";
-import type { Account, AccountAction, AccountForecast, AccountProduct, Hcp, HcpSponsorship } from "@/types/database";
+import type { Account, AccountAction, AccountForecast, AccountProduct, Hcp } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
@@ -48,26 +49,17 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
     .eq("account_id", id);
   const monthlySales = (monthlyRaw ?? []) as { year: number; month: number; ca: number }[];
 
-  // Sponsoring Nexora des médecins du compte, rapproché via le RPPS.
+  // Sponsoring des médecins du compte, en direct depuis la base Transparence
+  // Santé (Nexora), rapproché via le RPPS.
   const rppsList = hcps.map((h) => h.rpps).filter((r): r is string => !!r);
-  let sponsorships: SponsorshipRow[] = [];
-  if (rppsList.length > 0) {
-    const { data: sponsorRaw } = await supabase
-      .from("hcp_sponsorships")
-      .select("*")
-      .in("rpps", rppsList);
-    const nameByRpps = new Map(hcps.filter((h) => h.rpps).map((h) => [h.rpps as string, h.name] as const));
-    sponsorships = ((sponsorRaw ?? []) as HcpSponsorship[])
-      .filter((s) => s.laboratoire)
-      .map((s) => ({
-        id: s.id,
-        medecin: (s.rpps ? nameByRpps.get(s.rpps) : null) ?? s.hcp_name ?? "Médecin inconnu",
-        laboratoire: s.laboratoire as string,
-        montant: s.montant,
-        annee: s.annee,
-        type: s.type,
-      }));
-  }
+  const nameByRpps = new Map(hcps.filter((h) => h.rpps).map((h) => [h.rpps as string, h.name] as const));
+  const labs = await getLabsByRpps(rppsList);
+  const sponsorships: SponsorshipRow[] = labs.map((l, i) => ({
+    id: `${l.rpps}-${i}`,
+    medecin: nameByRpps.get(l.rpps) ?? l.rpps,
+    laboratoire: l.nom_labo,
+    montant: l.montant,
+  }));
 
   const refsAcheteesCount = products.filter((p) => (p.qty_ordered_cy ?? 0) > 0 || (p.sales_value_cy ?? 0) > 0).length;
 
