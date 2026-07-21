@@ -6,9 +6,10 @@ import { ForecastPanel } from "@/components/comptes/ForecastPanel";
 import { TargetingScoreCard } from "@/components/comptes/TargetingScoreCard";
 import { ObjectivesCard } from "@/components/comptes/ObjectivesCard";
 import { EditableAccountCard } from "@/components/comptes/EditableAccountCard";
-import { SegmentBadge } from "@/components/ui/Badge";
+import { HcpTable } from "@/components/comptes/HcpTable";
+import { ProductsTable } from "@/components/comptes/ProductsTable";
 import { createClient } from "@/lib/supabase/server";
-import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
+import { formatEUR, formatNumber } from "@/lib/utils";
 import type { Account, AccountAction, AccountForecast, AccountProduct, Hcp } from "@/types/database";
 
 export const dynamic = "force-dynamic";
@@ -107,32 +108,7 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
             <Card>
               <CardHeader><CardTitle>Médecins (HCP)</CardTitle></CardHeader>
               <CardContent>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="py-2 font-medium">Nom</th>
-                      <th className="py-2 font-medium">Seg</th>
-                      <th className="py-2 font-medium">RPPS</th>
-                      <th className="py-2 font-medium text-right">Potentiel (boîtes)</th>
-                      <th className="py-2 font-medium">Contact</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {hcps.map((h) => (
-                      <tr key={h.id} className="border-b border-border last:border-0">
-                        <td className="py-2 font-medium text-foreground">{h.name}</td>
-                        <td className="py-2"><SegmentBadge segment={h.segment} /></td>
-                        <td className="py-2 text-muted-foreground">{h.rpps ?? "—"}</td>
-                        <td className="py-2 text-right">{formatNumber(h.potentiel_boites)}</td>
-                        <td className="py-2 text-muted-foreground">
-                          {h.email && <div>{h.email}</div>}
-                          {h.telephone && <div>{h.telephone}</div>}
-                          {!h.email && !h.telephone && "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <HcpTable hcps={hcps} />
               </CardContent>
             </Card>
           )}
@@ -141,26 +117,7 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
             <Card>
               <CardHeader><CardTitle>Données produit</CardTitle></CardHeader>
               <CardContent>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="py-2 font-medium">Marque</th>
-                      <th className="py-2 font-medium text-right">CA N-1</th>
-                      <th className="py-2 font-medium text-right">CA N</th>
-                      <th className="py-2 font-medium text-right">Croissance</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {products.map((p) => (
-                      <tr key={p.id} className="border-b border-border last:border-0">
-                        <td className="py-2">{p.brand}</td>
-                        <td className="py-2 text-right text-muted-foreground">{formatEUR(p.sales_value_ly)}</td>
-                        <td className="py-2 text-right">{formatEUR(p.sales_value_cy)}</td>
-                        <td className="py-2 text-right">{formatPct(p.growth_rate_pct)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <ProductsTable products={products} />
               </CardContent>
             </Card>
           )}

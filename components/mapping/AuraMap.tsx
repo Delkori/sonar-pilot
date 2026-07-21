@@ -3,11 +3,17 @@
 import { useMemo, useState } from "react";
 import * as d3geo from "d3-geo";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
+import { ScoreBadge } from "@/components/ui/ScoreBadge";
+import { SortableTh } from "@/components/ui/SortableTh";
+import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
+import { computeTargetingScore } from "@/lib/scoring";
 import { suggestMonthlyForecast } from "@/lib/forecast";
 import { createClient } from "@/lib/supabase/client";
 import type { Account, Segment, AccountStatus } from "@/types/database";
+
+type SortKey = "name" | "segment" | "city" | "status" | "score" | "ca_ytd";
 import Link from "next/link";
 import { X, Sparkles, CheckCircle2, Loader2 } from "lucide-react";
 
@@ -111,6 +117,19 @@ export function AuraMap({
   }, [accounts]);
 
   const geolocated = filtered.filter((a) => a.latitude !== null && a.longitude !== null);
+
+  const { sorted: sortedFiltered, sortKey, dir, toggle } = useSortableTable<Account, SortKey>(
+    filtered,
+    {
+      name: (a) => a.name,
+      segment: (a) => a.segment,
+      city: (a) => a.city,
+      status: (a) => a.status,
+      score: (a) => computeTargetingScore(a).total,
+      ca_ytd: (a) => a.ca_2026_ytd,
+    },
+    "score"
+  );
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
@@ -257,16 +276,17 @@ export function AuraMap({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Compte</th>
-                <th className="px-2 py-2 font-medium">Seg</th>
-                <th className="px-2 py-2 font-medium">Ville</th>
-                <th className="px-2 py-2 font-medium">Statut</th>
+                <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="px-4" />
+                <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
+                <SortableTh label="Ville" sortKey="city" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
+                <SortableTh label="Statut" sortKey="status" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
+                <SortableTh label="Score" sortKey="score" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-2" />
                 <th className="px-2 py-2 font-medium">Opportunité</th>
-                <th className="px-4 py-2 font-medium text-right">CA YTD</th>
+                <SortableTh label="CA YTD" sortKey="ca_ytd" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-4" />
               </tr>
             </thead>
             <tbody>
-              {filtered.map((a) => {
+              {sortedFiltered.map((a) => {
                 const opp = opportunityByAccount.get(a.id);
                 return (
                   <tr
@@ -274,7 +294,12 @@ export function AuraMap({
                     className="cursor-pointer border-b border-border last:border-0 hover:bg-surface-muted"
                     onClick={() => setSelectedAccount(a)}
                   >
-                    <td className="px-4 py-2 font-medium text-foreground">{a.name}</td>
+                    <td className="px-4 py-2 font-medium text-foreground">
+                      <span className="flex items-center gap-2">
+                        {a.name}
+                        <ScoreBadge score={computeTargetingScore(a).total} />
+                      </span>
+                    </td>
                     <td className="px-2 py-2"><SegmentBadge segment={a.segment} /></td>
                     <td className="px-2 py-2 text-muted-foreground">{a.city ?? "—"}</td>
                     <td className="px-2 py-2"><StatusBadge status={a.status} /></td>
@@ -315,7 +340,10 @@ export function AuraMap({
             <SegmentBadge segment={selectedAccount.segment} />
             <StatusBadge status={selectedAccount.status} />
           </div>
-          <h3 className="text-lg font-semibold text-foreground">{selectedAccount.name}</h3>
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+            {selectedAccount.name}
+            <ScoreBadge score={computeTargetingScore(selectedAccount).total} />
+          </h3>
           <p className="mb-4 text-sm text-muted-foreground">
             {selectedAccount.city} {selectedAccount.postal_code}
           </p>

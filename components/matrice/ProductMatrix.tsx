@@ -3,7 +3,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { SegmentBadge } from "@/components/ui/Badge";
+import { ScoreBadge } from "@/components/ui/ScoreBadge";
+import { SortableTh } from "@/components/ui/SortableTh";
+import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { formatEUR } from "@/lib/utils";
+import { computeTargetingScore } from "@/lib/scoring";
 import type { Account, Segment } from "@/types/database";
 
 interface ProductRow {
@@ -13,10 +17,11 @@ interface ProductRow {
   sales_value_cy: number | null;
 }
 
+type SortKey = "name" | "segment" | "score" | "missing" | "ca_nc";
+
 export function ProductMatrix({ accounts, products }: { accounts: Account[]; products: ProductRow[] }) {
   const [segment, setSegment] = useState<Segment | "all">("all");
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<"missing" | "score" | "ca_nc">("missing");
 
   const brands = useMemo(() => {
     const totals = new Map<string, number>();
@@ -51,7 +56,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
     return totalBoites > 0 ? totalCa / totalBoites : 0;
   }, [accounts]);
 
-  const rows = useMemo(() => {
+  const filteredRows = useMemo(() => {
     return accounts
       .filter((a) => (segment === "all" ? true : a.segment === segment))
       .filter((a) => (search ? a.name.toLowerCase().includes(search.toLowerCase()) : true))
@@ -59,14 +64,22 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
         const bought = productsByAccount.get(a.id) ?? new Map();
         const missing = brands.filter((b) => !bought.has(b) || bought.get(b) === 0).length;
         const caNonCapte = Math.max((a.potentiel_boites ?? 0) * avgPricePerBox - (a.ca_2026_ytd ?? 0), 0);
-        return { account: a, bought, missing, caNonCapte };
-      })
-      .sort((r1, r2) => {
-        if (sortBy === "missing") return r2.missing - r1.missing;
-        if (sortBy === "score") return (r2.account.score ?? 0) - (r1.account.score ?? 0);
-        return r2.caNonCapte - r1.caNonCapte;
+        const score = computeTargetingScore(a).total;
+        return { account: a, bought, missing, caNonCapte, score };
       });
-  }, [accounts, productsByAccount, brands, segment, search, sortBy, avgPricePerBox]);
+  }, [accounts, productsByAccount, brands, segment, search, avgPricePerBox]);
+
+  const { sorted: rows, sortKey, dir, toggle } = useSortableTable<(typeof filteredRows)[number], SortKey>(
+    filteredRows,
+    {
+      name: (r) => r.account.name,
+      segment: (r) => r.account.segment,
+      score: (r) => r.score,
+      missing: (r) => r.missing,
+      ca_nc: (r) => r.caNonCapte,
+    },
+    "missing"
+  );
 
   if (brands.length === 0) {
     return (
@@ -95,15 +108,6 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
             <option key={s} value={s}>Segment {s}</option>
           ))}
         </select>
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
-        >
-          <option value="missing">Trier : Réfs manquantes</option>
-          <option value="score">Trier : Score</option>
-          <option value="ca_nc">Trier : CA non capté</option>
-        </select>
         <span className="ml-auto text-xs text-muted-foreground">{rows.length} compte(s) · {brands.length} marques</span>
       </div>
 
@@ -111,22 +115,25 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <th className="sticky left-0 z-10 bg-surface px-4 py-2 font-medium">Compte</th>
-              <th className="px-2 py-2 font-medium">Seg</th>
+              <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="sticky left-0 z-10 bg-surface px-4" />
+              <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
               {brands.map((b) => (
                 <th key={b} className="px-2 py-2 text-center font-medium whitespace-nowrap">{b}</th>
               ))}
-              <th className="px-3 py-2 text-right font-medium">Réfs manq.</th>
-              <th className="px-3 py-2 text-right font-medium">CA non capté</th>
+              <SortableTh label="Réfs manq." sortKey="missing" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+              <SortableTh label="CA non capté" sortKey="ca_nc" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ account, bought, missing, caNonCapte }) => (
+            {rows.map(({ account, bought, missing, caNonCapte, score }) => (
               <tr key={account.id} className="border-b border-border last:border-0 hover:bg-surface-muted">
                 <td className="sticky left-0 z-10 bg-surface px-4 py-2">
-                  <Link href={`/comptes/${account.id}`} className="font-medium text-foreground hover:text-primary">
-                    {account.name}
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Link href={`/comptes/${account.id}`} className="font-medium text-foreground hover:text-primary">
+                      {account.name}
+                    </Link>
+                    <ScoreBadge score={score} />
+                  </div>
                 </td>
                 <td className="px-2 py-2"><SegmentBadge segment={account.segment} /></td>
                 {brands.map((b) => {

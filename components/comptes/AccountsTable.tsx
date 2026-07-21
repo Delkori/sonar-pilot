@@ -3,39 +3,49 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
+import { ScoreBadge } from "@/components/ui/ScoreBadge";
+import { SortableTh } from "@/components/ui/SortableTh";
+import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { formatEUR } from "@/lib/utils";
 import { ACTION_META, computeTargetingScore } from "@/lib/scoring";
 import type { Account, AccountStatus, Segment } from "@/types/database";
 
-type SortKey = "score" | "ca_non_capte" | "name";
+type ScoredAccount = { account: Account; score: ReturnType<typeof computeTargetingScore> };
+type SortKey = "name" | "segment" | "status" | "city" | "score" | "ca_non_capte";
 
 export function AccountsTable({ accounts }: { accounts: Account[] }) {
   const [segment, setSegment] = useState<Segment | "all">("all");
   const [status, setStatus] = useState<AccountStatus | "all">("all");
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<SortKey>("score");
 
   const scored = useMemo(() => accounts.map((a) => ({ account: a, score: computeTargetingScore(a) })), [accounts]);
 
   const filtered = useMemo(() => {
-    return scored
-      .filter(({ account: a }) => {
-        if (segment !== "all" && a.segment !== segment) return false;
-        if (status !== "all" && a.status !== status) return false;
-        if (search) {
-          const q = search.toLowerCase();
-          if (!a.name.toLowerCase().includes(q) && !(a.city ?? "").toLowerCase().includes(q) && !(a.postal_code ?? "").includes(q)) {
-            return false;
-          }
+    return scored.filter(({ account: a }) => {
+      if (segment !== "all" && a.segment !== segment) return false;
+      if (status !== "all" && a.status !== status) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        if (!a.name.toLowerCase().includes(q) && !(a.city ?? "").toLowerCase().includes(q) && !(a.postal_code ?? "").includes(q)) {
+          return false;
         }
-        return true;
-      })
-      .sort((r1, r2) => {
-        if (sortBy === "score") return r2.score.total - r1.score.total;
-        if (sortBy === "ca_non_capte") return r2.score.caNonCapte - r1.score.caNonCapte;
-        return r1.account.name.localeCompare(r2.account.name);
-      });
-  }, [scored, segment, status, search, sortBy]);
+      }
+      return true;
+    });
+  }, [scored, segment, status, search]);
+
+  const { sorted, sortKey, dir, toggle } = useSortableTable<ScoredAccount, SortKey>(
+    filtered,
+    {
+      name: (r) => r.account.name,
+      segment: (r) => r.account.segment,
+      status: (r) => r.account.status,
+      city: (r) => r.account.city,
+      score: (r) => r.score.total,
+      ca_non_capte: (r) => r.score.caNonCapte,
+    },
+    "score"
+  );
 
   return (
     <div>
@@ -69,40 +79,34 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
           <option value="a_risque">À risque</option>
           <option value="a_suivre">À suivre</option>
         </select>
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as SortKey)}
-          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
-        >
-          <option value="score">Trier : Score</option>
-          <option value="ca_non_capte">Trier : CA non capté</option>
-          <option value="name">Trier : Nom</option>
-        </select>
-        <span className="ml-auto text-xs text-muted-foreground">{filtered.length} compte(s)</span>
+        <span className="ml-auto text-xs text-muted-foreground">{sorted.length} compte(s)</span>
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <th className="px-5 py-3 font-medium">Compte</th>
-              <th className="px-3 py-3 font-medium">Seg</th>
-              <th className="px-3 py-3 font-medium">Statut</th>
-              <th className="px-3 py-3 font-medium">Ville</th>
-              <th className="px-3 py-3 font-medium text-right">Score</th>
-              <th className="px-3 py-3 font-medium text-right">CA non capté</th>
+              <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="px-5" />
+              <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} />
+              <SortableTh label="Statut" sortKey="status" activeKey={sortKey} dir={dir} onSort={toggle} />
+              <SortableTh label="Ville" sortKey="city" activeKey={sortKey} dir={dir} onSort={toggle} />
+              <SortableTh label="Score" sortKey="score" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+              <SortableTh label="CA non capté" sortKey="ca_non_capte" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
               <th className="px-5 py-3 font-medium">Action recommandée</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(({ account: a, score }) => {
+            {sorted.map(({ account: a, score }) => {
               const meta = ACTION_META[score.action];
               return (
                 <tr key={a.id} className="border-b border-border last:border-0 hover:bg-surface-muted">
                   <td className="px-5 py-3">
-                    <Link href={`/comptes/${a.id}`} className="font-medium text-foreground hover:text-primary">
-                      {a.name}
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link href={`/comptes/${a.id}`} className="font-medium text-foreground hover:text-primary">
+                        {a.name}
+                      </Link>
+                      <ScoreBadge score={score.total} />
+                    </div>
                     <p className="text-xs text-muted-foreground">{a.external_ref}</p>
                   </td>
                   <td className="px-3 py-3"><SegmentBadge segment={a.segment} /></td>
@@ -121,7 +125,7 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
                 </tr>
               );
             })}
-            {filtered.length === 0 && (
+            {sorted.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-5 py-10 text-center text-muted-foreground">
                   Aucun compte ne correspond à ces filtres.

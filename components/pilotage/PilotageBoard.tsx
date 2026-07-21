@@ -3,13 +3,13 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { suggestMonthlyForecast } from "@/lib/forecast";
+import { autoFillPortfolioForecast, suggestMonthlyForecast } from "@/lib/forecast";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
 import type { Opportunity } from "@/lib/opportunities";
 import { SegmentBadge } from "@/components/ui/Badge";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import type { Account, AccountForecast } from "@/types/database";
-import { GripVertical, Trash2, Loader2, Target } from "lucide-react";
+import { GripVertical, Trash2, Loader2, Target, Wand2 } from "lucide-react";
 
 const MONTH_LABELS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 
@@ -47,8 +47,9 @@ export function PilotageBoard({
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
+  const [horizon, setHorizon] = useState<1 | 3 | 6>(3);
 
-  const months = useMemo(() => nextMonths(4), []);
+  const months = useMemo(() => nextMonths(horizon), [horizon]);
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a] as const)), [accounts]);
 
   const opportunities = useMemo(() => detectOpportunities(accounts), [accounts]);
@@ -63,6 +64,11 @@ export function PilotageBoard({
         filter ? o.account.name.toLowerCase().includes(filter.toLowerCase()) : true
       ),
     [opportunities, filter]
+  );
+
+  const cumulOpportunites = useMemo(
+    () => filteredOpportunities.reduce((s, o) => s + o.value, 0),
+    [filteredOpportunities]
   );
 
   const realiseByMonth = useMemo(() => {
@@ -107,6 +113,29 @@ export function PilotageBoard({
     if (!error && data) setForecasts((prev) => [...prev, data as AccountForecast]);
   }
 
+  const [autoFilling, setAutoFilling] = useState(false);
+
+  async function autoFillPortfolio() {
+    setAutoFilling(true);
+    const suggestions = autoFillPortfolioForecast(
+      accounts,
+      monthlySales,
+      forecasts.map((f) => ({ account_id: f.account_id, year: f.year, month: f.month })),
+      months
+    );
+    if (suggestions.length === 0) {
+      setAutoFilling(false);
+      return;
+    }
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("account_forecasts")
+      .insert(suggestions.map((s) => ({ ...s, kind: "prevision" as const })))
+      .select();
+    setAutoFilling(false);
+    if (!error && data) setForecasts((prev) => [...prev, ...(data as AccountForecast[])]);
+  }
+
   async function removeForecast(id: string) {
     setForecasts((prev) => prev.filter((f) => f.id !== id));
     const supabase = createClient();
@@ -128,6 +157,11 @@ export function PilotageBoard({
           <p className="mt-0.5 text-xs text-muted-foreground">
             Glissez un compte vers un mois pour planifier l&apos;action
           </p>
+          <div className="mt-3 rounded-lg border border-primary-100 bg-primary-50 px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-primary-700">Cumul opportunités</p>
+            <p className="text-lg font-semibold text-primary-700">{formatEUR(cumulOpportunites)}</p>
+            <p className="text-[10px] text-primary-700/70">{filteredOpportunities.length} compte(s) en jeu</p>
+          </div>
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -154,7 +188,37 @@ export function PilotageBoard({
       </div>
 
       {/* ── Colonnes mois ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div>
+        <div className="mb-3 flex items-center justify-end gap-2">
+          <button
+            onClick={autoFillPortfolio}
+            disabled={autoFilling}
+            title="Remplit automatiquement le prévisionnel de tout le portefeuille sur la période affichée, à partir de la saisonnalité des commandes passées (ou du score/silence à défaut d'historique) — n'écrase jamais un mois déjà renseigné"
+            className="mr-auto flex items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-60"
+          >
+            {autoFilling ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+            Générer le prévisionnel du portefeuille
+          </button>
+          <span className="text-xs text-muted-foreground">Horizon :</span>
+          {([1, 3, 6] as const).map((h) => (
+            <button
+              key={h}
+              onClick={() => setHorizon(h)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                horizon === h
+                  ? "border-primary bg-primary-50 text-primary-700"
+                  : "border-border text-muted-foreground hover:bg-surface-muted"
+              }`}
+            >
+              {h === 1 ? "1 mois" : h === 3 ? "Trimestre (3 mois)" : "Semestre (6 mois)"}
+            </button>
+          ))}
+        </div>
+        <div
+          className={`grid grid-cols-1 gap-3 ${
+            horizon === 1 ? "" : horizon === 3 ? "sm:grid-cols-2 xl:grid-cols-3" : "sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6"
+          }`}
+        >
         {months.map(({ year, month }) => {
           const monthForecasts = forecastsFor(year, month);
           const totalPrevu = monthForecasts.reduce((s, f) => s + (f.ca_prevu ?? 0), 0);
@@ -238,7 +302,11 @@ export function PilotageBoard({
                         />
                         €
                       </div>
-                      {f.note && <p className="mt-1 line-clamp-2 text-[10px] text-muted-foreground">{f.note}</p>}
+                      {f.note && (
+                        <p className={`mt-1 text-[10px] text-muted-foreground ${horizon === 1 ? "" : "line-clamp-2"}`}>
+                          {f.note}
+                        </p>
+                      )}
                     </div>
                   );
                 })}
@@ -246,6 +314,7 @@ export function PilotageBoard({
             </div>
           );
         })}
+        </div>
       </div>
     </div>
   );
