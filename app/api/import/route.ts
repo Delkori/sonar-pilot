@@ -27,6 +27,7 @@ import {
 } from "@/lib/import/salesforceParser";
 import { validateKpiRows, validatePasRows } from "@/lib/import/validator";
 import type { ImportLogEntry } from "@/lib/import/validator";
+import { bestMatch, HIGH_CONFIDENCE } from "@/lib/import/nameResolver";
 
 export const runtime = "nodejs";
 
@@ -205,6 +206,42 @@ export async function POST(req: NextRequest) {
     const { data: allAccounts } = await supabase.from("accounts").select("id, name");
     const idByName = new Map((allAccounts ?? []).map((a) => [normalizeName(a.name), a.id] as const));
 
+    // rapprochement flou (ex. "DR BEILLE Laurence" ↔ "CABINET DR BEILLE
+    // Laurence") pour les sources dont le nom ne correspond jamais
+    // exactement à Salesforce — auto-appliqué à haute confiance, sinon mis
+    // en attente de validation dans /admin/correspondances
+    const { data: aliasRows } = await supabase.from("name_aliases").select("raw_name, account_id");
+    const aliasMap = new Map((aliasRows ?? []).map((a) => [a.raw_name, a.account_id] as const));
+    const { data: existingCandidates } = await supabase.from("name_match_candidates").select("raw_name");
+    const knownCandidateNames = new Set((existingCandidates ?? []).map((c) => c.raw_name));
+    let pendingReviewCount = 0;
+
+    async function resolveAccountId(rawName: string): Promise<string | null> {
+      const exact = idByName.get(normalizeName(rawName));
+      if (exact) return exact;
+      if (aliasMap.has(rawName)) return aliasMap.get(rawName)!;
+      if (knownCandidateNames.has(rawName)) return null;
+
+      const match = bestMatch(rawName, allAccounts ?? []);
+      if (match && match.score >= HIGH_CONFIDENCE) {
+        await supabase
+          .from("name_aliases")
+          .insert({ raw_name: rawName, account_id: match.accountId, confidence: match.score });
+        aliasMap.set(rawName, match.accountId);
+        return match.accountId;
+      }
+
+      await supabase.from("name_match_candidates").insert({
+        raw_name: rawName,
+        candidate_account_id: match?.accountId ?? null,
+        candidate_name: match?.accountName ?? null,
+        confidence: match?.score ?? 0,
+      });
+      knownCandidateNames.add(rawName);
+      pendingReviewCount++;
+      return null;
+    }
+
     if (monthlyFile) {
       const monthlyBuffer = await monthlyFile.arrayBuffer();
       const monthlyRows = parseMonthlySalesWorkbook(monthlyBuffer);
@@ -276,12 +313,11 @@ export async function POST(req: NextRequest) {
     }
 
     // ACCOUNT DETAIL — factures réelles : CA par an, dates de commande, silence
-    let invoiceToCustomer = new Map<string, string>(); // invoiceNumber -> customerName normalisé
+    const invoiceToAccountId = new Map<string, string>(); // invoiceNumber -> accountId
     if (accountDetailFile) {
       const buf = await accountDetailFile.arrayBuffer();
       const invoices = parseAccountDetail(buf);
       rowsTotal += invoices.length;
-      invoiceToCustomer = new Map(invoices.map((i) => [i.invoiceNumber, normalizeName(i.customerName)]));
 
       const byAccount = new Map<
         string,
@@ -289,12 +325,15 @@ export async function POST(req: NextRequest) {
       >();
       let invoiceMatched = 0;
       for (const inv of invoices) {
-        const key = normalizeName(inv.customerName);
-        const accountId = idByName.get(key);
+        const accountId = await resolveAccountId(inv.customerName);
         if (!accountId) {
-          allErrors.push({ row: 0, message: `Compte "${inv.customerName}" introuvable — facture ignorée` });
+          allErrors.push({
+            row: 0,
+            message: `Compte "${inv.customerName}" en attente de validation (rapprochement incertain) — facture ignorée pour l'instant`,
+          });
           continue;
         }
+        invoiceToAccountId.set(inv.invoiceNumber, accountId);
         invoiceMatched++;
         const year = Number(inv.date.slice(0, 4));
         const cur = byAccount.get(accountId) ?? { ca: {}, first: inv.date, last: inv.date, matched: true };
@@ -336,7 +375,7 @@ export async function POST(req: NextRequest) {
       const lines = parseInvoiceProducts(buf);
       rowsTotal += lines.length;
 
-      if (invoiceToCustomer.size === 0) {
+      if (invoiceToAccountId.size === 0) {
         allErrors.push({
           row: 0,
           message: "Fichier ACCOUNT DETAIL requis pour attribuer les lignes produit à un compte — ignoré",
@@ -347,8 +386,7 @@ export async function POST(req: NextRequest) {
         let linesMatched = 0;
 
         for (const line of lines) {
-          const customerKey = invoiceToCustomer.get(line.invoiceNumber);
-          const accountId = customerKey ? idByName.get(customerKey) : undefined;
+          const accountId = invoiceToAccountId.get(line.invoiceNumber);
           if (!accountId) continue;
           linesMatched++;
           const brand = canonicalizeBrand(line.description);
@@ -396,6 +434,7 @@ export async function POST(req: NextRequest) {
       rowsSuccess,
       rowsError: allErrors.length,
       errors: allErrors,
+      pendingReviewCount,
       status: finalStatus,
     });
   } catch (err) {

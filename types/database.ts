@@ -125,6 +125,25 @@ export type AccountForecast = {
   updated_at: string;
 };
 
+export type NameAlias = {
+  id: string;
+  raw_name: string;
+  account_id: string;
+  confidence: number | null;
+  created_at: string;
+};
+
+export type NameMatchCandidate = {
+  id: string;
+  raw_name: string;
+  candidate_account_id: string | null;
+  candidate_name: string | null;
+  confidence: number | null;
+  status: "pending" | "confirmed" | "rejected";
+  created_at: string;
+  updated_at: string;
+};
+
 // Minimal Database type for the Supabase client generics. Run
 // `supabase gen types typescript` against the real project to replace this
 // with a fully generated definition once the schema is applied.
@@ -140,6 +159,8 @@ export type Database = {
       territory_objectives: Table<TerritoryObjective>;
       account_monthly_sales: Table<AccountMonthlySale>;
       account_forecasts: Table<AccountForecast>;
+      name_aliases: Table<NameAlias>;
+      name_match_candidates: Table<NameMatchCandidate>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
