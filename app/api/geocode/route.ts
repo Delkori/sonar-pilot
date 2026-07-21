@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -10,7 +10,7 @@ export const runtime = "nodejs";
  * regéocoder à chaque affichage de la carte.
  */
 export async function POST() {
-  const supabase = createAdminClient();
+  const supabase = await createClient();
 
   const { data: accounts, error } = await supabase
     .from("accounts")

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import {
   parseCallsWorkbook,
   parseGrowthByBrandWorkbook,
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const supabase = createAdminClient();
+  const supabase = await createClient();
   const allErrors: ImportLogEntry[] = [];
   let rowsTotal = 0;
   let rowsSuccess = 0;
