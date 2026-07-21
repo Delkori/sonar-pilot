@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
-import { formatEUR, formatNumber } from "@/lib/utils";
+import { formatEUR } from "@/lib/utils";
 import { ACTION_META, computeTargetingScore } from "@/lib/scoring";
 import type { Account } from "@/types/database";
 

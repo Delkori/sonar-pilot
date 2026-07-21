@@ -22,8 +22,15 @@ export default async function DashboardPage() {
 
   const { data: forecastsRaw } = await supabase
     .from("account_forecasts")
-    .select("account_id, year, month, boites_prevues, ca_prevu");
+    .select("account_id, year, month, boites_prevues, ca_prevu")
+    .eq("kind", "prevision");
   const forecasts = forecastsRaw ?? [];
+
+  const { data: objectifsRaw } = await supabase
+    .from("account_forecasts")
+    .select("account_id, year, month, boites_prevues, ca_prevu")
+    .eq("kind", "objectif");
+  const objectifs = objectifsRaw ?? [];
 
   const lastImport = await supabase
     .from("imports")
@@ -44,6 +51,7 @@ export default async function DashboardPage() {
         monthlySales={monthlySales}
         products={products}
         forecasts={forecasts}
+        objectifs={objectifs}
         lastImportLabel={lastImportLabel}
       />
     </div>

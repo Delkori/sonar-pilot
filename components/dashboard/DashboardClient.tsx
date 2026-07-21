@@ -6,10 +6,10 @@ import { KpiCard } from "@/components/dashboard/KpiCard";
 import { PriorityAccountsTable } from "@/components/dashboard/PriorityAccountsTable";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { suggestMonthlyForecast } from "@/lib/forecast";
+import { computeTargetingScore, ACTION_META } from "@/lib/scoring";
+import type { ActionCode } from "@/lib/scoring";
 import { createClient } from "@/lib/supabase/client";
 import {
-  Target,
-  TrendingDown,
   TrendingUp,
   Users,
   AlertTriangle,
@@ -19,18 +19,18 @@ import {
   Package,
   Sparkles,
   Loader2,
+  Wallet,
+  Target,
 } from "lucide-react";
 import type { Account } from "@/types/database";
 import Link from "next/link";
 
 const YEAR_FIELDS: Record<number, keyof Account> = {
-  2022: "ca_2022",
-  2023: "ca_2023",
   2024: "ca_2024",
   2025: "ca_2025",
   2026: "ca_2026_ytd",
 };
-const YEARS = [2022, 2023, 2024, 2025, 2026];
+const YEARS = [2024, 2025, 2026];
 const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"];
 
 interface MonthlySale {
@@ -61,12 +61,14 @@ export function DashboardClient({
   monthlySales,
   products,
   forecasts,
+  objectifs,
   lastImportLabel,
 }: {
   accounts: Account[];
   monthlySales: MonthlySale[];
   products: ProductRow[];
   forecasts: ForecastRow[];
+  objectifs: ForecastRow[];
   lastImportLabel: string;
 }) {
   const [year, setYear] = useState(2026);
@@ -84,10 +86,22 @@ export function DashboardClient({
   const monthsForYear = Array.from(availableMonthsByYear.get(year) ?? []).sort((a, b) => a - b);
   const hasMonthlyData = monthsForYear.length > 0;
 
-  const objectifTotal = accounts.reduce((sum, a) => sum + (a.objectif_boites ?? 0), 0);
-  const realiseTotal = accounts.reduce((sum, a) => sum + (a.realise_boites ?? 0), 0);
-  const ecartTotal = realiseTotal - objectifTotal;
-  const atteinte = objectifTotal > 0 ? realiseTotal / objectifTotal : 0;
+  // ── Score de ciblage calculé pour chaque compte — base de tout le reste
+  const scored = useMemo(() => accounts.map((a) => ({ account: a, score: computeTargetingScore(a) })), [accounts]);
+  const caPotentielTotal = useMemo(() => scored.reduce((s, r) => s + r.score.caNonCapte, 0), [scored]);
+
+  const actionDistribution = useMemo(() => {
+    const buckets = new Map<ActionCode, { count: number; caNonCapte: number }>();
+    for (const { score } of scored) {
+      const cur = buckets.get(score.action) ?? { count: 0, caNonCapte: 0 };
+      cur.count++;
+      cur.caNonCapte += score.caNonCapte;
+      buckets.set(score.action, cur);
+    }
+    return (Object.keys(ACTION_META) as ActionCode[])
+      .map((code) => ({ code, meta: ACTION_META[code], ...(buckets.get(code) ?? { count: 0, caNonCapte: 0 }) }))
+      .filter((b) => b.count > 0);
+  }, [scored]);
 
   const caYear = useMemo(
     () => accounts.reduce((sum, a) => sum + ((a[YEAR_FIELDS[year]] as number | null) ?? 0), 0),
@@ -113,6 +127,31 @@ export function DashboardClient({
     return arr;
   }, [monthlySales, year]);
 
+  // ── Objectif réel (assigné, kind='objectif') vs réalisé, pour la période sélectionnée
+  const objectifCaSelected = useMemo(() => {
+    return objectifs
+      .filter((o) => o.year === year && (month === null || o.month === month))
+      .reduce((s, o) => s + (o.ca_prevu ?? 0), 0);
+  }, [objectifs, year, month]);
+  const objectifBoitesSelected = useMemo(() => {
+    return objectifs
+      .filter((o) => o.year === year && (month === null || o.month === month))
+      .reduce((s, o) => s + (o.boites_prevues ?? 0), 0);
+  }, [objectifs, year, month]);
+  const realiseCaSelected = month === null ? caYear : caMonth ?? 0;
+  const ecartCa = realiseCaSelected - objectifCaSelected;
+  const atteinteCa = objectifCaSelected > 0 ? realiseCaSelected / objectifCaSelected : null;
+  const hasObjectifData = objectifCaSelected > 0 || objectifBoitesSelected > 0;
+
+  const objectifByMonthOfYear = useMemo(() => {
+    const arr = new Array(12).fill(0);
+    for (const o of objectifs) {
+      if (o.year === year) arr[o.month - 1] += o.ca_prevu ?? 0;
+    }
+    return arr;
+  }, [objectifs, year]);
+  const hasObjectifForYear = objectifs.some((o) => o.year === year);
+
   const forecastByMonthOfYear = useMemo(() => {
     const boites = new Array(12).fill(0);
     const ca = new Array(12).fill(0);
@@ -132,6 +171,10 @@ export function DashboardClient({
   );
   const caMoyenParCompteActif = clientsActifs > 0 ? caYear / clientsActifs : 0;
 
+  const accountsAvecHistorique = accounts.filter(
+    (a) => a.ca_2024 !== null || a.ca_2025 !== null || a.ca_2026_ytd !== null
+  ).length;
+
   const caParSegment = useMemo(() => {
     const totals: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
     for (const a of accounts) {
@@ -141,14 +184,17 @@ export function DashboardClient({
   }, [accounts, year]);
   const concentrationSegmentA = caYear > 0 ? caParSegment.A / caYear : 0;
 
-  const topCroissance = [...accounts]
-    .filter((a) => a.evolution_pct !== null)
-    .sort((a, b) => (b.evolution_pct ?? 0) - (a.evolution_pct ?? 0))
-    .slice(0, 5);
-  const topDeclin = [...accounts]
-    .filter((a) => a.evolution_pct !== null)
-    .sort((a, b) => (a.evolution_pct ?? 0) - (b.evolution_pct ?? 0))
-    .slice(0, 5);
+  // évolution recalculée à partir du CA réel (factures), plus fiable que
+  // l'ancienne colonne PAS evolution_pct qui n'est plus jamais mise à jour
+  const withEvolution = useMemo(
+    () =>
+      accounts
+        .filter((a) => (a.ca_2024 ?? 0) > 0)
+        .map((a) => ({ account: a, evolution: ((a.ca_2025 ?? 0) - (a.ca_2024 ?? 0)) / (a.ca_2024 ?? 1) })),
+    [accounts]
+  );
+  const topCroissance = [...withEvolution].sort((a, b) => b.evolution - a.evolution).slice(0, 5);
+  const topDeclin = [...withEvolution].sort((a, b) => a.evolution - b.evolution).slice(0, 5);
 
   const lostAccounts = [...accounts]
     .filter((a) => a.status === "lost")
@@ -175,13 +221,12 @@ export function DashboardClient({
   }, [products]);
   const hasProductData = products.length > 0;
 
-  const priorityAccounts = [...accounts]
-    .sort((a, b) => {
-      const ecartA = (a.realise_boites ?? 0) - (a.objectif_boites ?? 0);
-      const ecartB = (b.realise_boites ?? 0) - (b.objectif_boites ?? 0);
-      return ecartA - ecartB;
-    })
-    .slice(0, 8);
+  // comptes prioritaires = les plus gros scores de ciblage, pas un écart
+  // objectif/réalisé flou qui n'a plus de source fiable
+  const priorityAccounts = [...scored]
+    .sort((a, b) => b.score.total - a.score.total)
+    .slice(0, 8)
+    .map((r) => r.account);
 
   const [generatingForecasts, setGeneratingForecasts] = useState(false);
   const [forecastGenerationResult, setForecastGenerationResult] = useState<string | null>(null);
@@ -203,7 +248,7 @@ export function DashboardClient({
     const rows = priorityAccounts.flatMap((account) =>
       suggestMonthlyForecast(account, targetMonths)
         .filter((s) => !existingKeys.has(`${account.id}|${s.year}|${s.month}`))
-        .map((s) => ({ account_id: account.id, ...s }))
+        .map((s) => ({ account_id: account.id, kind: "prevision" as const, ...s }))
     );
 
     if (rows.length === 0) {
@@ -227,7 +272,7 @@ export function DashboardClient({
   }
 
   const displayedCa = month !== null ? caMonth : caYear;
-  const displayedCaLabel = month !== null ? `CA ${MONTH_LABELS[month - 1]} ${year}` : `CA ${year}`;
+  const displayedCaLabel = month !== null ? `CA réalisé ${MONTH_LABELS[month - 1]} ${year}` : `CA réalisé ${year}`;
 
   return (
     <div>
@@ -273,43 +318,85 @@ export function DashboardClient({
           </div>
         ) : (
           <span className="border-l border-border pl-4 text-xs text-muted-foreground">
-            Détail mensuel indisponible — importez le fichier ventes mensuelles pour l&apos;activer
+            Détail mensuel indisponible — importez Account Detail / Invoice Product pour l&apos;activer
           </span>
         )}
       </div>
 
       <main className="px-8 py-6 space-y-6">
-        <p className="text-xs text-muted-foreground">{lastImportLabel}</p>
+        <p className="text-xs text-muted-foreground">
+          {lastImportLabel} · {accountsAvecHistorique}/{accounts.length} comptes avec historique de CA importé
+        </p>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard label="Objectif Q3 (boîtes)" value={formatNumber(objectifTotal)} icon={Target} />
           <KpiCard
-            label="Réalisé (boîtes)"
-            value={formatNumber(realiseTotal)}
-            trend={`${formatPct(atteinte)} de l'objectif`}
-            tone={atteinte >= 1 ? "positive" : "default"}
-            icon={TrendingDown}
-          />
-          <KpiCard
-            label="Écart"
-            value={`${ecartTotal > 0 ? "+" : ""}${formatNumber(ecartTotal)}`}
-            tone={ecartTotal < 0 ? "negative" : "positive"}
-            icon={AlertTriangle}
+            label="CA potentiel à capter"
+            value={formatEUR(caPotentielTotal)}
+            trend="Potentiel × prix moyen − CA réalisé"
+            icon={Wallet}
           />
           <KpiCard
             label={displayedCaLabel}
             value={formatEUR(displayedCa)}
             trend={month === null && caYoyGrowth !== null ? `${caYoyGrowth > 0 ? "+" : ""}${formatPct(caYoyGrowth)} vs ${year - 1}` : undefined}
             tone={month === null && caYoyGrowth !== null ? (caYoyGrowth >= 0 ? "positive" : "negative") : "default"}
-            icon={Users}
+            icon={TrendingUp}
           />
+          {hasObjectifData ? (
+            <>
+              <KpiCard
+                label="Objectif CA (période)"
+                value={formatEUR(objectifCaSelected)}
+                trend={atteinteCa !== null ? `${formatPct(atteinteCa)} atteint` : undefined}
+                tone={atteinteCa !== null && atteinteCa >= 1 ? "positive" : "default"}
+                icon={Target}
+              />
+              <KpiCard
+                label="Écart vs objectif"
+                value={`${ecartCa > 0 ? "+" : ""}${formatEUR(ecartCa)}`}
+                tone={ecartCa < 0 ? "negative" : "positive"}
+                icon={AlertTriangle}
+              />
+            </>
+          ) : (
+            <>
+              <KpiCard label="Comptes actifs" value={formatNumber(clientsActifs)} icon={Users} />
+              <KpiCard label="Comptes à risque" value={formatNumber(clientsAlerte.length)} tone="negative" icon={AlertTriangle} />
+            </>
+          )}
         </div>
+
+        {!hasObjectifData && (
+          <p className="rounded-lg border border-dashed border-border bg-surface-muted px-4 py-2 text-xs text-muted-foreground">
+            Aucun objectif défini pour {month ? `${MONTH_LABELS[month - 1]} ` : ""}
+            {year} — allez sur une fiche compte, section &quot;Objectifs mensuels&quot;, pour en saisir (total annuel réparti
+            automatiquement sur 12 mois).
+          </p>
+        )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Répartition par action recommandée</CardTitle>
+            <CardDescription>Calculée en direct depuis le score de ciblage — {accounts.length} comptes</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              {actionDistribution.map((b) => (
+                <div key={b.code} className="rounded-lg border border-border p-3" style={{ borderTopColor: b.meta.color, borderTopWidth: 3 }}>
+                  <p className="text-lg font-semibold text-foreground">{b.count}</p>
+                  <p className="text-xs text-muted-foreground">{b.meta.label}</p>
+                  {b.caNonCapte > 0 && <p className="mt-1 text-[10px] text-muted-foreground">{formatEUR(b.caNonCapte)}</p>}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard label="CA moyen / compte actif" value={formatEUR(caMoyenParCompteActif)} icon={TrendingUp} />
           <KpiCard label="Concentration Segment A" value={formatPct(concentrationSegmentA)} icon={Crown} />
-          <KpiCard label="Comptes à risque" value={formatNumber(clientsAlerte.length)} tone="negative" icon={AlertTriangle} />
           <KpiCard label="Clients actifs" value={formatNumber(clientsActifs)} icon={Users} />
+          <KpiCard label="Comptes à risque" value={formatNumber(clientsAlerte.length)} tone="negative" icon={AlertTriangle} />
         </div>
 
         {month === null && hasMonthlyData && (
@@ -338,12 +425,50 @@ export function DashboardClient({
           </Card>
         )}
 
+        {month === null && hasObjectifForYear && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Objectif vs Réalisé — {year}</CardTitle>
+              <CardDescription>Objectif saisi sur les fiches comptes comparé au CA réel importé, mois par mois</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-end gap-2" style={{ height: 120 }}>
+                {objectifByMonthOfYear.map((obj, i) => {
+                  const realise = caByMonthOfYear[i];
+                  const max = Math.max(...objectifByMonthOfYear, ...caByMonthOfYear, 1);
+                  return (
+                    <div key={i} className="flex flex-1 flex-col items-center gap-1">
+                      <div className="flex h-[90px] w-full items-end gap-0.5">
+                        <div
+                          className="flex-1 rounded-t bg-amber-200"
+                          style={{ height: `${Math.max((obj / max) * 90, obj > 0 ? 4 : 0)}px` }}
+                          title={`Objectif : ${formatEUR(obj)}`}
+                        />
+                        <div
+                          className="flex-1 rounded-t bg-primary"
+                          style={{ height: `${Math.max((realise / max) * 90, realise > 0 ? 4 : 0)}px` }}
+                          title={`Réalisé : ${formatEUR(realise)}`}
+                        />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground">{MONTH_LABELS[i]}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-3 flex gap-4 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-amber-200" /> Objectif</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-primary" /> Réalisé</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {month === null && hasForecastData && (
           <Card>
             <CardHeader>
-              <CardTitle>Prévisionnel vs Réalisé — {year}</CardTitle>
+              <CardTitle>Mon prévisionnel vs Réalisé — {year}</CardTitle>
               <CardDescription>
-                CA prévu (saisi dans les fiches comptes) comparé au CA réel importé. Ajoutez/éditez vos prévisions depuis une fiche compte.
+                CA que vous prévoyez de faire (fiches comptes) comparé au CA réel importé.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -404,12 +529,12 @@ export function DashboardClient({
             <CardHeader className="flex flex-row items-start justify-between">
               <div>
                 <CardTitle>Comptes prioritaires</CardTitle>
-                <CardDescription>Écart le plus critique entre objectif et réalisé</CardDescription>
+                <CardDescription>Score de ciblage le plus élevé — recalculé en direct</CardDescription>
               </div>
               <button
                 onClick={generatePriorityForecasts}
                 disabled={generatingForecasts}
-                title="Propose un prévisionnel 3 mois pour ces comptes prioritaires, basé sur leur objectif restant"
+                title="Propose un prévisionnel 3 mois pour ces comptes prioritaires"
                 className="flex shrink-0 items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
               >
                 {generatingForecasts ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
@@ -424,8 +549,8 @@ export function DashboardClient({
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <MoversCard title="Top 5 croissance (Évol. 25→26)" accounts={topCroissance} tone="positive" />
-          <MoversCard title="Top 5 déclin (Évol. 25→26)" accounts={topDeclin} tone="negative" />
+          <MoversCard title="Top 5 croissance (Évol. 24→25)" rows={topCroissance} tone="positive" />
+          <MoversCard title="Top 5 déclin (Évol. 24→25)" rows={topDeclin} tone="negative" />
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -530,20 +655,28 @@ export function DashboardClient({
   );
 }
 
-function MoversCard({ title, accounts, tone }: { title: string; accounts: Account[]; tone: "positive" | "negative" }) {
+function MoversCard({
+  title,
+  rows,
+  tone,
+}: {
+  title: string;
+  rows: { account: Account; evolution: number }[];
+  tone: "positive" | "negative";
+}) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        {accounts.length === 0 && <p className="text-sm text-muted-foreground">Pas assez de données.</p>}
-        {accounts.map((a) => (
+        {rows.length === 0 && <p className="text-sm text-muted-foreground">Pas assez de données (nécessite CA 2024 et 2025).</p>}
+        {rows.map(({ account: a, evolution }) => (
           <div key={a.id} className="flex items-center justify-between text-sm">
             <Link href={`/comptes/${a.id}`} className="text-foreground hover:text-primary">
               {a.name}
             </Link>
-            <span className={tone === "positive" ? "text-success" : "text-danger"}>{formatPct(a.evolution_pct)}</span>
+            <span className={tone === "positive" ? "text-success" : "text-danger"}>{formatPct(evolution)}</span>
           </div>
         ))}
       </CardContent>
