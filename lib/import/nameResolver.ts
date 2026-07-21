@@ -21,13 +21,21 @@ const STRUCTURE_PREFIXES = new Set([
   "DOCTEUR",
 ]);
 
+// Tokens de "bruit" à ignorer en plus des préfixes de structure : mentions
+// de statut ajoutées par Salesforce (INACTIVE) qui ne portent pas de sens
+// pour le rapprochement.
+const NOISE_TOKENS = new Set(["INACTIVE", "INACTIF", "FERME", "FERMEE"]);
+
 function tokenSet(name: string): Set<string> {
   const stripped = name
     .toUpperCase()
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "") // strip accents
+    .replace(/\([^)]*\)/g, " ") // supprime le contenu entre parenthèses, ex. "(INACTIVE)"
     .replace(/[^A-Z0-9 ]/g, " ");
-  const tokens = stripped.split(/\s+/).filter((t) => t && !STRUCTURE_PREFIXES.has(t));
+  const tokens = stripped
+    .split(/\s+/)
+    .filter((t) => t && !STRUCTURE_PREFIXES.has(t) && !NOISE_TOKENS.has(t));
   return new Set(tokens);
 }
 

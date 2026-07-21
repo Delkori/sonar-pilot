@@ -57,14 +57,16 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
       .select("*")
       .in("rpps", rppsList);
     const nameByRpps = new Map(hcps.filter((h) => h.rpps).map((h) => [h.rpps as string, h.name] as const));
-    sponsorships = ((sponsorRaw ?? []) as HcpSponsorship[]).map((s) => ({
-      id: s.id,
-      medecin: (s.rpps ? nameByRpps.get(s.rpps) : null) ?? s.hcp_name ?? "Médecin inconnu",
-      laboratoire: s.laboratoire,
-      montant: s.montant,
-      annee: s.annee,
-      type: s.type,
-    }));
+    sponsorships = ((sponsorRaw ?? []) as HcpSponsorship[])
+      .filter((s) => s.laboratoire)
+      .map((s) => ({
+        id: s.id,
+        medecin: (s.rpps ? nameByRpps.get(s.rpps) : null) ?? s.hcp_name ?? "Médecin inconnu",
+        laboratoire: s.laboratoire as string,
+        montant: s.montant,
+        annee: s.annee,
+        type: s.type,
+      }));
   }
 
   const refsAcheteesCount = products.filter((p) => (p.qty_ordered_cy ?? 0) > 0 || (p.sales_value_cy ?? 0) > 0).length;

@@ -169,10 +169,13 @@ export type HcpSponsorship = {
   id: string;
   rpps: string | null;
   hcp_name: string | null;
-  laboratoire: string;
+  laboratoire: string | null;
   montant: number | null;
   annee: number | null;
   type: string | null;
+  structure_nom: string | null;
+  departement: string | null;
+  specialite: string | null;
   source: string;
   created_at: string;
   updated_at: string;
