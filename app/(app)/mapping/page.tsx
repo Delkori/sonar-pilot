@@ -12,11 +12,6 @@ export default async function MappingPage() {
   const { data } = await supabase.from("accounts").select("*");
   const accounts = (data ?? []) as Account[];
 
-  const { data: productsRaw } = await supabase
-    .from("account_products")
-    .select("account_id, brand, qty_ordered_cy");
-  const products = productsRaw ?? [];
-
   const geoRaw = await readFile(path.join(process.cwd(), "public/geo/aura-departements.json"), "utf-8");
   const geo = JSON.parse(geoRaw);
 
@@ -27,7 +22,7 @@ export default async function MappingPage() {
         subtitle="Lecture géographique du secteur — préparation de tournée terrain"
       />
       <main className="px-8 py-6">
-        <AuraMap geo={geo} accounts={accounts} products={products} />
+        <AuraMap geo={geo} accounts={accounts} />
       </main>
     </div>
   );

@@ -19,11 +19,6 @@ export default async function PilotagePage() {
     .select("account_id, year, month, ca");
   const monthlySales = monthlyRaw ?? [];
 
-  const { data: productsRaw } = await supabase
-    .from("account_products")
-    .select("account_id, brand, qty_ordered_cy");
-  const products = productsRaw ?? [];
-
   return (
     <div>
       <TopBar
@@ -31,12 +26,7 @@ export default async function PilotagePage() {
         subtitle="Glissez les opportunités dans un mois pour construire votre plan — le suivi prévu/réalisé se met à jour à chaque import"
       />
       <main className="px-8 py-6">
-        <PilotageBoard
-          accounts={accounts}
-          initialForecasts={forecasts}
-          monthlySales={monthlySales}
-          products={products}
-        />
+        <PilotageBoard accounts={accounts} initialForecasts={forecasts} monthlySales={monthlySales} />
       </main>
     </div>
   );

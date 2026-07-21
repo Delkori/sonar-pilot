@@ -33,20 +33,12 @@ function deptColor(ratio: number | null) {
   return "#fca5a5";
 }
 
-interface ProductRow {
-  account_id: string;
-  brand: string;
-  qty_ordered_cy: number | null;
-}
-
 export function AuraMap({
   geo,
   accounts,
-  products = [],
 }: {
   geo: { type: "FeatureCollection"; features: DeptFeature[] };
   accounts: Account[];
-  products?: ProductRow[];
 }) {
   const [segment, setSegment] = useState<Segment | "all">("all");
   const [status, setStatus] = useState<AccountStatus | "all">("all");
@@ -56,20 +48,10 @@ export function AuraMap({
   const [planning, setPlanning] = useState(false);
   const [planned, setPlanned] = useState<Set<string>>(new Set());
 
-  const productsByAccount = useMemo(() => {
-    const map = new Map<string, { brand: string; qty: number }[]>();
-    for (const p of products) {
-      if (!map.has(p.account_id)) map.set(p.account_id, []);
-      map.get(p.account_id)!.push({ brand: p.brand, qty: p.qty_ordered_cy ?? 0 });
-    }
-    return map;
-  }, [products]);
-  const totalBrandCount = useMemo(() => new Set(products.map((p) => p.brand)).size, [products]);
-
   const opportunityByAccount = useMemo(() => {
-    const opps = detectOpportunities(accounts, productsByAccount, totalBrandCount);
+    const opps = detectOpportunities(accounts);
     return new Map(opps.map((o) => [o.account.id, o] as const));
-  }, [accounts, productsByAccount, totalBrandCount]);
+  }, [accounts]);
 
   async function planNextMonth(account: Account) {
     setPlanning(true);

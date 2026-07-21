@@ -41,6 +41,7 @@ export type Account = {
   evolution_pct: number | null;
   action_recommandee: string | null;
   refs_manquantes: string | null;
+  nb_refs_achetees_2025: number | null;
   last_call_date: string | null;
   days_since_last_call: number | null;
   first_order_date: string | null;

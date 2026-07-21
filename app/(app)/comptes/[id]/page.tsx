@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
 import { AccountActionsPanel } from "@/components/comptes/AccountActionsPanel";
 import { ForecastPanel } from "@/components/comptes/ForecastPanel";
+import { TargetingScoreCard } from "@/components/comptes/TargetingScoreCard";
 import { createClient } from "@/lib/supabase/server";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import type { Account, AccountAction, AccountForecast, AccountProduct } from "@/types/database";
@@ -40,6 +41,8 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
 
       <main className="grid grid-cols-1 gap-6 px-8 py-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-1">
+          <TargetingScoreCard account={acc} />
+
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Compte</CardTitle>

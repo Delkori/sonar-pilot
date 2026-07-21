@@ -20,12 +20,6 @@ interface MonthlySale {
   ca: number;
 }
 
-interface ProductRow {
-  account_id: string;
-  brand: string;
-  qty_ordered_cy: number | null;
-}
-
 function nextMonths(count: number): { year: number; month: number }[] {
   const now = new Date();
   const result: { year: number; month: number }[] = [];
@@ -43,12 +37,10 @@ export function PilotageBoard({
   accounts,
   initialForecasts,
   monthlySales,
-  products,
 }: {
   accounts: Account[];
   initialForecasts: AccountForecast[];
   monthlySales: MonthlySale[];
-  products: ProductRow[];
 }) {
   const [forecasts, setForecasts] = useState(initialForecasts);
   const [isSaving, setIsSaving] = useState(false);
@@ -59,20 +51,7 @@ export function PilotageBoard({
   const months = useMemo(() => nextMonths(4), []);
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a] as const)), [accounts]);
 
-  const productsByAccount = useMemo(() => {
-    const map = new Map<string, { brand: string; qty: number }[]>();
-    for (const p of products) {
-      if (!map.has(p.account_id)) map.set(p.account_id, []);
-      map.get(p.account_id)!.push({ brand: p.brand, qty: p.qty_ordered_cy ?? 0 });
-    }
-    return map;
-  }, [products]);
-  const totalBrandCount = useMemo(() => new Set(products.map((p) => p.brand)).size, [products]);
-
-  const opportunities = useMemo(
-    () => detectOpportunities(accounts, productsByAccount, totalBrandCount),
-    [accounts, productsByAccount, totalBrandCount]
-  );
+  const opportunities = useMemo(() => detectOpportunities(accounts), [accounts]);
   const opportunityByAccount = useMemo(
     () => new Map(opportunities.map((o) => [o.account.id, o] as const)),
     [opportunities]

@@ -1,102 +1,51 @@
 import type { Account } from "@/types/database";
+import { ACTION_META, computeTargetingScore } from "@/lib/scoring";
+import type { ActionCode, TargetingScore } from "@/lib/scoring";
 
-export type OpportunityType = "reactivation" | "cross_sell" | "declin" | "relance_appel" | "potentiel";
+export type OpportunityType = ActionCode;
 
 export interface Opportunity {
   account: Account;
   type: OpportunityType;
   label: string;
   reason: string;
-  /** montant en € servant à prioriser (CA à regagner / à capter) */
+  /** montant en € servant à prioriser (CA non capté / CA à regagner) */
   value: number;
+  score: TargetingScore;
 }
 
-export const OPPORTUNITY_META: Record<OpportunityType, { label: string; color: string }> = {
-  reactivation: { label: "Réactivation", color: "#dc2626" },
-  declin: { label: "Déclin à enrayer", color: "#d97706" },
-  cross_sell: { label: "Cross-sell", color: "#0d9488" },
-  relance_appel: { label: "Relance appel", color: "#b45309" },
-  potentiel: { label: "Potentiel inexploité", color: "#4f46e5" },
-};
+export const OPPORTUNITY_META = ACTION_META;
 
 /**
- * Détection d'opportunités par règles, uniquement à partir de champs réels
- * importés (silence, CA historique, évolution, appels, potentiel, produits).
- * Chaque compte n'apparaît qu'une fois, sur sa raison la plus forte.
+ * Les opportunités découlent directement du score de ciblage /100 du PAS :
+ * tout compte dont l'action recommandée n'est pas "Fidéliser" est une
+ * opportunité, triée par score décroissant puis par CA en jeu.
  */
-export function detectOpportunities(
-  accounts: Account[],
-  productsByAccount: Map<string, { brand: string; qty: number }[]>,
-  totalBrandCount: number
-): Opportunity[] {
+export function detectOpportunities(accounts: Account[]): Opportunity[] {
   const opportunities: Opportunity[] = [];
 
-  for (const a of accounts) {
-    const caRef = a.ca_2025 ?? 0;
+  for (const account of accounts) {
+    const score = computeTargetingScore(account);
+    if (score.action === "fideliser") continue;
 
-    // 1. Réactivation : compte qui générait du CA et devenu silencieux
-    if ((a.jours_silence ?? 0) > 90 && caRef > 2000 && a.status !== "lost") {
-      opportunities.push({
-        account: a,
-        type: "reactivation",
-        label: "Réactiver",
-        reason: `${a.jours_silence} jours sans commande — ${Math.round(caRef).toLocaleString("fr-FR")} € de CA 2025 à regagner`,
-        value: caRef,
-      });
-      continue;
-    }
+    const topCriteria = [...score.criteria]
+      .filter((c) => c.points > 0)
+      .sort((c1, c2) => c2.points / c2.max - c1.points / c1.max)
+      .slice(0, 2);
 
-    // 2. Déclin : forte chute 25→26 sur un compte qui pèse
-    if ((a.evolution_pct ?? 0) < -0.5 && caRef > 5000 && a.status === "actif") {
-      opportunities.push({
-        account: a,
-        type: "declin",
-        label: "Enrayer le déclin",
-        reason: `Évolution ${Math.round((a.evolution_pct ?? 0) * 100)}% vs 2025 — compte encore actif, agir vite`,
-        value: caRef * Math.abs(a.evolution_pct ?? 0),
-      });
-      continue;
-    }
+    const value = score.action === "reconquete" ? account.ca_2024 ?? 0 : score.caNonCapte;
 
-    // 3. Cross-sell : compte actif avec beaucoup de marques non achetées
-    const bought = productsByAccount.get(a.id) ?? [];
-    const activeBrands = bought.filter((p) => p.qty > 0).length;
-    if (totalBrandCount > 0 && a.status === "actif" && activeBrands > 0 && activeBrands <= totalBrandCount / 2 && caRef > 3000) {
-      opportunities.push({
-        account: a,
-        type: "cross_sell",
-        label: "Élargir la gamme",
-        reason: `${activeBrands}/${totalBrandCount} marques achetées — mix incomplet sur un compte fidèle`,
-        value: caRef * 0.3,
-      });
-      continue;
-    }
-
-    // 4. Relance appel : actif mais plus contacté depuis longtemps
-    if (a.status === "actif" && (a.days_since_last_call ?? 0) > 90) {
-      opportunities.push({
-        account: a,
-        type: "relance_appel",
-        label: "Reprendre contact",
-        reason: `${a.days_since_last_call} jours depuis le dernier appel`,
-        value: caRef * 0.2,
-      });
-      continue;
-    }
-
-    // 5. Potentiel inexploité : gros potentiel déclaré, faible réalisation
-    const potentiel = a.potentiel_boites ?? 0;
-    const realise = a.realise_boites ?? 0;
-    if (potentiel >= 100 && realise < potentiel * 0.2 && a.status !== "lost") {
-      opportunities.push({
-        account: a,
-        type: "potentiel",
-        label: "Développer",
-        reason: `${realise}/${potentiel} boîtes du potentiel réalisées — marge de progression forte`,
-        value: (potentiel - realise) * 130,
-      });
-    }
+    opportunities.push({
+      account,
+      type: score.action,
+      label: ACTION_META[score.action].label,
+      reason: `Score ${score.total}/100 — ${topCriteria.map((c) => c.detail).join(" · ")}`,
+      value,
+      score,
+    });
   }
 
-  return opportunities.sort((o1, o2) => o2.value - o1.value);
+  return opportunities.sort(
+    (o1, o2) => o2.score.total - o1.score.total || o2.value - o1.value
+  );
 }

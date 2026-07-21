@@ -7,6 +7,7 @@ import {
   parseKpiWorkbook,
   parseMonthlySalesWorkbook,
   parsePasWorkbook,
+  parseProduitsSheet,
 } from "@/lib/import/parser";
 import {
   mapCallsRow,
@@ -71,6 +72,14 @@ export async function POST(req: NextRequest) {
       if (existing) Object.assign(existing, patch, { owner: existing.owner ?? patch.owner });
     }
     rowsTotal += kpiDataRows.length;
+
+    // 1c) DATA PRODUITS 2025 sheet — nb de références achetées par client,
+    // alimente le critère "références manquantes" du score de ciblage
+    const refsBoughtByCode = parseProduitsSheet(pasBuffer);
+    for (const [code, count] of refsBoughtByCode) {
+      const existing = accountsByRef.get(code);
+      if (existing) existing.nb_refs_achetees_2025 = count;
+    }
 
     if (kpiFile) {
       const kpiBuffer = await kpiFile.arrayBuffer();

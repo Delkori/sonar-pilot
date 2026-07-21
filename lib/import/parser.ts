@@ -184,6 +184,27 @@ export function parseKpiDataSheet(buffer: ArrayBuffer): RawKpiDataRow[] {
   return rows.filter((r) => r["Code client"]);
 }
 
+/**
+ * "DATA PRODUITS 2025" sheet, embedded in the PAS workbook: one row per
+ * Code client, one column per référence filler (10 au total). Sert au
+ * critère "références manquantes" du score de ciblage — comptage exact,
+ * matching fiable par code client.
+ */
+export function parseProduitsSheet(buffer: ArrayBuffer): Map<string, number> {
+  const wb = XLSX.read(buffer, { type: "array" });
+  const sheet = wb.Sheets["DATA PRODUITS 2025"];
+  const result = new Map<string, number>();
+  if (!sheet) return result;
+  const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+  for (const row of rows.slice(1)) {
+    const code = row[0] ? String(row[0]).trim() : null;
+    if (!code) continue;
+    const bought = row.slice(1).filter((v) => typeof v === "number" && v > 0).length;
+    result.set(code, bought);
+  }
+  return result;
+}
+
 /** Converts an Excel date serial number to an ISO date string (YYYY-MM-DD). */
 export function excelSerialToISODate(value: number | string | null): string | null {
   if (value === null || value === undefined || value === "") return null;
