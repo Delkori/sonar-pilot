@@ -289,8 +289,14 @@ export async function POST(req: NextRequest) {
           nom_concurrent: row.competitor || null,
         });
       }
-      if (hcpPayload.length > 0) {
-        const { error } = await supabase.from("hcps").upsert(hcpPayload, { onConflict: "external_ref" });
+      // Dédoublonnage par external_ref : un upsert groupé échoue si la même
+      // clé apparaît deux fois dans le lot (homonymes sans RPPS). On garde la
+      // dernière occurrence.
+      const dedupedHcp = Array.from(
+        new Map(hcpPayload.map((h) => [h.external_ref, h])).values()
+      );
+      if (dedupedHcp.length > 0) {
+        const { error } = await supabase.from("hcps").upsert(dedupedHcp, { onConflict: "external_ref" });
         if (error) allErrors.push({ row: 0, message: `Médecins (HCP) : ${error.message}` });
       }
       rowsSuccess += hcpMatched;
