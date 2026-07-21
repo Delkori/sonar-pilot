@@ -165,6 +165,19 @@ export type Hcp = {
   updated_at: string;
 };
 
+export type HcpSponsorship = {
+  id: string;
+  rpps: string | null;
+  hcp_name: string | null;
+  laboratoire: string;
+  montant: number | null;
+  annee: number | null;
+  type: string | null;
+  source: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type CalendarFeedToken = {
   token: string;
   created_at: string;
@@ -189,6 +202,7 @@ export type Database = {
       name_match_candidates: Table<NameMatchCandidate>;
       calendar_feed_tokens: Table<CalendarFeedToken>;
       hcps: Table<Hcp>;
+      hcp_sponsorships: Table<HcpSponsorship>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

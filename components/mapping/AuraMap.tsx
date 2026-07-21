@@ -96,9 +96,12 @@ export function AuraMap({
     [accounts, segment, status, selectedDept, showOnlyOpportunities, opportunityByAccount]
   );
 
+  // fitExtent recadre automatiquement la projection sur l'emprise réelle des
+  // départements chargés — plus besoin de caler center/scale à la main quand
+  // on ajoute des départements (ex. Saône-et-Loire, Nièvre).
   const projection = useMemo(
-    () => d3geo.geoConicConformal().center([4.5, 45.4]).scale(9000).translate([WIDTH / 2, HEIGHT / 2]),
-    []
+    () => d3geo.geoConicConformal().fitExtent([[12, 12], [WIDTH - 12, HEIGHT - 12]], geo),
+    [geo]
   );
   const pathGen = useMemo(() => d3geo.geoPath(projection), [projection]);
 

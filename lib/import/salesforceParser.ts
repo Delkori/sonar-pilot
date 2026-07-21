@@ -250,6 +250,82 @@ export function parseInvoiceProducts(buffer: ArrayBuffer): RawInvoiceProductRow[
   return result;
 }
 
+export interface RawSponsorshipRow {
+  rpps: string | null;
+  hcpName: string | null;
+  laboratoire: string;
+  montant: number | null;
+  annee: number | null;
+  type: string | null;
+}
+
+// Colonnes attendues de l'export Nexora, retrouvées par nom (tolérant à la
+// casse/aux accents et à l'ordre) plutôt que par position — l'export pourra
+// évoluer sans casser l'import.
+const SPONSOR_HEADER_ALIASES: Record<string, string[]> = {
+  rpps: ["rpps"],
+  hcpName: ["nom", "medecin", "praticien", "professionnel", "hcp", "prenom nom", "beneficiaire"],
+  laboratoire: ["laboratoire", "labo", "entreprise", "societe", "sponsor", "industriel", "firme"],
+  montant: ["montant", "valeur", "somme", "amount", "avantage", "remuneration"],
+  annee: ["annee", "an", "exercice"],
+  type: ["type", "nature", "categorie", "objet", "convention"],
+};
+
+function normHeader(h: string): string {
+  return String(h).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+}
+
+/**
+ * Parse un export Nexora de sponsoring (xlsx) : une ligne = un avantage /
+ * une convention entre un laboratoire et un médecin. Le rapprochement avec
+ * nos médecins se fera ensuite via le RPPS. Parser volontairement tolérant
+ * sur les noms de colonnes — à recalibrer si l'export réel diffère.
+ */
+export function parseNexoraSponsorships(buffer: ArrayBuffer): RawSponsorshipRow[] {
+  const wb = XLSX.read(buffer, { type: "array" });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+  if (rows.length < 2) return [];
+
+  const headers = (rows[0] as unknown[]).map((h) => normHeader(h == null ? "" : String(h)));
+  const idxOf = (field: keyof typeof SPONSOR_HEADER_ALIASES) =>
+    headers.findIndex((h) => SPONSOR_HEADER_ALIASES[field].some((a) => h.includes(a)));
+
+  const idx = {
+    rpps: idxOf("rpps"),
+    hcpName: idxOf("hcpName"),
+    laboratoire: idxOf("laboratoire"),
+    montant: idxOf("montant"),
+    annee: idxOf("annee"),
+    type: idxOf("type"),
+  };
+
+  const cell = (row: unknown[], i: number) => (i >= 0 && row[i] != null ? String(row[i]).trim() : null);
+  const num = (v: string | null) => {
+    if (!v) return null;
+    const n = Number(v.replace(/[^\d.,-]/g, "").replace(/\s/g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const result: RawSponsorshipRow[] = [];
+  for (const row of rows.slice(1)) {
+    const laboratoire = cell(row, idx.laboratoire);
+    const rpps = cell(row, idx.rpps);
+    const hcpName = cell(row, idx.hcpName);
+    if (!laboratoire || (!rpps && !hcpName)) continue; // ligne inexploitable
+    const anneeRaw = cell(row, idx.annee);
+    result.push({
+      rpps: rpps ? rpps.replace(/\s/g, "") : null,
+      hcpName,
+      laboratoire,
+      montant: num(cell(row, idx.montant)),
+      annee: anneeRaw ? Number(anneeRaw.replace(/[^\d]/g, "").slice(0, 4)) || null : null,
+      type: cell(row, idx.type),
+    });
+  }
+  return result;
+}
+
 /**
  * Les libellés produit varient selon l'emballage/le canal (MDR, WS, boîte
  * de 1 ou 2) pour la même référence — on les regroupe sous un nom canonique

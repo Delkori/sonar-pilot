@@ -24,6 +24,7 @@ import {
   parseAccountPartners,
   parseInvoiceProducts,
   parseSalesforceReport,
+  parseNexoraSponsorships,
 } from "@/lib/import/salesforceParser";
 import { validateKpiRows, validatePasRows } from "@/lib/import/validator";
 import type { ImportLogEntry } from "@/lib/import/validator";
@@ -55,9 +56,12 @@ export async function POST(req: NextRequest) {
   const monthlyFile = formData.get("monthly") as File | null;
   const callsFile = formData.get("calls") as File | null;
   const growthFile = formData.get("growth") as File | null;
+  const nexoraFile = formData.get("nexora") as File | null;
   const importedBy = (formData.get("importedBy") as string) || null;
 
-  if (!pasFile && !salesforceFile) {
+  // Le fichier Nexora (sponsoring) peut être importé seul ; les autres
+  // fichiers ont besoin d'un référentiel compte (PAS ou Salesforce).
+  if (!pasFile && !salesforceFile && !nexoraFile) {
     return NextResponse.json(
       { error: "Un référentiel compte est requis : fichier PAS ou Rapport Salesforce." },
       { status: 400 }
@@ -68,7 +72,7 @@ export async function POST(req: NextRequest) {
   const allErrors: ImportLogEntry[] = [];
   let rowsTotal = 0;
   let rowsSuccess = 0;
-  const mainFilename = pasFile?.name ?? salesforceFile!.name;
+  const mainFilename = pasFile?.name ?? salesforceFile?.name ?? nexoraFile?.name ?? "import";
 
   try {
     const accountsByRef = new Map<string, Record<string, unknown>>();
@@ -360,6 +364,37 @@ export async function POST(req: NextRequest) {
         if (error) allErrors.push({ row: 0, message: `Croissance par marque : ${error.message}` });
       }
       rowsSuccess += growthMatched;
+    }
+
+    // NEXORA — sponsoring des médecins par les laboratoires. Indépendant des
+    // comptes : le rattachement se fait ensuite via le RPPS des HCP.
+    if (nexoraFile) {
+      const nexoraBuffer = await nexoraFile.arrayBuffer();
+      const sponsorRows = parseNexoraSponsorships(nexoraBuffer);
+      rowsTotal += sponsorRows.length;
+      if (sponsorRows.length > 0) {
+        const payload = sponsorRows.map((r) => ({
+          rpps: r.rpps,
+          hcp_name: r.hcpName,
+          laboratoire: r.laboratoire,
+          montant: r.montant,
+          annee: r.annee,
+          type: r.type,
+          source: "nexora",
+        }));
+        // On repart d'une table propre à chaque import Nexora (remplacement),
+        // pour éviter d'empiler les doublons d'un export à l'autre.
+        await supabase.from("hcp_sponsorships").delete().eq("source", "nexora");
+        const { error } = await supabase.from("hcp_sponsorships").insert(payload);
+        if (error) allErrors.push({ row: 0, message: `Sponsoring Nexora : ${error.message}` });
+        else rowsSuccess += sponsorRows.length;
+      } else {
+        allErrors.push({
+          row: 0,
+          message:
+            "Fichier Nexora : aucune ligne exploitable — vérifiez les colonnes (RPPS ou nom médecin, laboratoire, montant).",
+        });
+      }
     }
 
     // ACCOUNT DETAIL — factures réelles : CA par an, dates de commande, silence

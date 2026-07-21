@@ -31,6 +31,13 @@ const PRIMARY_FIELDS = [
     title: "Invoice Number et Product",
     description: '"INVOICE NUMBER ET PRODUCT.xlsx" — le détail produit de chaque facture (nécessite Account Detail pour retrouver le compte) : ventes mensuelles réelles et données produit.',
   },
+  {
+    key: "nexora",
+    required: false,
+    title: "Sponsoring Nexora",
+    description:
+      "Export Nexora du sponsoring : quel laboratoire sponsorise quel médecin et pour quel montant. Colonnes attendues (souples) : RPPS ou nom du médecin, laboratoire, montant, année, type. Rattaché aux médecins via le RPPS — peut être importé seul.",
+  },
 ] as const;
 
 const LEGACY_FIELDS = [
@@ -68,6 +75,7 @@ export function ImportForm() {
     salesforce: null,
     accountDetail: null,
     invoiceProducts: null,
+    nexora: null,
     pas: null,
     kpi: null,
     monthly: null,
@@ -82,7 +90,7 @@ export function ImportForm() {
   const [cleaning, setCleaning] = useState(false);
   const [cleanupResult, setCleanupResult] = useState<{ cleaned: number } | null>(null);
 
-  const canImport = Boolean(files.pas || files.salesforce);
+  const canImport = Boolean(files.pas || files.salesforce || files.nexora);
 
   async function handleImport() {
     if (!canImport) return;

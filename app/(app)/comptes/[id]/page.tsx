@@ -9,10 +9,12 @@ import { EditableAccountCard } from "@/components/comptes/EditableAccountCard";
 import { HcpTable } from "@/components/comptes/HcpTable";
 import { ProductsTable } from "@/components/comptes/ProductsTable";
 import { OrderHistoryCard } from "@/components/comptes/OrderHistoryCard";
+import { SponsorshipCard } from "@/components/comptes/SponsorshipCard";
+import type { SponsorshipRow } from "@/components/comptes/SponsorshipCard";
 import { allocateToHcps } from "@/lib/forecast";
 import { createClient } from "@/lib/supabase/server";
 import { formatEUR, formatNumber } from "@/lib/utils";
-import type { Account, AccountAction, AccountForecast, AccountProduct, Hcp } from "@/types/database";
+import type { Account, AccountAction, AccountForecast, AccountProduct, Hcp, HcpSponsorship } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +47,25 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
     .select("year, month, ca")
     .eq("account_id", id);
   const monthlySales = (monthlyRaw ?? []) as { year: number; month: number; ca: number }[];
+
+  // Sponsoring Nexora des médecins du compte, rapproché via le RPPS.
+  const rppsList = hcps.map((h) => h.rpps).filter((r): r is string => !!r);
+  let sponsorships: SponsorshipRow[] = [];
+  if (rppsList.length > 0) {
+    const { data: sponsorRaw } = await supabase
+      .from("hcp_sponsorships")
+      .select("*")
+      .in("rpps", rppsList);
+    const nameByRpps = new Map(hcps.filter((h) => h.rpps).map((h) => [h.rpps as string, h.name] as const));
+    sponsorships = ((sponsorRaw ?? []) as HcpSponsorship[]).map((s) => ({
+      id: s.id,
+      medecin: (s.rpps ? nameByRpps.get(s.rpps) : null) ?? s.hcp_name ?? "Médecin inconnu",
+      laboratoire: s.laboratoire,
+      montant: s.montant,
+      annee: s.annee,
+      type: s.type,
+    }));
+  }
 
   const refsAcheteesCount = products.filter((p) => (p.qty_ordered_cy ?? 0) > 0 || (p.sales_value_cy ?? 0) > 0).length;
 
@@ -152,6 +173,17 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
               <CardHeader><CardTitle>Médecins (HCP)</CardTitle></CardHeader>
               <CardContent>
                 <HcpTable hcps={hcps} allocation={hcpAllocation} />
+              </CardContent>
+            </Card>
+          )}
+
+          {sponsorships.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Sponsoring (Nexora)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <SponsorshipCard rows={sponsorships} />
               </CardContent>
             </Card>
           )}
