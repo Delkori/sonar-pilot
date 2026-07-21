@@ -47,6 +47,11 @@ export type Account = {
   first_order_date: string | null;
   last_order_date: string | null;
   import_id: string | null;
+  email: string | null;
+  telephone: string | null;
+  nom_concurrent: string | null;
+  objectif_filler: number | null;
+  objectif_cosmetique: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -54,7 +59,7 @@ export type Account = {
 export type Import = {
   id: string;
   filename: string;
-  source: "PAS" | "KPI" | "CALLS" | "GROWTH_BY_BRAND" | "PRODUCTS";
+  source: "PAS" | "SALESFORCE" | "KPI" | "CALLS" | "GROWTH_BY_BRAND" | "PRODUCTS";
   imported_at: string;
   imported_by: string | null;
   status: "success" | "partial" | "failed";

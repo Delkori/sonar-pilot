@@ -15,8 +15,15 @@ import {
   mapKpiDataRow,
   mapKpiRow,
   mapPasRow,
+  departmentCodeFromPostal,
   normalizeName,
 } from "@/lib/import/mapping";
+import {
+  canonicalizeBrand,
+  parseAccountDetail,
+  parseInvoiceProducts,
+  parseSalesforceReport,
+} from "@/lib/import/salesforceParser";
 import { validateKpiRows, validatePasRows } from "@/lib/import/validator";
 import type { ImportLogEntry } from "@/lib/import/validator";
 
@@ -24,61 +31,101 @@ export const runtime = "nodejs";
 
 /**
  * Import robuste et non destructif :
- * - upsert par external_ref (CODE SAP / Code client), jamais delete+insert
+ * - upsert par external_ref, jamais delete+insert
  * - un import raté ou partiel est journalisé dans `imports`, ne bloque pas
  *   les comptes déjà en base
- * - seul le fichier PAS (SUIVI COMPTES) est obligatoire ; tous les autres
- *   (KPI, ventes mensuelles, appels, croissance par marque) sont optionnels
- *   et viennent enrichir les mêmes comptes
+ * - deux chemins possibles pour le référentiel compte :
+ *   - historique : fichier PAS (SUIVI COMPTES)
+ *   - actuel : "Rapport Salesforce" — les comptes sans code SAP reçoivent
+ *     un external_ref synthétique stable, dérivé du nom normalisé
+ * - ACCOUNT DETAIL (factures) et INVOICE NUMBER ET PRODUCT (lignes produit)
+ *   sont optionnels et alimentent CA réel, silence, ventes mensuelles et
+ *   données produit — matching par nom de client normalisé
  */
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const pasFile = formData.get("pas") as File | null;
+  const salesforceFile = formData.get("salesforce") as File | null;
+  const accountDetailFile = formData.get("accountDetail") as File | null;
+  const invoiceProductsFile = formData.get("invoiceProducts") as File | null;
   const kpiFile = formData.get("kpi") as File | null;
   const monthlyFile = formData.get("monthly") as File | null;
   const callsFile = formData.get("calls") as File | null;
   const growthFile = formData.get("growth") as File | null;
   const importedBy = (formData.get("importedBy") as string) || null;
 
-  if (!pasFile) {
-    return NextResponse.json({ error: "Fichier PAS (SUIVI COMPTES) requis." }, { status: 400 });
+  if (!pasFile && !salesforceFile) {
+    return NextResponse.json(
+      { error: "Un référentiel compte est requis : fichier PAS ou Rapport Salesforce." },
+      { status: 400 }
+    );
   }
 
   const supabase = createAdminClient();
   const allErrors: ImportLogEntry[] = [];
   let rowsTotal = 0;
   let rowsSuccess = 0;
+  const mainFilename = pasFile?.name ?? salesforceFile!.name;
 
   try {
-    const pasBuffer = await pasFile.arrayBuffer();
-    const rawPasRows = parsePasWorkbook(pasBuffer);
-    const pasPatches = rawPasRows.map(mapPasRow);
-    const { valid: validPas, errors: pasErrors } = validatePasRows(pasPatches);
-    allErrors.push(...pasErrors);
-    rowsTotal += rawPasRows.length;
-
     const accountsByRef = new Map<string, Record<string, unknown>>();
-    for (const row of validPas) {
-      const { _row, _comment, ...patch } = row as typeof row & { _comment?: string | null };
-      accountsByRef.set(patch.external_ref!, { ...patch, _comment });
+
+    if (pasFile) {
+      const pasBuffer = await pasFile.arrayBuffer();
+      const rawPasRows = parsePasWorkbook(pasBuffer);
+      const pasPatches = rawPasRows.map(mapPasRow);
+      const { valid: validPas, errors: pasErrors } = validatePasRows(pasPatches);
+      allErrors.push(...pasErrors);
+      rowsTotal += rawPasRows.length;
+
+      for (const row of validPas) {
+        const { _row, _comment, ...patch } = row as typeof row & { _comment?: string | null };
+        accountsByRef.set(patch.external_ref!, { ...patch, _comment });
+      }
+
+      // DATA KPI 2026 — dates de commande + commercial, déjà dans le PAS
+      const kpiDataRows = parseKpiDataSheet(pasBuffer);
+      for (const row of kpiDataRows) {
+        const { externalRef, patch } = mapKpiDataRow(row);
+        const existing = accountsByRef.get(externalRef);
+        if (existing) Object.assign(existing, patch, { owner: existing.owner ?? patch.owner });
+      }
+      rowsTotal += kpiDataRows.length;
+
+      // DATA PRODUITS 2025 — nb de références achetées, pour le score
+      const refsBoughtByCode = parseProduitsSheet(pasBuffer);
+      for (const [code, count] of refsBoughtByCode) {
+        const existing = accountsByRef.get(code);
+        if (existing) existing.nb_refs_achetees_2025 = count;
+      }
     }
 
-    // 1b) DATA KPI 2026 sheet — embedded in the same PAS file, no extra
-    // upload needed. Only source with real first/last order dates.
-    const kpiDataRows = parseKpiDataSheet(pasBuffer);
-    for (const row of kpiDataRows) {
-      const { externalRef, patch } = mapKpiDataRow(row);
-      const existing = accountsByRef.get(externalRef);
-      if (existing) Object.assign(existing, patch, { owner: existing.owner ?? patch.owner });
-    }
-    rowsTotal += kpiDataRows.length;
+    if (salesforceFile) {
+      const sfBuffer = await salesforceFile.arrayBuffer();
+      const rawSfRows = parseSalesforceReport(sfBuffer);
+      rowsTotal += rawSfRows.length;
 
-    // 1c) DATA PRODUITS 2025 sheet — nb de références achetées par client,
-    // alimente le critère "références manquantes" du score de ciblage
-    const refsBoughtByCode = parseProduitsSheet(pasBuffer);
-    for (const [code, count] of refsBoughtByCode) {
-      const existing = accountsByRef.get(code);
-      if (existing) existing.nb_refs_achetees_2025 = count;
+      for (const row of rawSfRows) {
+        if (!row.name) continue;
+        const externalRef = row.externalRef || `NAME:${normalizeName(row.name)}`;
+        const patch: Record<string, unknown> = {
+          external_ref: externalRef,
+          name: row.name,
+          segment: (["A", "B", "C", "D", "E"] as const).includes(row.segment as never)
+            ? row.segment
+            : null,
+          potentiel_boites: row.potentielBoites,
+          city: row.city,
+          postal_code: row.postalCode,
+          department_code: departmentCodeFromPostal(row.postalCode),
+          email: row.email || row.email2,
+          telephone: row.telephone || row.mobile,
+          nom_concurrent: row.competitor || null,
+        };
+        const existing = accountsByRef.get(externalRef);
+        if (existing) Object.assign(existing, patch);
+        else accountsByRef.set(externalRef, patch);
+      }
     }
 
     if (kpiFile) {
@@ -93,22 +140,19 @@ export async function POST(req: NextRequest) {
         const { _row, ...patch } = row;
         const existing = accountsByRef.get(patch.external_ref!);
         if (existing) {
-          Object.assign(existing, patch, {
-            // ne pas laisser un statut KPI vide écraser un statut déjà connu
-            status: patch.status ?? existing.status,
-          });
+          Object.assign(existing, patch, { status: patch.status ?? existing.status });
         } else {
           accountsByRef.set(patch.external_ref!, patch);
         }
       }
     }
 
-    // 1) create the import row first so accounts can reference it
+    // create the import row first so accounts can reference it
     const { data: importRow, error: importInsertError } = await supabase
       .from("imports")
       .insert({
-        filename: pasFile.name,
-        source: "PAS",
+        filename: mainFilename,
+        source: pasFile ? "PAS" : "SALESFORCE",
         imported_by: importedBy,
         status: "success",
         rows_total: rowsTotal,
@@ -123,7 +167,7 @@ export async function POST(req: NextRequest) {
       throw new Error(importInsertError?.message ?? "Échec de création de l'import.");
     }
 
-    // 2) upsert accounts by external_ref
+    // upsert accounts by external_ref
     const accountsPayload = Array.from(accountsByRef.values()).map(({ _comment, ...acc }) => ({
       ...acc,
       import_id: importRow.id,
@@ -139,7 +183,7 @@ export async function POST(req: NextRequest) {
     }
     rowsSuccess = upserted?.length ?? 0;
 
-    // 3) push PAS comments into account_actions (avoid duplicating identical comments)
+    // comments issus du PAS (si présent)
     const refToId = new Map((upserted ?? []).map((a) => [a.external_ref, a.id] as const));
     const comments = Array.from(accountsByRef.entries())
       .filter(([, v]) => v._comment)
@@ -150,22 +194,17 @@ export async function POST(req: NextRequest) {
         created_by: importedBy,
       }))
       .filter((c) => c.account_id);
+    if (comments.length > 0) await supabase.from("account_actions").insert(comments);
 
-    if (comments.length > 0) {
-      await supabase.from("account_actions").insert(comments);
-    }
-
-    // all accounts (post-upsert) needed for name-matching the file-based
-    // sources below, which don't carry a stable account code
+    // tous les comptes (post-upsert), nécessaires pour le matching par nom
+    // des sources suivantes, qui n'ont pas de code compte stable
     const { data: allAccounts } = await supabase.from("accounts").select("id, name");
     const idByName = new Map((allAccounts ?? []).map((a) => [normalizeName(a.name), a.id] as const));
 
-    // 3b) optional monthly sales file — matched by normalized account name
     if (monthlyFile) {
       const monthlyBuffer = await monthlyFile.arrayBuffer();
       const monthlyRows = parseMonthlySalesWorkbook(monthlyBuffer);
       rowsTotal += monthlyRows.length;
-
       const monthlyPayload = [];
       let monthlyMatched = 0;
       for (const row of monthlyRows) {
@@ -177,22 +216,19 @@ export async function POST(req: NextRequest) {
         monthlyMatched++;
         monthlyPayload.push({ account_id: accountId, year: row.year, month: row.month, ca: row.ca });
       }
-
       if (monthlyPayload.length > 0) {
-        const { error: monthlyError } = await supabase
+        const { error } = await supabase
           .from("account_monthly_sales")
           .upsert(monthlyPayload, { onConflict: "account_id,year,month" });
-        if (monthlyError) allErrors.push({ row: 0, message: `Ventes mensuelles : ${monthlyError.message}` });
+        if (error) allErrors.push({ row: 0, message: `Ventes mensuelles : ${error.message}` });
       }
       rowsSuccess += monthlyMatched;
     }
 
-    // 3c) optional calls file — last call date / days since last call
     if (callsFile) {
       const callsBuffer = await callsFile.arrayBuffer();
       const rawCallsRows = parseCallsWorkbook(callsBuffer);
       rowsTotal += rawCallsRows.length;
-
       let callsMatched = 0;
       for (const row of rawCallsRows) {
         const { name, patch } = mapCallsRow(row);
@@ -210,12 +246,10 @@ export async function POST(req: NextRequest) {
       rowsSuccess += callsMatched;
     }
 
-    // 3d) optional growth-by-brand file — per-brand CA/qty LY vs CY
     if (growthFile) {
       const growthBuffer = await growthFile.arrayBuffer();
       const rawGrowthRows = parseGrowthByBrandWorkbook(growthBuffer);
       rowsTotal += rawGrowthRows.length;
-
       const productsPayload = [];
       let growthMatched = 0;
       for (const row of rawGrowthRows) {
@@ -228,22 +262,129 @@ export async function POST(req: NextRequest) {
         growthMatched++;
         productsPayload.push({ account_id: accountId, ...product });
       }
-
       if (productsPayload.length > 0) {
-        const { error: productsError } = await supabase
+        const { error } = await supabase
           .from("account_products")
           .upsert(productsPayload, { onConflict: "account_id,brand,period" });
-        if (productsError) allErrors.push({ row: 0, message: `Croissance par marque : ${productsError.message}` });
+        if (error) allErrors.push({ row: 0, message: `Croissance par marque : ${error.message}` });
       }
       rowsSuccess += growthMatched;
     }
 
-    // 4) finalize import log
+    // ACCOUNT DETAIL — factures réelles : CA par an, dates de commande, silence
+    let invoiceToCustomer = new Map<string, string>(); // invoiceNumber -> customerName normalisé
+    if (accountDetailFile) {
+      const buf = await accountDetailFile.arrayBuffer();
+      const invoices = parseAccountDetail(buf);
+      rowsTotal += invoices.length;
+      invoiceToCustomer = new Map(invoices.map((i) => [i.invoiceNumber, normalizeName(i.customerName)]));
+
+      const byAccount = new Map<
+        string,
+        { ca: Record<number, number>; first: string; last: string; matched: boolean }
+      >();
+      let invoiceMatched = 0;
+      for (const inv of invoices) {
+        const key = normalizeName(inv.customerName);
+        const accountId = idByName.get(key);
+        if (!accountId) {
+          allErrors.push({ row: 0, message: `Compte "${inv.customerName}" introuvable — facture ignorée` });
+          continue;
+        }
+        invoiceMatched++;
+        const year = Number(inv.date.slice(0, 4));
+        const cur = byAccount.get(accountId) ?? { ca: {}, first: inv.date, last: inv.date, matched: true };
+        cur.ca[year] = (cur.ca[year] ?? 0) + inv.totalExclTax;
+        if (inv.date < cur.first) cur.first = inv.date;
+        if (inv.date > cur.last) cur.last = inv.date;
+        byAccount.set(accountId, cur);
+
+        // ventes mensuelles réelles à partir des factures
+        const month = Number(inv.date.slice(5, 7));
+        await supabase.from("account_monthly_sales").upsert(
+          { account_id: accountId, year, month, ca: inv.totalExclTax },
+          { onConflict: "account_id,year,month" }
+        );
+      }
+      rowsSuccess += invoiceMatched;
+
+      const now = Date.now();
+      for (const [accountId, agg] of byAccount) {
+        const silenceDays = Math.floor((now - new Date(agg.last).getTime()) / 86400000);
+        await supabase
+          .from("accounts")
+          .update({
+            ca_2024: agg.ca[2024] ?? null,
+            ca_2025: agg.ca[2025] ?? null,
+            ca_2026_ytd: agg.ca[2026] ?? null,
+            first_order_date: agg.first,
+            last_order_date: agg.last,
+            jours_silence: silenceDays,
+          })
+          .eq("id", accountId);
+      }
+    }
+
+    // INVOICE NUMBER ET PRODUCT — lignes produit réelles, jointes via le
+    // n° de facture d'ACCOUNT DETAIL pour retrouver le compte
+    if (invoiceProductsFile) {
+      const buf = await invoiceProductsFile.arrayBuffer();
+      const lines = parseInvoiceProducts(buf);
+      rowsTotal += lines.length;
+
+      if (invoiceToCustomer.size === 0) {
+        allErrors.push({
+          row: 0,
+          message: "Fichier ACCOUNT DETAIL requis pour attribuer les lignes produit à un compte — ignoré",
+        });
+      } else {
+        const productTotals = new Map<string, { qty: number; value: number }>(); // accountId|brand
+        const boitesByAccount = new Map<string, number>();
+        let linesMatched = 0;
+
+        for (const line of lines) {
+          const customerKey = invoiceToCustomer.get(line.invoiceNumber);
+          const accountId = customerKey ? idByName.get(customerKey) : undefined;
+          if (!accountId) continue;
+          linesMatched++;
+          const brand = canonicalizeBrand(line.description);
+          const key = `${accountId}|${brand}`;
+          const cur = productTotals.get(key) ?? { qty: 0, value: 0 };
+          cur.qty += line.qty;
+          cur.value += line.valueEur;
+          productTotals.set(key, cur);
+
+          if (line.date.startsWith(String(new Date().getFullYear()))) {
+            boitesByAccount.set(accountId, (boitesByAccount.get(accountId) ?? 0) + line.qty);
+          }
+        }
+        rowsSuccess += linesMatched;
+
+        const productsPayload = Array.from(productTotals.entries()).map(([key, v]) => {
+          const [accountId, brand] = key.split("|");
+          return {
+            account_id: accountId,
+            brand,
+            sales_value_cy: v.value,
+            qty_ordered_cy: v.qty,
+            period: "Factures réelles",
+          };
+        });
+        if (productsPayload.length > 0) {
+          const { error } = await supabase
+            .from("account_products")
+            .upsert(productsPayload, { onConflict: "account_id,brand,period" });
+          if (error) allErrors.push({ row: 0, message: `Lignes produit : ${error.message}` });
+        }
+
+        for (const [accountId, boites] of boitesByAccount) {
+          await supabase.from("accounts").update({ realise_boites: boites }).eq("id", accountId);
+        }
+      }
+    }
+
     const finalStatus = allErrors.length === 0 ? "success" : rowsSuccess > 0 ? "partial" : "failed";
-    await supabase
-      .from("imports")
-      .update({ rows_success: rowsSuccess, status: finalStatus })
-      .eq("id", importRow.id);
+    await supabase.from("imports").update({ rows_success: rowsSuccess, status: finalStatus }).eq("id", importRow.id);
 
     return NextResponse.json({
       importId: importRow.id,
@@ -256,8 +397,8 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erreur d'import inconnue.";
     await supabase.from("imports").insert({
-      filename: pasFile.name,
-      source: "PAS",
+      filename: mainFilename,
+      source: pasFile ? "PAS" : "SALESFORCE",
       imported_by: importedBy,
       status: "failed",
       rows_total: rowsTotal,

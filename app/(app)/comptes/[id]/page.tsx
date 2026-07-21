@@ -5,6 +5,7 @@ import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
 import { AccountActionsPanel } from "@/components/comptes/AccountActionsPanel";
 import { ForecastPanel } from "@/components/comptes/ForecastPanel";
 import { TargetingScoreCard } from "@/components/comptes/TargetingScoreCard";
+import { ObjectivesCard } from "@/components/comptes/ObjectivesCard";
 import { createClient } from "@/lib/supabase/server";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import type { Account, AccountAction, AccountForecast, AccountProduct } from "@/types/database";
@@ -32,9 +33,6 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
   const { data: forecastsRaw } = await supabase.from("account_forecasts").select("*").eq("account_id", id);
   const forecasts = (forecastsRaw ?? []) as AccountForecast[];
 
-  const ecart = (acc.realise_boites ?? 0) - (acc.objectif_boites ?? 0);
-  const atteinte = acc.objectif_boites ? (acc.realise_boites ?? 0) / acc.objectif_boites : 0;
-
   return (
     <div>
       <TopBar title={acc.name} subtitle={`${acc.external_ref} · ${acc.city ?? "Ville inconnue"} ${acc.postal_code ?? ""}`} />
@@ -59,26 +57,21 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
               <Row label="Score" value={formatNumber(acc.score)} />
               <Row label="Silence (jours)" value={formatNumber(acc.jours_silence)} />
               <Row label="Dernier appel" value={acc.last_call_date ? new Date(acc.last_call_date).toLocaleDateString("fr-FR") : "—"} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader><CardTitle>Objectif / Réalisé / Écart</CardTitle></CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <Row label="Objectif (boîtes)" value={formatNumber(acc.objectif_boites)} />
-              <Row label="Réalisé (boîtes)" value={formatNumber(acc.realise_boites)} />
-              <Row
-                label="Écart"
-                value={`${ecart > 0 ? "+" : ""}${formatNumber(ecart)}`}
-                valueClassName={ecart < 0 ? "text-danger" : "text-success"}
-              />
-              <Row label="% Atteinte" value={formatPct(atteinte)} />
-              <Row label="Évolution 25→26" value={formatPct(acc.evolution_pct)} />
+              {acc.email && <Row label="Email" value={acc.email} />}
+              {acc.telephone && <Row label="Téléphone" value={acc.telephone} />}
+              {acc.nom_concurrent && <Row label="Concurrent" value={acc.nom_concurrent} />}
               {acc.action_recommandee && (
                 <div className="mt-3 rounded-lg bg-primary-50 px-3 py-2 text-primary-700">
                   {acc.action_recommandee}
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Objectifs</CardTitle></CardHeader>
+            <CardContent>
+              <ObjectivesCard account={acc} />
             </CardContent>
           </Card>
 
