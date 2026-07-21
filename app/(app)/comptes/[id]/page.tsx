@@ -6,9 +6,10 @@ import { ForecastPanel } from "@/components/comptes/ForecastPanel";
 import { TargetingScoreCard } from "@/components/comptes/TargetingScoreCard";
 import { ObjectivesCard } from "@/components/comptes/ObjectivesCard";
 import { EditableAccountCard } from "@/components/comptes/EditableAccountCard";
+import { SegmentBadge } from "@/components/ui/Badge";
 import { createClient } from "@/lib/supabase/server";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
-import type { Account, AccountAction, AccountForecast, AccountProduct } from "@/types/database";
+import type { Account, AccountAction, AccountForecast, AccountProduct, Hcp } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,9 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
 
   const { data: forecastsRaw } = await supabase.from("account_forecasts").select("*").eq("account_id", id);
   const forecasts = (forecastsRaw ?? []) as AccountForecast[];
+
+  const { data: hcpsRaw } = await supabase.from("hcps").select("*").eq("account_id", id).order("name");
+  const hcps = (hcpsRaw ?? []) as Hcp[];
 
   const refsAcheteesCount = products.filter((p) => (p.qty_ordered_cy ?? 0) > 0 || (p.sales_value_cy ?? 0) > 0).length;
 
@@ -98,6 +102,40 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
             </CardHeader>
             <ForecastPanel accountId={id} account={acc} initialForecasts={forecasts} kind="prevision" />
           </Card>
+
+          {hcps.length > 0 && (
+            <Card>
+              <CardHeader><CardTitle>Médecins (HCP)</CardTitle></CardHeader>
+              <CardContent>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="py-2 font-medium">Nom</th>
+                      <th className="py-2 font-medium">Seg</th>
+                      <th className="py-2 font-medium">RPPS</th>
+                      <th className="py-2 font-medium text-right">Potentiel (boîtes)</th>
+                      <th className="py-2 font-medium">Contact</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hcps.map((h) => (
+                      <tr key={h.id} className="border-b border-border last:border-0">
+                        <td className="py-2 font-medium text-foreground">{h.name}</td>
+                        <td className="py-2"><SegmentBadge segment={h.segment} /></td>
+                        <td className="py-2 text-muted-foreground">{h.rpps ?? "—"}</td>
+                        <td className="py-2 text-right">{formatNumber(h.potentiel_boites)}</td>
+                        <td className="py-2 text-muted-foreground">
+                          {h.email && <div>{h.email}</div>}
+                          {h.telephone && <div>{h.telephone}</div>}
+                          {!h.email && !h.telephone && "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
 
           {products.length > 0 && (
             <Card>
