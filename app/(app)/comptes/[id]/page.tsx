@@ -8,6 +8,8 @@ import { ObjectivesCard } from "@/components/comptes/ObjectivesCard";
 import { EditableAccountCard } from "@/components/comptes/EditableAccountCard";
 import { HcpTable } from "@/components/comptes/HcpTable";
 import { ProductsTable } from "@/components/comptes/ProductsTable";
+import { OrderHistoryCard } from "@/components/comptes/OrderHistoryCard";
+import { allocateToHcps } from "@/lib/forecast";
 import { createClient } from "@/lib/supabase/server";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import type { Account, AccountAction, AccountForecast, AccountProduct, Hcp } from "@/types/database";
@@ -38,7 +40,39 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
   const { data: hcpsRaw } = await supabase.from("hcps").select("*").eq("account_id", id).order("name");
   const hcps = (hcpsRaw ?? []) as Hcp[];
 
+  const { data: monthlyRaw } = await supabase
+    .from("account_monthly_sales")
+    .select("year, month, ca")
+    .eq("account_id", id);
+  const monthlySales = (monthlyRaw ?? []) as { year: number; month: number; ca: number }[];
+
   const refsAcheteesCount = products.filter((p) => (p.qty_ordered_cy ?? 0) > 0 || (p.sales_value_cy ?? 0) > 0).length;
+
+  // Répartition de la prévision à venir (mois >= mois courant) sur les médecins
+  // du compte, au prorata de leur potentiel — pour que "les médecins dans le
+  // mois aient une prévision" jusque dans la fiche.
+  const now = new Date();
+  const nowIdx = now.getFullYear() * 12 + (now.getMonth() + 1);
+  const upcomingPrevision = forecasts
+    .filter((f) => f.kind === "prevision" && f.year * 12 + f.month >= nowIdx)
+    .reduce(
+      (acc, f) => {
+        acc.boites += f.boites_prevues ?? 0;
+        acc.ca += f.ca_prevu ?? 0;
+        return acc;
+      },
+      { boites: 0, ca: 0 }
+    );
+  const hcpAllocation = new Map<string, { boites: number; ca: number }>();
+  if ((upcomingPrevision.ca > 0 || upcomingPrevision.boites > 0) && hcps.length > 0) {
+    for (const share of allocateToHcps(
+      hcps.map((h) => ({ id: h.id, name: h.name, potentiel_boites: h.potentiel_boites })),
+      upcomingPrevision.boites,
+      upcomingPrevision.ca
+    )) {
+      hcpAllocation.set(share.hcpId, { boites: share.boites, ca: share.ca });
+    }
+  }
 
   return (
     <div>
@@ -101,14 +135,23 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
             <CardHeader>
               <CardTitle>Prévisionnel mensuel</CardTitle>
             </CardHeader>
-            <ForecastPanel accountId={id} account={acc} initialForecasts={forecasts} kind="prevision" />
+            <ForecastPanel accountId={id} account={acc} initialForecasts={forecasts} kind="prevision" monthlySales={monthlySales} />
           </Card>
+
+          <Card className="overflow-hidden">
+            <CardHeader>
+              <CardTitle>Réalisé mensuel</CardTitle>
+            </CardHeader>
+            <ForecastPanel accountId={id} account={acc} initialForecasts={forecasts} kind="realise" monthlySales={monthlySales} />
+          </Card>
+
+          <OrderHistoryCard sales={monthlySales} />
 
           {hcps.length > 0 && (
             <Card>
               <CardHeader><CardTitle>Médecins (HCP)</CardTitle></CardHeader>
               <CardContent>
-                <HcpTable hcps={hcps} />
+                <HcpTable hcps={hcps} allocation={hcpAllocation} />
               </CardContent>
             </Card>
           )}

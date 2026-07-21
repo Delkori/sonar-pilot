@@ -4,10 +4,11 @@ import { useMemo, useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import { suggestMonthlyForecast } from "@/lib/forecast";
+import { PRIX_MOYEN_BOITE } from "@/lib/scoring";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import type { Account, AccountForecast, ForecastKind } from "@/types/database";
-import { Plus, Trash2, Loader2, Sparkles, CalendarRange, CalendarPlus } from "lucide-react";
+import { Plus, Trash2, Loader2, Sparkles, CalendarRange, CalendarPlus, DownloadCloud } from "lucide-react";
 
 const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"];
 
@@ -26,11 +27,13 @@ export function ForecastPanel({
   account,
   initialForecasts,
   kind,
+  monthlySales = [],
 }: {
   accountId: string;
   account: Account;
   initialForecasts: AccountForecast[];
   kind: ForecastKind;
+  monthlySales?: { year: number; month: number; ca: number }[];
 }) {
   const [forecasts, setForecasts] = useState(
     initialForecasts.filter((f) => f.kind === kind).sort((a, b) => a.year - b.year || a.month - b.month)
@@ -125,6 +128,34 @@ export function ForecastPanel({
           [...prev, ...(data as AccountForecast[])].sort((a, b) => a.year - b.year || a.month - b.month)
         );
         setAnnualTotal("");
+      }
+    });
+  }
+
+  function fillFromOrders() {
+    const caParBoite =
+      account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
+        ? account.ca_2026_ytd / account.realise_boites
+        : PRIX_MOYEN_BOITE;
+    const rows = monthlySales
+      .filter((s) => s.ca > 0 && !forecasts.some((f) => f.year === s.year && f.month === s.month))
+      .map((s) => ({
+        account_id: accountId,
+        year: s.year,
+        month: s.month,
+        kind,
+        boites_prevues: caParBoite > 0 ? Math.round(s.ca / caParBoite) : 0,
+        ca_prevu: Math.round(s.ca),
+        note: "Réalisé recopié depuis les commandes",
+      }));
+    if (rows.length === 0) return;
+    const supabase = createClient();
+    startTransition(async () => {
+      const { data, error } = await supabase.from("account_forecasts").insert(rows).select();
+      if (!error && data) {
+        setForecasts((prev) =>
+          [...prev, ...(data as AccountForecast[])].sort((a, b) => a.year - b.year || a.month - b.month)
+        );
       }
     });
   }
@@ -240,7 +271,7 @@ export function ForecastPanel({
             >
               <CalendarPlus size={14} /> Toute l&apos;année
             </button>
-            {kind === "prevision" ? (
+            {kind === "prevision" && (
               <button
                 onClick={suggestNext3Months}
                 disabled={isPending}
@@ -249,7 +280,8 @@ export function ForecastPanel({
               >
                 <Sparkles size={14} /> Suggérer 3 mois
               </button>
-            ) : (
+            )}
+            {kind === "objectif" && (
               <div className="flex items-center gap-1">
                 <input
                   type="number"
@@ -268,6 +300,16 @@ export function ForecastPanel({
                 </button>
               </div>
             )}
+            {kind === "realise" && monthlySales.length > 0 && (
+              <button
+                onClick={fillFromOrders}
+                disabled={isPending}
+                title="Recopie le CA réellement facturé (commandes importées) dans le réalisé, pour les mois pas encore saisis"
+                className="flex items-center gap-1 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-sm font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
+              >
+                <DownloadCloud size={14} /> Remplir depuis les commandes
+              </button>
+            )}
           </>
         )}
         {isPending && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
@@ -280,6 +322,8 @@ export function ForecastPanel({
         <p className="px-4 py-6 text-center text-sm text-muted-foreground">
           {kind === "objectif"
             ? "Aucun objectif défini — saisissez un objectif annuel ci-dessus pour le répartir sur les 12 mois, ou ajoutez un mois manuellement."
+            : kind === "realise"
+            ? "Aucun réalisé saisi — cliquez \"Remplir depuis les commandes\" pour recopier le CA facturé, ou ajoutez un mois manuellement."
             : "Aucune prévision — cliquez \"Suggérer 3 mois\" pour une proposition basée sur ce compte, ou ajoutez un mois manuellement."}
         </p>
       ) : (

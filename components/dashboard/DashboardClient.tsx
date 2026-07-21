@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { PriorityAccountsTable } from "@/components/dashboard/PriorityAccountsTable";
+import { QuickActionCard } from "@/components/dashboard/QuickActionCard";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { suggestMonthlyForecast } from "@/lib/forecast";
 import { computeTargetingScore, ACTION_META } from "@/lib/scoring";
@@ -21,6 +22,8 @@ import {
   Loader2,
   Wallet,
   Target,
+  CalendarCheck,
+  UserPlus,
 } from "lucide-react";
 import type { Account } from "@/types/database";
 import Link from "next/link";
@@ -170,6 +173,27 @@ export function DashboardClient({
     (a) => a.status === "lost" || a.status === "a_risque" || (a.jours_silence ?? 0) > 90
   );
   const caMoyenParCompteActif = clientsActifs > 0 ? caYear / clientsActifs : 0;
+
+  // ── Suivi prévision / prospects
+  const accountsAvecPrevision = useMemo(() => new Set(forecasts.map((f) => f.account_id)), [forecasts]);
+  const clientsActifsEnPrevision = accounts.filter(
+    (a) => a.status === "actif" && accountsAvecPrevision.has(a.id)
+  ).length;
+  const nouveauxProspects = accounts.filter((a) => a.status === "new").length;
+
+  // ── Suivi Premium / Pro / Pro+ (tier stocké dans price_list)
+  const tierStats = useMemo(() => {
+    const tiers = ["Premium", "Pro", "Pro+"] as const;
+    const caField = YEAR_FIELDS[year];
+    return tiers.map((tier) => {
+      const list = accounts.filter((a) => a.price_list === tier);
+      const ca = list.reduce((s, a) => s + ((a[caField] as number | null) ?? 0), 0);
+      const objectif = list.reduce((s, a) => s + (a.objectif_boites ?? 0), 0);
+      const potentiel = list.reduce((s, a) => s + ((a.potentiel_boites ?? 0) * 133.66), 0);
+      return { tier, count: list.length, ca, objectif, potentiel };
+    });
+  }, [accounts, year]);
+  const hasTierData = tierStats.some((t) => t.count > 0);
 
   const accountsAvecHistorique = accounts.filter(
     (a) => a.ca_2024 !== null || a.ca_2025 !== null || a.ca_2026_ytd !== null
@@ -399,6 +423,63 @@ export function DashboardClient({
           <KpiCard label="Comptes à risque" value={formatNumber(clientsAlerte.length)} tone="negative" icon={AlertTriangle} />
         </div>
 
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard
+            label="Clients actifs en prévision"
+            value={formatNumber(clientsActifsEnPrevision)}
+            trend={`sur ${clientsActifs} actifs`}
+            icon={CalendarCheck}
+          />
+          <KpiCard label="Nouveaux prospects" value={formatNumber(nouveauxProspects)} icon={UserPlus} />
+          <KpiCard
+            label="Comptes avec prévisionnel"
+            value={formatNumber(accountsAvecPrevision.size)}
+            trend={`sur ${accounts.length} comptes`}
+            icon={Target}
+          />
+          <KpiCard label="Comptes perdus" value={formatNumber(accounts.filter((a) => a.status === "lost").length)} tone="negative" icon={UserX} />
+        </div>
+
+        {hasTierData && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Suivi Premium / Pro / Pro+</CardTitle>
+                <CardDescription>Comptes sous contrat de partenariat — CA {year} vs potentiel</CardDescription>
+              </div>
+              <Crown size={18} className="text-primary" />
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {tierStats.map((t) => {
+                  const atteinte = t.potentiel > 0 ? Math.min(t.ca / t.potentiel, 1) : 0;
+                  return (
+                    <div key={t.tier} className="rounded-lg border border-border p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold text-foreground">{t.tier}</span>
+                        <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                          {t.count} compte(s)
+                        </span>
+                      </div>
+                      <p className="mt-2 text-lg font-semibold text-foreground">{formatEUR(t.ca)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Objectif {formatNumber(t.objectif)} boîtes · Potentiel {formatEUR(t.potentiel)}
+                      </p>
+                      <div className="mt-2 h-1.5 rounded-full bg-surface-muted">
+                        <div
+                          className={`h-1.5 rounded-full ${atteinte >= 0.75 ? "bg-success" : "bg-primary"}`}
+                          style={{ width: `${atteinte * 100}%` }}
+                        />
+                      </div>
+                      <p className="mt-1 text-[10px] text-muted-foreground">{formatPct(atteinte)} du potentiel capté</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {month === null && hasMonthlyData && (
           <Card>
             <CardHeader>
@@ -504,26 +585,29 @@ export function DashboardClient({
         )}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Card className="lg:col-span-1">
-            <CardHeader>
-              <CardTitle>Vue management</CardTitle>
-              <CardDescription>Synthèse du portefeuille</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Comptes suivis</span>
-                <span className="font-medium">{formatNumber(accounts.length)}</span>
-              </div>
-              {(["A", "B", "C", "D", "E"] as const).map((seg) => (
-                <div key={seg} className="flex justify-between">
-                  <span className="text-muted-foreground">Segment {seg}</span>
-                  <span className="font-medium">
-                    {accounts.filter((a) => a.segment === seg).length} · {formatEUR(caParSegment[seg])}
-                  </span>
+          <div className="space-y-4 lg:col-span-1">
+            <QuickActionCard accounts={accounts} />
+            <Card>
+              <CardHeader>
+                <CardTitle>Vue management</CardTitle>
+                <CardDescription>Synthèse du portefeuille</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Comptes suivis</span>
+                  <span className="font-medium">{formatNumber(accounts.length)}</span>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
+                {(["A", "B", "C", "D", "E"] as const).map((seg) => (
+                  <div key={seg} className="flex justify-between">
+                    <span className="text-muted-foreground">Segment {seg}</span>
+                    <span className="font-medium">
+                      {accounts.filter((a) => a.segment === seg).length} · {formatEUR(caParSegment[seg])}
+                    </span>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
 
           <Card className="lg:col-span-2">
             <CardHeader className="flex flex-row items-start justify-between">

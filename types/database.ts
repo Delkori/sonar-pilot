@@ -72,7 +72,7 @@ export type Import = {
 export type AccountAction = {
   id: string;
   account_id: string;
-  type: "commentaire" | "action" | "relance";
+  type: "commentaire" | "action" | "relance" | "offre";
   content: string;
   due_date: string | null;
   done: boolean;
@@ -112,7 +112,7 @@ export type AccountMonthlySale = {
   updated_at: string;
 };
 
-export type ForecastKind = "objectif" | "prevision";
+export type ForecastKind = "objectif" | "prevision" | "realise";
 
 export type AccountForecast = {
   id: string;

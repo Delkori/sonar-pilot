@@ -14,7 +14,7 @@ export function AccountActionsPanel({
 }) {
   const [actions, setActions] = useState(initialActions);
   const [content, setContent] = useState("");
-  const [type, setType] = useState<"commentaire" | "action" | "relance">("commentaire");
+  const [type, setType] = useState<"commentaire" | "action" | "relance" | "offre">("commentaire");
   const [dueDate, setDueDate] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -46,19 +46,20 @@ export function AccountActionsPanel({
     });
   }
 
-  const needsDate = type === "action" || type === "relance";
+  const needsDate = type === "action" || type === "relance" || type === "offre";
 
   return (
     <div>
       <div className="flex flex-wrap gap-2 border-b border-border p-4">
         <select
           value={type}
-          onChange={(e) => setType(e.target.value as "commentaire" | "action" | "relance")}
+          onChange={(e) => setType(e.target.value as "commentaire" | "action" | "relance" | "offre")}
           className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
         >
           <option value="commentaire">Commentaire</option>
           <option value="action">Action</option>
           <option value="relance">Relance</option>
+          <option value="offre">Offre</option>
         </select>
         <input
           value={content}
@@ -101,7 +102,7 @@ export function AccountActionsPanel({
             <div className="flex-1">
               <p className={`text-sm ${a.done ? "text-muted-foreground line-through" : "text-foreground"}`}>{a.content}</p>
               <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                {a.type === "action" ? "Action" : a.type === "relance" ? "Relance" : "Commentaire"} ·{" "}
+                {a.type === "action" ? "Action" : a.type === "relance" ? "Relance" : a.type === "offre" ? "Offre" : "Commentaire"} ·{" "}
                 {new Date(a.created_at).toLocaleDateString("fr-FR")}
                 {a.due_date && (
                   <span className="flex items-center gap-1 text-primary">

@@ -3,13 +3,19 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { autoFillPortfolioForecast, suggestMonthlyForecast } from "@/lib/forecast";
+import { predictPortfolioForecast, suggestMonthlyForecast, allocateToHcps } from "@/lib/forecast";
+import type { HcpLite } from "@/lib/forecast";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
 import type { Opportunity } from "@/lib/opportunities";
+import { computeTargetingScore } from "@/lib/scoring";
 import { SegmentBadge } from "@/components/ui/Badge";
+import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { formatEUR, formatNumber } from "@/lib/utils";
-import type { Account, AccountForecast } from "@/types/database";
-import { GripVertical, Trash2, Loader2, Target, Wand2 } from "lucide-react";
+import type { Account, AccountForecast, Hcp } from "@/types/database";
+import { GripVertical, Trash2, Loader2, Target, Wand2, Stethoscope } from "lucide-react";
+
+type HcpRow = Pick<Hcp, "id" | "account_id" | "name" | "potentiel_boites">;
+type CardSort = "ca" | "boites" | "score" | "nom" | "silence";
 
 const MONTH_LABELS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 
@@ -37,10 +43,12 @@ export function PilotageBoard({
   accounts,
   initialForecasts,
   monthlySales,
+  hcps,
 }: {
   accounts: Account[];
   initialForecasts: AccountForecast[];
   monthlySales: MonthlySale[];
+  hcps: HcpRow[];
 }) {
   const [forecasts, setForecasts] = useState(initialForecasts);
   const [isSaving, setIsSaving] = useState(false);
@@ -48,9 +56,21 @@ export function PilotageBoard({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [horizon, setHorizon] = useState<1 | 3 | 6>(3);
+  const [cardSort, setCardSort] = useState<CardSort>("ca");
 
   const months = useMemo(() => nextMonths(horizon), [horizon]);
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a] as const)), [accounts]);
+  const hcpsByAccount = useMemo(() => {
+    const map = new Map<string, HcpLite[]>();
+    for (const h of hcps) {
+      if (!h.account_id) continue;
+      const lite: HcpLite = { id: h.id, name: h.name, potentiel_boites: h.potentiel_boites };
+      const arr = map.get(h.account_id);
+      if (arr) arr.push(lite);
+      else map.set(h.account_id, [lite]);
+    }
+    return map;
+  }, [hcps]);
 
   const opportunities = useMemo(() => detectOpportunities(accounts), [accounts]);
   const opportunityByAccount = useMemo(
@@ -81,7 +101,24 @@ export function PilotageBoard({
   }, [monthlySales]);
 
   function forecastsFor(year: number, month: number) {
-    return forecasts.filter((f) => f.year === year && f.month === month);
+    const rows = forecasts.filter((f) => f.year === year && f.month === month);
+    return rows.sort((a, b) => {
+      const accA = accountById.get(a.account_id);
+      const accB = accountById.get(b.account_id);
+      switch (cardSort) {
+        case "boites":
+          return (b.boites_prevues ?? 0) - (a.boites_prevues ?? 0);
+        case "nom":
+          return (accA?.name ?? "").localeCompare(accB?.name ?? "");
+        case "score":
+          return (accB ? computeTargetingScore(accB).total : 0) - (accA ? computeTargetingScore(accA).total : 0);
+        case "silence":
+          return (accB?.jours_silence ?? 0) - (accA?.jours_silence ?? 0);
+        case "ca":
+        default:
+          return (b.ca_prevu ?? 0) - (a.ca_prevu ?? 0);
+      }
+    });
   }
 
   async function handleDrop(accountId: string, year: number, month: number) {
@@ -117,20 +154,33 @@ export function PilotageBoard({
 
   async function autoFillPortfolio() {
     setAutoFilling(true);
-    const suggestions = autoFillPortfolioForecast(
+    const predictions = predictPortfolioForecast(
       accounts,
+      hcpsByAccount,
       monthlySales,
       forecasts.map((f) => ({ account_id: f.account_id, year: f.year, month: f.month })),
       months
     );
-    if (suggestions.length === 0) {
+    if (predictions.length === 0) {
       setAutoFilling(false);
       return;
     }
     const supabase = createClient();
+    // La répartition par médecin est calculée pour l'affichage, pas stockée :
+    // seuls le CA et les boîtes au niveau compte partent en base.
     const { data, error } = await supabase
       .from("account_forecasts")
-      .insert(suggestions.map((s) => ({ ...s, kind: "prevision" as const })))
+      .insert(
+        predictions.map((p) => ({
+          account_id: p.account_id,
+          year: p.year,
+          month: p.month,
+          boites_prevues: p.boites_prevues,
+          ca_prevu: p.ca_prevu,
+          note: p.note,
+          kind: "prevision" as const,
+        }))
+      )
       .select();
     setAutoFilling(false);
     if (!error && data) setForecasts((prev) => [...prev, ...(data as AccountForecast[])]);
@@ -199,6 +249,18 @@ export function PilotageBoard({
             {autoFilling ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
             Générer le prévisionnel du portefeuille
           </button>
+          <span className="text-xs text-muted-foreground">Trier les comptes :</span>
+          <select
+            value={cardSort}
+            onChange={(e) => setCardSort(e.target.value as CardSort)}
+            className="rounded-lg border border-border bg-surface px-2 py-1.5 text-xs outline-none focus:border-primary"
+          >
+            <option value="ca">CA prévu</option>
+            <option value="boites">Boîtes prévues</option>
+            <option value="score">Score</option>
+            <option value="silence">Silence</option>
+            <option value="nom">Nom</option>
+          </select>
           <span className="text-xs text-muted-foreground">Horizon :</span>
           {([1, 3, 6] as const).map((h) => (
             <button
@@ -275,14 +337,19 @@ export function PilotageBoard({
                 {monthForecasts.map((f) => {
                   const account = accountById.get(f.account_id);
                   if (!account) return null;
+                  const accHcps = hcpsByAccount.get(account.id) ?? [];
+                  const allocation = allocateToHcps(accHcps, f.boites_prevues ?? 0, f.ca_prevu ?? 0)
+                    .filter((h) => h.ca > 0)
+                    .sort((a, b) => b.ca - a.ca);
                   return (
                     <div key={f.id} className="rounded-lg border border-border bg-surface-muted p-2.5">
                       <div className="flex items-start justify-between gap-1">
                         <Link
                           href={`/comptes/${account.id}`}
-                          className="text-xs font-medium text-foreground hover:text-primary"
+                          className="flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-primary"
                         >
                           {account.name}
+                          <ScoreBadge score={computeTargetingScore(account).total} />
                         </Link>
                         <button
                           onClick={() => removeForecast(f.id)}
@@ -302,6 +369,22 @@ export function PilotageBoard({
                         />
                         €
                       </div>
+                      {allocation.length > 0 && (
+                        <div className="mt-1.5 space-y-0.5 rounded-md bg-surface px-2 py-1">
+                          <p className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                            <Stethoscope size={10} /> Répartition médecins
+                          </p>
+                          {allocation.slice(0, horizon === 1 ? 6 : 3).map((h) => (
+                            <div key={h.hcpId} className="flex items-center justify-between text-[10px] text-muted-foreground">
+                              <span className="truncate">{h.name}</span>
+                              <span className="shrink-0">{formatNumber(h.boites)} b · {formatEUR(h.ca)}</span>
+                            </div>
+                          ))}
+                          {allocation.length > (horizon === 1 ? 6 : 3) && (
+                            <p className="text-[10px] text-muted-foreground/70">+{allocation.length - (horizon === 1 ? 6 : 3)} autre(s)</p>
+                          )}
+                        </div>
+                      )}
                       {f.note && (
                         <p className={`mt-1 text-[10px] text-muted-foreground ${horizon === 1 ? "" : "line-clamp-2"}`}>
                           {f.note}

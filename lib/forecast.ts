@@ -1,5 +1,6 @@
 import type { Account } from "@/types/database";
-import { PRIX_MOYEN_BOITE, computeTargetingScore } from "./scoring";
+import { PRIX_MOYEN_BOITE, computeTargetingScore, ACTION_META } from "./scoring";
+import type { ActionCode } from "./scoring";
 
 export interface SuggestedForecast {
   year: number;
@@ -57,6 +58,160 @@ export interface MonthlySaleRow {
   year: number;
   month: number;
   ca: number;
+}
+
+// ── Modèle prédictif v2 ──────────────────────────────────────────────────
+// Objectif : une prévision réaliste, ancrée sur le vrai rythme de commandes
+// (run-rate) plutôt que sur l'objectif souvent vide, avec une répartition
+// par médecin (HCP) et un plafond au potentiel du compte.
+
+export interface HcpLite {
+  id: string;
+  name: string;
+  potentiel_boites: number | null;
+}
+
+export interface HcpShare {
+  hcpId: string;
+  name: string;
+  boites: number;
+  ca: number;
+}
+
+export interface PredictedForecast {
+  account_id: string;
+  year: number;
+  month: number;
+  boites_prevues: number;
+  ca_prevu: number;
+  note: string;
+  /** Répartition de la prévision du mois sur les médecins du compte. */
+  hcp: HcpShare[];
+}
+
+// Facteur de croissance appliqué au run-rate selon l'action recommandée :
+// un compte à conquérir/développer a plus d'upside qu'un compte déjà fidèle.
+const GROWTH_BY_ACTION: Record<ActionCode, number> = {
+  visite_urgente: 1.3,
+  developper_pdm: 1.25,
+  reconquete: 1.15,
+  cross_sell: 1.15,
+  relance: 1.1,
+  fideliser: 1.0,
+};
+
+export function allocateToHcps(hcps: HcpLite[], boites: number, ca: number): HcpShare[] {
+  if (hcps.length === 0) return [];
+  const totalPot = hcps.reduce((s, h) => s + (h.potentiel_boites ?? 0), 0);
+  return hcps.map((h) => {
+    const share = totalPot > 0 ? (h.potentiel_boites ?? 0) / totalPot : 1 / hcps.length;
+    return { hcpId: h.id, name: h.name, boites: Math.round(boites * share), ca: Math.round(ca * share) };
+  });
+}
+
+/**
+ * Prévision mensuelle prédictive pour un compte :
+ *  - base = run-rate annuel réel (somme des 12 derniers mois de commandes),
+ *    à défaut CA 2026 annualisé, à défaut CA 2025 ; un prospect sans
+ *    historique est amorcé sur 20 % de son potentiel ;
+ *  - amplifiée par un facteur de croissance selon l'action recommandée ;
+ *  - plafonnée à 110 % du potentiel annuel (on ne prévoit pas l'impossible) ;
+ *  - répartie sur les mois cibles selon la saisonnalité observée (lissée),
+ *    puis éclatée par médecin au prorata de leur potentiel.
+ */
+export function predictMonthlyForecast(
+  account: Account,
+  hcps: HcpLite[],
+  sales: MonthlySaleRow[],
+  targetMonths: { year: number; month: number }[]
+): PredictedForecast[] {
+  const score = computeTargetingScore(account);
+  const growth = GROWTH_BY_ACTION[score.action];
+
+  const monthlyTotals = new Array(12).fill(0) as number[];
+  for (const s of sales) monthlyTotals[s.month - 1] += s.ca;
+
+  const runRate = [...sales]
+    .sort((a, b) => b.year * 12 + b.month - (a.year * 12 + a.month))
+    .slice(0, 12)
+    .reduce((s, r) => s + r.ca, 0);
+
+  const monthsElapsed = new Date().getMonth() + 1;
+  let baseAnnual =
+    runRate > 0
+      ? runRate
+      : account.ca_2026_ytd && account.ca_2026_ytd > 0
+      ? account.ca_2026_ytd * (12 / monthsElapsed)
+      : account.ca_2025 ?? 0;
+
+  const potentielAnnual = (account.potentiel_boites ?? 0) * PRIX_MOYEN_BOITE;
+  if (baseAnnual === 0 && potentielAnnual > 0) baseAnnual = potentielAnnual * 0.2;
+
+  let projectedAnnual = baseAnnual * growth;
+  if (potentielAnnual > 0) projectedAnnual = Math.min(projectedAnnual, potentielAnnual * 1.1);
+
+  const caParBoite =
+    account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
+      ? account.ca_2026_ytd / account.realise_boites
+      : PRIX_MOYEN_BOITE;
+
+  const seasonalSum = monthlyTotals.reduce((s, v) => s + v, 0);
+
+  return targetMonths.map((tm) => {
+    // poids saisonnier lissé (60 % saisonnalité réelle, 40 % uniforme) pour
+    // éviter qu'un mois jamais commandé tombe à zéro
+    const weight =
+      seasonalSum > 0 ? 0.6 * (monthlyTotals[tm.month - 1] / seasonalSum) + 0.4 * (1 / 12) : 1 / 12;
+    const ca = Math.round(projectedAnnual * weight);
+    const boites = caParBoite > 0 ? Math.round(ca / caParBoite) : 0;
+    return {
+      account_id: account.id,
+      year: tm.year,
+      month: tm.month,
+      ca_prevu: ca,
+      boites_prevues: boites,
+      note: `${ACTION_META[score.action].label} — prévision IA (run-rate ${Math.round(baseAnnual).toLocaleString("fr-FR")} €/an ×${growth})`,
+      hcp: allocateToHcps(hcps, boites, ca),
+    };
+  });
+}
+
+/**
+ * Applique le modèle prédictif à tout le portefeuille, en sautant les
+ * comptes "lost", ceux dont la prévision ressort à 0 sur toute la période,
+ * et les mois déjà renseignés (jamais d'écrasement).
+ */
+export function predictPortfolioForecast(
+  accounts: Account[],
+  hcpsByAccount: Map<string, HcpLite[]>,
+  sales: MonthlySaleRow[],
+  existing: { account_id: string; year: number; month: number }[],
+  targetMonths: { year: number; month: number }[]
+): PredictedForecast[] {
+  const salesByAccount = new Map<string, MonthlySaleRow[]>();
+  for (const s of sales) {
+    const arr = salesByAccount.get(s.account_id);
+    if (arr) arr.push(s);
+    else salesByAccount.set(s.account_id, [s]);
+  }
+  const existingKey = new Set(existing.map((f) => `${f.account_id}-${f.year}-${f.month}`));
+
+  const out: PredictedForecast[] = [];
+  for (const account of accounts) {
+    if (account.status === "lost") continue;
+    const remaining = targetMonths.filter((tm) => !existingKey.has(`${account.id}-${tm.year}-${tm.month}`));
+    if (remaining.length === 0) continue;
+
+    const preds = predictMonthlyForecast(
+      account,
+      hcpsByAccount.get(account.id) ?? [],
+      salesByAccount.get(account.id) ?? [],
+      remaining
+    );
+    if (preds.every((p) => p.ca_prevu === 0)) continue;
+    out.push(...preds);
+  }
+  return out;
 }
 
 /**
