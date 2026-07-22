@@ -139,9 +139,9 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
                       <span className="text-xs text-muted-foreground">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(a.ca_2025)}</td>
-                  <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(a.ca_2026_ytd)}</td>
-                  <td className="px-3 py-3 text-right text-muted-foreground">{formatNumber(a.potentiel_boites)}</td>
+                  <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(a.ca_2025 ?? 0)}</td>
+                  <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(a.ca_2026_ytd ?? 0)}</td>
+                  <td className="px-3 py-3 text-right text-muted-foreground">{formatNumber(a.potentiel_boites ?? 0)}</td>
                   <td className="px-3 py-3 text-right font-medium text-foreground">{score.total}/100</td>
                   <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(score.caNonCapte)}</td>
                   <td className="px-5 py-3">

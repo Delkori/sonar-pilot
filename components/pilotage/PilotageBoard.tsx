@@ -100,6 +100,31 @@ export function PilotageBoard({
     return map;
   }, [monthlySales]);
 
+  // Synthèse de planification sur la période affichée (mois / trimestre /
+  // semestre selon l'horizon) : combien on planifie, chez qui, prospects,
+  // répartition Premium/Pro/Pro+, et le réalisé de la même période.
+  const periodSummary = useMemo(() => {
+    const keySet = new Set(months.map((m) => `${m.year}-${m.month}`));
+    const rows = forecasts.filter((f) => keySet.has(`${f.year}-${f.month}`));
+    const totalCa = rows.reduce((s, f) => s + (f.ca_prevu ?? 0), 0);
+    const totalBoites = rows.reduce((s, f) => s + (f.boites_prevues ?? 0), 0);
+    const accountIds = new Set(rows.map((r) => r.account_id));
+    const tiers: Record<"Premium" | "Pro" | "Pro+", number> = { Premium: 0, Pro: 0, "Pro+": 0 };
+    let prospects = 0;
+    for (const id of accountIds) {
+      const acc = accountById.get(id);
+      if (!acc) continue;
+      if (acc.status === "new") prospects++;
+      if (acc.price_list === "Premium" || acc.price_list === "Pro" || acc.price_list === "Pro+") {
+        tiers[acc.price_list]++;
+      }
+    }
+    const realise = months.reduce((s, m) => s + (realiseByMonth.get(`${m.year}-${m.month}`) ?? 0), 0);
+    return { totalCa, totalBoites, comptes: accountIds.size, prospects, tiers, realise };
+  }, [forecasts, months, accountById, realiseByMonth]);
+
+  const periodLabel = horizon === 1 ? "ce mois" : horizon === 3 ? "ce trimestre" : "ce semestre";
+
   function forecastsFor(year: number, month: number) {
     const rows = forecasts.filter((f) => f.year === year && f.month === month);
     return rows.sort((a, b) => {
@@ -199,7 +224,29 @@ export function PilotageBoard({
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_1fr]">
+    <div className="space-y-4">
+      {/* ── Encart de planification (adapté à la période) ─────────── */}
+      <div className="rounded-xl border border-border bg-surface p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">Planification — {periodLabel}</h3>
+          <span className="text-xs text-muted-foreground">
+            Horizon : {horizon === 1 ? "1 mois" : horizon === 3 ? "trimestre" : "semestre"}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <SummaryTile label="CA planifié" value={formatEUR(periodSummary.totalCa)} accent />
+          <SummaryTile label="Boîtes planifiées" value={formatNumber(periodSummary.totalBoites)} />
+          <SummaryTile label="Comptes planifiés" value={formatNumber(periodSummary.comptes)} />
+          <SummaryTile label="Dont prospects" value={formatNumber(periodSummary.prospects)} />
+          <SummaryTile
+            label="Premium / Pro / Pro+"
+            value={`${periodSummary.tiers.Premium} / ${periodSummary.tiers.Pro} / ${periodSummary.tiers["Pro+"]}`}
+          />
+          <SummaryTile label="Réalisé (période)" value={formatEUR(periodSummary.realise)} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_1fr]">
       {/* ── Rail opportunités ─────────────────────────────────────── */}
       <div className="flex max-h-[calc(100vh-180px)] flex-col rounded-xl border border-border bg-surface">
         <div className="border-b border-border p-4">
@@ -399,6 +446,16 @@ export function PilotageBoard({
         })}
         </div>
       </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryTile({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className={`rounded-lg border p-3 ${accent ? "border-primary-100 bg-primary-50" : "border-border"}`}>
+      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={`mt-1 text-lg font-semibold ${accent ? "text-primary-700" : "text-foreground"}`}>{value}</p>
     </div>
   );
 }

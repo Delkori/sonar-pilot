@@ -91,12 +91,15 @@ export interface PredictedForecast {
 
 // Facteur de croissance appliqué au run-rate selon l'action recommandée :
 // un compte à conquérir/développer a plus d'upside qu'un compte déjà fidèle.
+// Facteurs volontairement prudents : on part du rythme réel de commandes
+// (run-rate) et on n'ajoute qu'une croissance modérée selon l'action. Objectif :
+// un prévisionnel crédible, pas gonflé.
 const GROWTH_BY_ACTION: Record<ActionCode, number> = {
-  visite_urgente: 1.3,
-  developper_pdm: 1.25,
-  reconquete: 1.15,
-  cross_sell: 1.15,
-  relance: 1.1,
+  visite_urgente: 1.15,
+  developper_pdm: 1.12,
+  reconquete: 1.1,
+  cross_sell: 1.08,
+  relance: 1.05,
   fideliser: 1.0,
 };
 
@@ -145,10 +148,16 @@ export function predictMonthlyForecast(
       : account.ca_2025 ?? 0;
 
   const potentielAnnual = (account.potentiel_boites ?? 0) * PRIX_MOYEN_BOITE;
-  if (baseAnnual === 0 && potentielAnnual > 0) baseAnnual = potentielAnnual * 0.2;
+  // Prospect sans historique : amorce sur une petite fraction du potentiel.
+  if (baseAnnual === 0 && potentielAnnual > 0) baseAnnual = potentielAnnual * 0.1;
 
   let projectedAnnual = baseAnnual * growth;
-  if (potentielAnnual > 0) projectedAnnual = Math.min(projectedAnnual, potentielAnnual * 1.1);
+  // Plafond prudent : on ne prévoit pas plus que ~50 % du potentiel annuel,
+  // tout en ne coupant jamais sous le rythme réel déjà observé (+30 % max).
+  if (potentielAnnual > 0) {
+    const plafond = Math.max(runRate * 1.3, potentielAnnual * 0.5);
+    projectedAnnual = Math.min(projectedAnnual, plafond);
+  }
 
   const caParBoite =
     account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
