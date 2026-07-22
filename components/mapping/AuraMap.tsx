@@ -376,13 +376,13 @@ export function AuraMap({
         </div>
 
         {/* ── Centre : carte SVG ── */}
-        <div className="rounded-xl border border-border bg-surface p-3">
+        <div className="rounded-xl border border-border bg-surface p-3 flex flex-col items-center">
           <p className="mb-2 text-xs font-semibold text-muted-foreground text-center uppercase tracking-wide">
             {selectedDept && selectedDeptFeature
               ? `${selectedDeptFeature.properties.nom} (${selectedDept}) — ${selectedDeptStats?.count ?? 0} comptes`
               : "Cliquez sur un département pour filtrer"}
           </p>
-          <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="w-full" style={{ maxHeight: 420 }}>
+          <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} style={{ maxHeight: 340, maxWidth: 380, width: "100%" }}>
             {geo.features.map((f) => {
               const stats = deptStats.get(f.properties.code);
               const ratio = stats && stats.objectif > 0 ? (stats.realise - stats.objectif) / stats.objectif : null;
