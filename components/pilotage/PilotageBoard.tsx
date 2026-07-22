@@ -445,13 +445,14 @@ export function PilotageBoard({
             ) : (
               <div className="space-y-2.5">
                 {tierTracking.map((t) => (
-                  <Gauge
-                    key={t.tier}
-                    label={`${t.tier} (${t.count})`}
-                    value={t.objectifBoites > 0 ? t.realiseBoites / t.objectifBoites : 0}
-                    left={`${formatNumber(Math.round(t.realiseBoites))} faites`}
-                    right={`/ ${formatNumber(t.objectifBoites)} à faire`}
-                  />
+                  <Link key={t.tier} href={`/comptes?tier=${encodeURIComponent(t.tier)}`} className="block rounded hover:bg-surface-muted">
+                    <Gauge
+                      label={`${t.tier} (${t.count}) →`}
+                      value={t.objectifBoites > 0 ? t.realiseBoites / t.objectifBoites : 0}
+                      left={`${formatNumber(Math.round(t.realiseBoites))} faites`}
+                      right={`/ ${formatNumber(t.objectifBoites)} à faire`}
+                    />
+                  </Link>
                 ))}
               </div>
             )}
@@ -464,9 +465,9 @@ export function PilotageBoard({
             </p>
             <div className="space-y-2">
               {(["Mensuelle", "Bimestrielle", "Trimestrielle", "Espacée", "Unique"] as const).map((k) => (
-                <div key={k}>
+                <Link key={k} href={`/comptes?recurrence=${encodeURIComponent(k)}`} className="block rounded hover:bg-surface-muted">
                   <div className="mb-0.5 flex items-center justify-between text-xs">
-                    <span className="font-medium text-foreground">{k}</span>
+                    <span className="font-medium text-foreground">{k} →</span>
                     <span className="text-muted-foreground">{recurrence[k]} compte(s)</span>
                   </div>
                   <div className="h-1.5 rounded-full bg-surface-muted">
@@ -475,7 +476,7 @@ export function PilotageBoard({
                       style={{ width: `${(recurrence[k] / recurrenceTotal) * 100}%` }}
                     />
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
             <p className="mt-2 text-[10px] text-muted-foreground">Écart moyen entre 2 commandes, sur l&apos;historique importé.</p>

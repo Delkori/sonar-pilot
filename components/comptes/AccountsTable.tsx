@@ -8,6 +8,8 @@ import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import { ACTION_META, computeTargetingScore } from "@/lib/scoring";
+import { RECURRENCE_BUCKETS } from "@/lib/accounts";
+import type { RecurrenceBucket } from "@/lib/accounts";
 import type { Account, AccountStatus, Segment } from "@/types/database";
 
 type ScoredAccount = { account: Account; score: ReturnType<typeof computeTargetingScore> };
@@ -17,6 +19,7 @@ type SortKey =
   | "status"
   | "city"
   | "tier"
+  | "recurrence"
   | "ca_2025"
   | "ca_ytd"
   | "potentiel"
@@ -24,10 +27,23 @@ type SortKey =
   | "ca_non_capte";
 
 const TIER_ORDER: Record<string, number> = { "Pro+": 3, Pro: 2, Premium: 1 };
+const RECU_ORDER: Record<string, number> = { Mensuelle: 5, Bimestrielle: 4, Trimestrielle: 3, Espacée: 2, Unique: 1 };
 
-export function AccountsTable({ accounts }: { accounts: Account[] }) {
+export function AccountsTable({
+  accounts,
+  recurrence = {},
+  initialTier = "all",
+  initialRecurrence = "all",
+}: {
+  accounts: Account[];
+  recurrence?: Record<string, RecurrenceBucket>;
+  initialTier?: string;
+  initialRecurrence?: string;
+}) {
   const [segment, setSegment] = useState<Segment | "all">("all");
   const [status, setStatus] = useState<AccountStatus | "all">("all");
+  const [tier, setTier] = useState<string>(initialTier);
+  const [recu, setRecu] = useState<string>(initialRecurrence);
   const [search, setSearch] = useState("");
 
   const scored = useMemo(() => accounts.map((a) => ({ account: a, score: computeTargetingScore(a) })), [accounts]);
@@ -36,6 +52,8 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
     return scored.filter(({ account: a }) => {
       if (segment !== "all" && a.segment !== segment) return false;
       if (status !== "all" && a.status !== status) return false;
+      if (tier !== "all" && a.price_list !== tier) return false;
+      if (recu !== "all" && recurrence[a.id] !== recu) return false;
       if (search) {
         const q = search.toLowerCase();
         if (!a.name.toLowerCase().includes(q) && !(a.city ?? "").toLowerCase().includes(q) && !(a.postal_code ?? "").includes(q)) {
@@ -44,7 +62,7 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
       }
       return true;
     });
-  }, [scored, segment, status, search]);
+  }, [scored, segment, status, tier, recu, search, recurrence]);
 
   const { sorted, sortKey, dir, toggle } = useSortableTable<ScoredAccount, SortKey>(
     filtered,
@@ -54,6 +72,7 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
       status: (r) => r.account.status,
       city: (r) => r.account.city,
       tier: (r) => (r.account.price_list ? TIER_ORDER[r.account.price_list] ?? 0 : null),
+      recurrence: (r) => RECU_ORDER[recurrence[r.account.id]] ?? null,
       ca_2025: (r) => r.account.ca_2025,
       ca_ytd: (r) => r.account.ca_2026_ytd,
       potentiel: (r) => r.account.potentiel_boites,
@@ -95,6 +114,26 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
           <option value="a_risque">À risque</option>
           <option value="a_suivre">À suivre</option>
         </select>
+        <select
+          value={tier}
+          onChange={(e) => setTier(e.target.value)}
+          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+        >
+          <option value="all">Tous contrats</option>
+          <option value="Premium">Premium</option>
+          <option value="Pro">Pro</option>
+          <option value="Pro+">Pro+</option>
+        </select>
+        <select
+          value={recu}
+          onChange={(e) => setRecu(e.target.value)}
+          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+        >
+          <option value="all">Toute récurrence</option>
+          {RECURRENCE_BUCKETS.map((b) => (
+            <option key={b} value={b}>{b}</option>
+          ))}
+        </select>
         <span className="ml-auto text-xs text-muted-foreground">{sorted.length} compte(s)</span>
       </div>
 
@@ -107,6 +146,7 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
               <SortableTh label="Statut" sortKey="status" activeKey={sortKey} dir={dir} onSort={toggle} />
               <SortableTh label="Ville" sortKey="city" activeKey={sortKey} dir={dir} onSort={toggle} />
               <SortableTh label="Contrat" sortKey="tier" activeKey={sortKey} dir={dir} onSort={toggle} />
+              <SortableTh label="Récurrence" sortKey="recurrence" activeKey={sortKey} dir={dir} onSort={toggle} />
               <SortableTh label="CA 2025" sortKey="ca_2025" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
               <SortableTh label="CA 2026 YTD" sortKey="ca_ytd" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
               <SortableTh label="Potentiel" sortKey="potentiel" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
@@ -139,6 +179,13 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
                       <span className="text-xs text-muted-foreground">—</span>
                     )}
                   </td>
+                  <td className="px-3 py-3">
+                    {recurrence[a.id] ? (
+                      <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">{recurrence[a.id]}</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(a.ca_2025 ?? 0)}</td>
                   <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(a.ca_2026_ytd ?? 0)}</td>
                   <td className="px-3 py-3 text-right text-muted-foreground">{formatNumber(a.potentiel_boites ?? 0)}</td>
@@ -157,7 +204,7 @@ export function AccountsTable({ accounts }: { accounts: Account[] }) {
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-5 py-10 text-center text-muted-foreground">
+                <td colSpan={12} className="px-5 py-10 text-center text-muted-foreground">
                   Aucun compte ne correspond à ces filtres.
                 </td>
               </tr>
