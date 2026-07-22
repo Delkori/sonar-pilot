@@ -7,7 +7,7 @@ import { predictPortfolioForecast, suggestMonthlyForecast, allocateToHcps } from
 import type { HcpLite } from "@/lib/forecast";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
 import type { Opportunity } from "@/lib/opportunities";
-import { computeTargetingScore } from "@/lib/scoring";
+import { computeTargetingScore, PRIX_MOYEN_BOITE } from "@/lib/scoring";
 import { isProspect } from "@/lib/accounts";
 import { SegmentBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
@@ -163,6 +163,59 @@ export function PilotageBoard({
   const couverture = accounts.length > 0 ? periodSummary.comptes / accounts.length : 0;
   const atteinteRealise = periodSummary.totalCa > 0 ? periodSummary.realise / periodSummary.totalCa : 0;
   const atteinteObjectif = periodSummary.objectif > 0 ? periodSummary.realise / periodSummary.objectif : 0;
+
+  // Suivi Premium / Pro / Pro+ : boîtes à faire (objectif) vs réalisées.
+  const tierTracking = useMemo(() => {
+    return (["Premium", "Pro", "Pro+"] as const).map((tier) => {
+      const list = accounts.filter((a) => a.price_list === tier);
+      const objectifBoites = list.reduce((s, a) => s + (a.objectif_boites ?? 0), 0);
+      const realiseBoites = list.reduce(
+        (s, a) => s + (a.realise_boites ?? (a.ca_2026_ytd ? a.ca_2026_ytd / PRIX_MOYEN_BOITE : 0)),
+        0
+      );
+      return { tier, count: list.length, objectifBoites, realiseBoites };
+    });
+  }, [accounts]);
+
+  // Prévu vs Réalisé mois par mois (année en cours) — courbe d'atterrissage.
+  const currentYear = new Date().getFullYear();
+  const landing = useMemo(() => {
+    const prevu = new Array(12).fill(0) as number[];
+    const realise = new Array(12).fill(0) as number[];
+    for (const f of forecasts) if (f.year === currentYear) prevu[f.month - 1] += f.ca_prevu ?? 0;
+    for (const s of monthlySales) if (s.year === currentYear) realise[s.month - 1] += s.ca;
+    return { prevu, realise };
+  }, [forecasts, monthlySales, currentYear]);
+  const landingMax = Math.max(...landing.prevu, ...landing.realise, 1);
+
+  // Récurrence des commandes : écart moyen (mois) entre 2 commandes par compte.
+  const recurrence = useMemo(() => {
+    const byAcc = new Map<string, number[]>();
+    for (const s of monthlySales) {
+      if (s.ca <= 0) continue;
+      const idx = s.year * 12 + s.month;
+      const arr = byAcc.get(s.account_id);
+      if (arr) arr.push(idx);
+      else byAcc.set(s.account_id, [idx]);
+    }
+    const buckets = { Mensuelle: 0, Bimestrielle: 0, Trimestrielle: 0, Espacée: 0, Unique: 0 };
+    for (const months of byAcc.values()) {
+      if (months.length < 2) {
+        buckets.Unique++;
+        continue;
+      }
+      months.sort((a, b) => a - b);
+      let gap = 0;
+      for (let i = 1; i < months.length; i++) gap += months[i] - months[i - 1];
+      const avg = gap / (months.length - 1);
+      if (avg <= 1.3) buckets.Mensuelle++;
+      else if (avg <= 2.5) buckets.Bimestrielle++;
+      else if (avg <= 4) buckets.Trimestrielle++;
+      else buckets.Espacée++;
+    }
+    return buckets;
+  }, [monthlySales]);
+  const recurrenceTotal = Object.values(recurrence).reduce((s, v) => s + v, 0) || 1;
 
   function forecastsFor(year: number, month: number) {
     const rows = forecasts.filter((f) => f.year === year && f.month === month);
@@ -336,6 +389,87 @@ export function PilotageBoard({
                 ))}
               </div>
             )}
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/* Suivi Premium / Pro / Pro+ — boîtes à faire vs réalisées */}
+          <div className="rounded-lg border border-border p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Suivi Premium / Pro / Pro+ (boîtes)
+            </p>
+            {tierTracking.every((t) => t.count === 0) ? (
+              <p className="text-xs text-muted-foreground">Aucun compte sous contrat — renseignez la colonne Account Partners.</p>
+            ) : (
+              <div className="space-y-2.5">
+                {tierTracking.map((t) => (
+                  <Gauge
+                    key={t.tier}
+                    label={`${t.tier} (${t.count})`}
+                    value={t.objectifBoites > 0 ? t.realiseBoites / t.objectifBoites : 0}
+                    left={`${formatNumber(Math.round(t.realiseBoites))} faites`}
+                    right={`/ ${formatNumber(t.objectifBoites)} à faire`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Récurrence des commandes */}
+          <div className="rounded-lg border border-border p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Récurrence des commandes
+            </p>
+            <div className="space-y-2">
+              {(["Mensuelle", "Bimestrielle", "Trimestrielle", "Espacée", "Unique"] as const).map((k) => (
+                <div key={k}>
+                  <div className="mb-0.5 flex items-center justify-between text-xs">
+                    <span className="font-medium text-foreground">{k}</span>
+                    <span className="text-muted-foreground">{recurrence[k]} compte(s)</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-surface-muted">
+                    <div
+                      className="h-1.5 rounded-full bg-indigo-400"
+                      style={{ width: `${(recurrence[k] / recurrenceTotal) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-[10px] text-muted-foreground">Écart moyen entre 2 commandes, sur l&apos;historique importé.</p>
+          </div>
+        </div>
+
+        {/* Prévu vs Réalisé mois par mois — courbe d'atterrissage */}
+        <div className="mt-4 rounded-lg border border-border p-3">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Prévu vs Réalisé mois par mois — {currentYear}
+          </p>
+          <div className="flex items-end gap-2" style={{ height: 130 }}>
+            {landing.prevu.map((prevu, i) => {
+              const realise = landing.realise[i];
+              return (
+                <div key={i} className="flex flex-1 flex-col items-center gap-1">
+                  <div className="flex h-[100px] w-full items-end justify-center gap-0.5">
+                    <div
+                      className="w-1/2 rounded-t bg-slate-300"
+                      style={{ height: `${Math.max((prevu / landingMax) * 100, prevu > 0 ? 3 : 0)}px` }}
+                      title={`Prévu : ${formatEUR(prevu)}`}
+                    />
+                    <div
+                      className="w-1/2 rounded-t bg-primary"
+                      style={{ height: `${Math.max((realise / landingMax) * 100, realise > 0 ? 3 : 0)}px` }}
+                      title={`Réalisé : ${formatEUR(realise)}`}
+                    />
+                  </div>
+                  <span className="text-[9px] text-muted-foreground">{MONTH_LABELS[i].slice(0, 3)}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-2 flex gap-4 text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-slate-300" /> Prévu</span>
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-primary" /> Réalisé</span>
           </div>
         </div>
       </div>
