@@ -26,11 +26,16 @@ export default async function DashboardPage() {
     .eq("kind", "prevision");
   const forecasts = forecastsRaw ?? [];
 
-  const { data: objectifsRaw } = await supabase
-    .from("account_forecasts")
-    .select("account_id, year, month, boites_prevues, ca_prevu")
-    .eq("kind", "objectif");
-  const objectifs = objectifsRaw ?? [];
+  // Objectifs du secteur (saisis dans Paramètres) — mappés au format attendu
+  // par le dashboard pour alimenter le graphique Objectif vs Réalisé.
+  const { data: sectorObjRaw } = await supabase.from("sector_objectives").select("*");
+  const objectifs = (sectorObjRaw ?? []).map((o) => ({
+    account_id: "",
+    year: o.year as number,
+    month: o.month as number,
+    boites_prevues: o.objectif_boites as number,
+    ca_prevu: o.objectif_ca as number,
+  }));
 
   const lastImport = await supabase
     .from("imports")
