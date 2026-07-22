@@ -136,27 +136,51 @@ export function PilotageBoard({
 
   const periodLabel = horizon === 1 ? "ce mois" : horizon === 3 ? "ce trimestre" : "ce semestre";
 
-  // CA par segment (année en cours, YTD) — vision portefeuille.
-  const caParSegment = useMemo(() => {
-    const totals: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
-    for (const a of accounts) {
-      if (a.segment && a.segment in totals) totals[a.segment] += a.ca_2026_ytd ?? 0;
-    }
-    return totals;
-  }, [accounts]);
-  const caSegmentMax = Math.max(...SEGMENTS.map((s) => caParSegment[s]), 1);
+  const accountSegment = useMemo(
+    () => new Map(accounts.map((a) => [a.id, a.segment] as const)),
+    [accounts]
+  );
 
-  // Ventes des références en 2025 (année précédente = sales_value_ly).
-  const refs2025 = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const p of products) totals.set(p.brand, (totals.get(p.brand) ?? 0) + (p.sales_value_ly ?? 0));
-    return Array.from(totals.entries())
-      .map(([brand, ca]) => ({ brand, ca }))
-      .filter((r) => r.ca > 0)
-      .sort((a, b) => b.ca - a.ca)
+  // CA par segment SUR LA PÉRIODE affichée : prévu (prévisionnel) vs réalisé.
+  const caParSegment = useMemo(() => {
+    const keySet = new Set(months.map((m) => `${m.year}-${m.month}`));
+    const prevu: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
+    const realise: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
+    for (const f of forecasts) {
+      if (!keySet.has(`${f.year}-${f.month}`)) continue;
+      const seg = accountSegment.get(f.account_id);
+      if (seg && seg in prevu) prevu[seg] += f.ca_prevu ?? 0;
+    }
+    for (const s of monthlySales) {
+      if (!keySet.has(`${s.year}-${s.month}`)) continue;
+      const seg = accountSegment.get(s.account_id);
+      if (seg && seg in realise) realise[seg] += s.ca;
+    }
+    return { prevu, realise };
+  }, [forecasts, monthlySales, months, accountSegment]);
+  const caSegmentMax = Math.max(...SEGMENTS.flatMap((s) => [caParSegment.prevu[s], caParSegment.realise[s]]), 1);
+
+  // Références vendues 2025 vs 2026 (annuel) — pour voir quoi pousser en priorité.
+  const refsByYear = useMemo(() => {
+    const m = new Map<string, { y2025: number; y2026: number }>();
+    for (const p of products) {
+      const cur = m.get(p.brand) ?? { y2025: 0, y2026: 0 };
+      cur.y2025 += p.sales_value_ly ?? 0;
+      cur.y2026 += p.sales_value_cy ?? 0;
+      m.set(p.brand, cur);
+    }
+    return Array.from(m.entries())
+      .map(([brand, v]) => ({ brand, ...v }))
+      .filter((r) => r.y2025 > 0 || r.y2026 > 0)
+      .sort((a, b) => b.y2025 + b.y2026 - (a.y2025 + a.y2026))
       .slice(0, 8);
   }, [products]);
-  const refsMax = Math.max(...refs2025.map((r) => r.ca), 1);
+  const refsMax = Math.max(...refsByYear.flatMap((r) => [r.y2025, r.y2026]), 1);
+
+  const periodRange =
+    months.length > 0
+      ? `${MONTH_LABELS[months[0].month - 1].slice(0, 3)} ${months[0].year} → ${MONTH_LABELS[months[months.length - 1].month - 1].slice(0, 3)} ${months[months.length - 1].year}`
+      : "";
 
   // Couverture du portefeuille : comptes planifiés vs total, prospects.
   const totalProspects = useMemo(() => accounts.filter(isProspect).length, [accounts]);
@@ -320,7 +344,9 @@ export function PilotageBoard({
       {/* ── Encart de planification (adapté à la période) ─────────── */}
       <div className="rounded-xl border border-border bg-surface p-4">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">Planification — {periodLabel}</h3>
+          <h3 className="text-sm font-semibold text-foreground">
+            Planification — {periodLabel} <span className="ml-1 text-xs font-normal text-muted-foreground">({periodRange})</span>
+          </h3>
           <span className="text-xs text-muted-foreground">
             Horizon : {horizon === 1 ? "1 mois" : horizon === 3 ? "trimestre" : "semestre"}
           </span>
@@ -351,44 +377,60 @@ export function PilotageBoard({
             </p>
           </div>
 
-          {/* CA par segment */}
+          {/* CA par segment — période, prévu vs réalisé */}
           <div className="rounded-lg border border-border p-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">CA par segment (YTD)</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">CA par segment — {periodLabel}</p>
             <div className="space-y-2">
               {SEGMENTS.map((s) => (
-                <div key={s}>
-                  <div className="mb-0.5 flex items-center justify-between text-xs">
+                <div key={s} className="text-xs">
+                  <div className="flex items-center justify-between">
                     <span className="font-medium text-foreground">Segment {s}</span>
-                    <span className="text-muted-foreground">{formatEUR(caParSegment[s])}</span>
+                    <span className="text-muted-foreground">
+                      Réal {formatEUR(caParSegment.realise[s])} · Prév {formatEUR(caParSegment.prevu[s])}
+                    </span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-surface-muted">
-                    <div className="h-1.5 rounded-full bg-primary" style={{ width: `${(caParSegment[s] / caSegmentMax) * 100}%` }} />
+                  <div className="mt-0.5 h-1.5 rounded-full bg-surface-muted">
+                    <div className="h-1.5 rounded-full bg-primary" style={{ width: `${(caParSegment.realise[s] / caSegmentMax) * 100}%` }} />
+                  </div>
+                  <div className="mt-0.5 h-1.5 rounded-full bg-surface-muted">
+                    <div className="h-1.5 rounded-full bg-slate-300" style={{ width: `${(caParSegment.prevu[s] / caSegmentMax) * 100}%` }} />
                   </div>
                 </div>
               ))}
             </div>
+            <div className="mt-2 flex gap-3 text-[10px] text-muted-foreground">
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-primary" /> Réalisé</span>
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-slate-300" /> Prévu</span>
+            </div>
           </div>
 
-          {/* Références vendues 2025 */}
+          {/* Références vendues 2025 vs 2026 */}
           <div className="rounded-lg border border-border p-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Références vendues 2025</p>
-            {refs2025.length === 0 ? (
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Références vendues 2025 / 2026</p>
+            {refsByYear.length === 0 ? (
               <p className="text-xs text-muted-foreground">Importez les données produit pour activer cette vue.</p>
             ) : (
               <div className="space-y-2">
-                {refs2025.map((r) => (
-                  <div key={r.brand}>
-                    <div className="mb-0.5 flex items-center justify-between text-xs">
+                {refsByYear.map((r) => (
+                  <div key={r.brand} className="text-xs">
+                    <div className="flex items-center justify-between">
                       <span className="font-medium text-foreground">{r.brand}</span>
-                      <span className="text-muted-foreground">{formatEUR(r.ca)}</span>
+                      <span className="text-muted-foreground">{formatEUR(r.y2025)} → {formatEUR(r.y2026)}</span>
                     </div>
-                    <div className="h-1.5 rounded-full bg-surface-muted">
-                      <div className="h-1.5 rounded-full bg-amber-400" style={{ width: `${(r.ca / refsMax) * 100}%` }} />
+                    <div className="mt-0.5 h-1.5 rounded-full bg-surface-muted">
+                      <div className="h-1.5 rounded-full bg-amber-300" style={{ width: `${(r.y2025 / refsMax) * 100}%` }} />
+                    </div>
+                    <div className="mt-0.5 h-1.5 rounded-full bg-surface-muted">
+                      <div className="h-1.5 rounded-full bg-amber-500" style={{ width: `${(r.y2026 / refsMax) * 100}%` }} />
                     </div>
                   </div>
                 ))}
               </div>
             )}
+            <div className="mt-2 flex gap-3 text-[10px] text-muted-foreground">
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-amber-300" /> 2025</span>
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-amber-500" /> 2026</span>
+            </div>
           </div>
         </div>
 
