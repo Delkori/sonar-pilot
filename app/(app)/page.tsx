@@ -1,7 +1,7 @@
 import { TopBar } from "@/components/layout/TopBar";
 import { DashboardClient } from "@/components/dashboard/DashboardClient";
 import { createClient } from "@/lib/supabase/server";
-import type { Account } from "@/types/database";
+import type { Account, AccountAction, Hcp, HcpSponsorship } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,7 @@ export default async function DashboardPage() {
 
   const { data: productsRaw } = await supabase
     .from("account_products")
-    .select("account_id, brand, sales_value_ly, sales_value_cy, growth_rate_pct");
+    .select("account_id, brand, sales_value_ly, sales_value_cy, qty_ordered_ly, qty_ordered_cy, growth_rate_pct");
   const products = productsRaw ?? [];
 
   const { data: forecastsRaw } = await supabase
@@ -25,6 +25,15 @@ export default async function DashboardPage() {
     .select("account_id, year, month, boites_prevues, ca_prevu")
     .eq("kind", "prevision");
   const forecasts = forecastsRaw ?? [];
+
+  const { data: actionsRaw } = await supabase.from("account_actions").select("*");
+  const actions = (actionsRaw ?? []) as AccountAction[];
+
+  const { data: hcpsRaw } = await supabase.from("hcps").select("*");
+  const hcps = (hcpsRaw ?? []) as Hcp[];
+
+  const { data: sponsoRaw } = await supabase.from("hcp_sponsorships").select("*");
+  const sponsorships = (sponsoRaw ?? []) as HcpSponsorship[];
 
   // Objectifs du secteur (saisis dans Paramètres) — mappés au format attendu
   // par le dashboard pour alimenter le graphique Objectif vs Réalisé.
@@ -57,8 +66,12 @@ export default async function DashboardPage() {
         products={products}
         forecasts={forecasts}
         objectifs={objectifs}
+        actions={actions}
+        hcps={hcps}
+        sponsorships={sponsorships}
         lastImportLabel={lastImportLabel}
       />
     </div>
   );
 }
+
