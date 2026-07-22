@@ -8,14 +8,17 @@ import type { HcpLite } from "@/lib/forecast";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
 import type { Opportunity } from "@/lib/opportunities";
 import { computeTargetingScore } from "@/lib/scoring";
+import { isProspect } from "@/lib/accounts";
 import { SegmentBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
-import { formatEUR, formatNumber } from "@/lib/utils";
-import type { Account, AccountForecast, Hcp } from "@/types/database";
+import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
+import type { Account, AccountForecast, Hcp, SectorObjective } from "@/types/database";
 import { GripVertical, Trash2, Loader2, Target, Wand2, Stethoscope } from "lucide-react";
 
 type HcpRow = Pick<Hcp, "id" | "account_id" | "name" | "potentiel_boites">;
+type ProductRow = { brand: string; sales_value_ly: number | null; sales_value_cy: number | null };
 type CardSort = "ca" | "boites" | "score" | "nom" | "silence";
+const SEGMENTS = ["A", "B", "C", "D", "E"] as const;
 
 const MONTH_LABELS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 
@@ -44,11 +47,15 @@ export function PilotageBoard({
   initialForecasts,
   monthlySales,
   hcps,
+  products,
+  sectorObjectives,
 }: {
   accounts: Account[];
   initialForecasts: AccountForecast[];
   monthlySales: MonthlySale[];
   hcps: HcpRow[];
+  products: ProductRow[];
+  sectorObjectives: SectorObjective[];
 }) {
   const [forecasts, setForecasts] = useState(initialForecasts);
   const [isSaving, setIsSaving] = useState(false);
@@ -114,16 +121,48 @@ export function PilotageBoard({
     for (const id of accountIds) {
       const acc = accountById.get(id);
       if (!acc) continue;
-      if (acc.status === "new") prospects++;
+      if (isProspect(acc)) prospects++;
       if (acc.price_list === "Premium" || acc.price_list === "Pro" || acc.price_list === "Pro+") {
         tiers[acc.price_list]++;
       }
     }
     const realise = months.reduce((s, m) => s + (realiseByMonth.get(`${m.year}-${m.month}`) ?? 0), 0);
-    return { totalCa, totalBoites, comptes: accountIds.size, prospects, tiers, realise };
-  }, [forecasts, months, accountById, realiseByMonth]);
+    const objectif = months.reduce((s, m) => {
+      const o = sectorObjectives.find((x) => x.year === m.year && x.month === m.month);
+      return s + (o?.objectif_ca ?? 0);
+    }, 0);
+    return { totalCa, totalBoites, comptes: accountIds.size, prospects, tiers, realise, objectif };
+  }, [forecasts, months, accountById, realiseByMonth, sectorObjectives]);
 
   const periodLabel = horizon === 1 ? "ce mois" : horizon === 3 ? "ce trimestre" : "ce semestre";
+
+  // CA par segment (année en cours, YTD) — vision portefeuille.
+  const caParSegment = useMemo(() => {
+    const totals: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
+    for (const a of accounts) {
+      if (a.segment && a.segment in totals) totals[a.segment] += a.ca_2026_ytd ?? 0;
+    }
+    return totals;
+  }, [accounts]);
+  const caSegmentMax = Math.max(...SEGMENTS.map((s) => caParSegment[s]), 1);
+
+  // Ventes des références en 2025 (année précédente = sales_value_ly).
+  const refs2025 = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const p of products) totals.set(p.brand, (totals.get(p.brand) ?? 0) + (p.sales_value_ly ?? 0));
+    return Array.from(totals.entries())
+      .map(([brand, ca]) => ({ brand, ca }))
+      .filter((r) => r.ca > 0)
+      .sort((a, b) => b.ca - a.ca)
+      .slice(0, 8);
+  }, [products]);
+  const refsMax = Math.max(...refs2025.map((r) => r.ca), 1);
+
+  // Couverture du portefeuille : comptes planifiés vs total, prospects.
+  const totalProspects = useMemo(() => accounts.filter(isProspect).length, [accounts]);
+  const couverture = accounts.length > 0 ? periodSummary.comptes / accounts.length : 0;
+  const atteinteRealise = periodSummary.totalCa > 0 ? periodSummary.realise / periodSummary.totalCa : 0;
+  const atteinteObjectif = periodSummary.objectif > 0 ? periodSummary.realise / periodSummary.objectif : 0;
 
   function forecastsFor(year: number, month: number) {
     const rows = forecasts.filter((f) => f.year === year && f.month === month);
@@ -243,6 +282,61 @@ export function PilotageBoard({
             value={`${periodSummary.tiers.Premium} / ${periodSummary.tiers.Pro} / ${periodSummary.tiers["Pro+"]}`}
           />
           <SummaryTile label="Réalisé (période)" value={formatEUR(periodSummary.realise)} />
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {/* Jauges prévu / objectif / couverture */}
+          <div className="rounded-lg border border-border p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Avancement — {periodLabel}</p>
+            <Gauge label="Réalisé vs prévu" value={atteinteRealise} left={formatEUR(periodSummary.realise)} right={formatEUR(periodSummary.totalCa)} />
+            {periodSummary.objectif > 0 && (
+              <Gauge label="Réalisé vs objectif" value={atteinteObjectif} left={formatEUR(periodSummary.realise)} right={formatEUR(periodSummary.objectif)} />
+            )}
+            <Gauge label="Couverture (comptes planifiés)" value={couverture} left={`${periodSummary.comptes}`} right={`${accounts.length}`} />
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              {totalProspects} prospect(s) au total (sans commande &gt; 12 mois)
+            </p>
+          </div>
+
+          {/* CA par segment */}
+          <div className="rounded-lg border border-border p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">CA par segment (YTD)</p>
+            <div className="space-y-2">
+              {SEGMENTS.map((s) => (
+                <div key={s}>
+                  <div className="mb-0.5 flex items-center justify-between text-xs">
+                    <span className="font-medium text-foreground">Segment {s}</span>
+                    <span className="text-muted-foreground">{formatEUR(caParSegment[s])}</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-surface-muted">
+                    <div className="h-1.5 rounded-full bg-primary" style={{ width: `${(caParSegment[s] / caSegmentMax) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Références vendues 2025 */}
+          <div className="rounded-lg border border-border p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Références vendues 2025</p>
+            {refs2025.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Importez les données produit pour activer cette vue.</p>
+            ) : (
+              <div className="space-y-2">
+                {refs2025.map((r) => (
+                  <div key={r.brand}>
+                    <div className="mb-0.5 flex items-center justify-between text-xs">
+                      <span className="font-medium text-foreground">{r.brand}</span>
+                      <span className="text-muted-foreground">{formatEUR(r.ca)}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-surface-muted">
+                      <div className="h-1.5 rounded-full bg-amber-400" style={{ width: `${(r.ca / refsMax) * 100}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -456,6 +550,26 @@ function SummaryTile({ label, value, accent = false }: { label: string; value: s
     <div className={`rounded-lg border p-3 ${accent ? "border-primary-100 bg-primary-50" : "border-border"}`}>
       <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className={`mt-1 text-lg font-semibold ${accent ? "text-primary-700" : "text-foreground"}`}>{value}</p>
+    </div>
+  );
+}
+
+function Gauge({ label, value, left, right }: { label: string; value: number; left: string; right: string }) {
+  const pct = Math.min(Math.max(value, 0), 1);
+  const color = pct >= 1 ? "bg-success" : pct >= 0.6 ? "bg-primary" : "bg-amber-400";
+  return (
+    <div className="mb-2.5">
+      <div className="mb-0.5 flex items-center justify-between text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-medium text-foreground">{formatPct(value)}</span>
+      </div>
+      <div className="h-2 rounded-full bg-surface-muted">
+        <div className={`h-2 rounded-full ${color}`} style={{ width: `${pct * 100}%` }} />
+      </div>
+      <div className="mt-0.5 flex justify-between text-[10px] text-muted-foreground">
+        <span>{left}</span>
+        <span>{right}</span>
+      </div>
     </div>
   );
 }

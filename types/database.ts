@@ -181,6 +181,15 @@ export type HcpSponsorship = {
   updated_at: string;
 };
 
+export type SectorObjective = {
+  id: string;
+  year: number;
+  month: number;
+  objectif_ca: number;
+  objectif_boites: number;
+  updated_at: string;
+};
+
 export type CalendarFeedToken = {
   token: string;
   created_at: string;
@@ -206,6 +215,7 @@ export type Database = {
       calendar_feed_tokens: Table<CalendarFeedToken>;
       hcps: Table<Hcp>;
       hcp_sponsorships: Table<HcpSponsorship>;
+      sector_objectives: Table<SectorObjective>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

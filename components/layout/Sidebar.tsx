@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Map, UploadCloud, Radar, LogOut, Grid3x3, Gamepad2, CalendarDays, PhoneCall, HandCoins } from "lucide-react";
+import { LayoutDashboard, Users, Map, UploadCloud, Radar, LogOut, Grid3x3, Gamepad2, CalendarDays, PhoneCall, HandCoins, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
@@ -15,6 +15,7 @@ const items = [
   { href: "/sponsoring", label: "Sponsoring & concurrence", icon: HandCoins },
   { href: "/calendrier", label: "Calendrier", icon: CalendarDays },
   { href: "/admin/import", label: "Import", icon: UploadCloud },
+  { href: "/parametres", label: "Paramètres", icon: Settings },
 ];
 
 export function Sidebar() {

@@ -1,7 +1,7 @@
 import { TopBar } from "@/components/layout/TopBar";
 import { PilotageBoard } from "@/components/pilotage/PilotageBoard";
 import { createClient } from "@/lib/supabase/server";
-import type { Account, AccountForecast, Hcp } from "@/types/database";
+import type { Account, AccountForecast, Hcp, SectorObjective } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +22,19 @@ export default async function PilotagePage() {
   const { data: hcpsRaw } = await supabase.from("hcps").select("id, account_id, name, potentiel_boites");
   const hcps = (hcpsRaw ?? []) as Pick<Hcp, "id" | "account_id" | "name" | "potentiel_boites">[];
 
+  const { data: productsRaw } = await supabase
+    .from("account_products")
+    .select("brand, sales_value_ly, sales_value_cy");
+  const products = (productsRaw ?? []) as { brand: string; sales_value_ly: number | null; sales_value_cy: number | null }[];
+
+  const { data: objRaw } = await supabase.from("sector_objectives").select("*");
+  const sectorObjectives = (objRaw ?? []) as SectorObjective[];
+
   return (
     <div>
       <TopBar
         title="Pilotage"
-        subtitle="Glissez les opportunités dans un mois pour construire votre plan — le suivi prévu/réalisé se met à jour à chaque import"
+        subtitle="Planifiez le secteur : dashboard, opportunités à glisser dans les mois, suivi prévu/réalisé"
       />
       <main className="px-8 py-6">
         <PilotageBoard
@@ -34,6 +42,8 @@ export default async function PilotagePage() {
           initialForecasts={forecasts}
           monthlySales={monthlySales}
           hcps={hcps}
+          products={products}
+          sectorObjectives={sectorObjectives}
         />
       </main>
     </div>
