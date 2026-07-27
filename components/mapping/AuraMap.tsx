@@ -8,7 +8,7 @@ import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
-import { computeTargetingScore } from "@/lib/scoring";
+import { computeTargetingScore, PRIX_MOYEN_BOITE } from "@/lib/scoring";
 import { suggestMonthlyForecast } from "@/lib/forecast";
 import { createClient } from "@/lib/supabase/client";
 import type { Account, Segment, AccountStatus } from "@/types/database";
@@ -51,6 +51,25 @@ function ecartRatio(a: Account) {
   return ((a.realise_boites ?? 0) - a.objectif_boites) / a.objectif_boites;
 }
 
+type MapMetric = "ecart" | "realise" | "potentiel" | "couverture";
+
+const METRIC_LABELS: Record<MapMetric, string> = {
+  ecart: "Écart objectif",
+  realise: "CA réalisé",
+  potentiel: "Potentiel",
+  couverture: "Couverture",
+};
+
+// Heatmap indigo : plus la valeur est forte, plus c'est foncé.
+function heatColor(value: number, max: number): string {
+  if (max <= 0 || value <= 0) return "#E2E8F0";
+  const i = value / max;
+  if (i > 0.7) return "#4F46E5";
+  if (i > 0.4) return "#818CF8";
+  if (i > 0.15) return "#C7D2FE";
+  return "#EEF2FF";
+}
+
 function deptColor(ratio: number | null, caVal: number, maxCa: number) {
   // Si on a un objectif/réalisé, on colorie selon l'écart
   if (ratio !== null) {
@@ -72,16 +91,29 @@ export function AuraMap({
   geo,
   accounts,
   products = [],
+  hcps = [],
 }: {
   geo: { type: "FeatureCollection"; features: DeptFeature[] };
   accounts: Account[];
   products?: ProductRow[];
+  hcps?: { account_id: string | null; name: string; rpps: string | null }[];
 }) {
+  const hcpsByAccount = useMemo(() => {
+    const m = new Map<string, { name: string; rpps: string | null }[]>();
+    for (const h of hcps) {
+      if (!h.account_id) continue;
+      const arr = m.get(h.account_id);
+      if (arr) arr.push({ name: h.name, rpps: h.rpps });
+      else m.set(h.account_id, [{ name: h.name, rpps: h.rpps }]);
+    }
+    return m;
+  }, [hcps]);
   const [segment, setSegment] = useState<Segment | "all">("all");
   const [status, setStatus] = useState<AccountStatus | "all">("all");
   const [selectedDept, setSelectedDept] = useState<string | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
   const [showOnlyOpportunities, setShowOnlyOpportunities] = useState(false);
+  const [metric, setMetric] = useState<MapMetric>("realise");
   const [planning, setPlanning] = useState(false);
   const [planned, setPlanned] = useState<Set<string>>(new Set());
 
@@ -141,16 +173,18 @@ export function AuraMap({
       count: number;
       activeCount: number;
       ca: number;
+      potentiel: number;
       centroid: [number, number] | null;
     }>();
     for (const a of accounts) {
       if (!a.department_code) continue;
       const cur = map.get(a.department_code) ?? {
-        objectif: 0, realise: 0, count: 0, activeCount: 0, ca: 0, centroid: null,
+        objectif: 0, realise: 0, count: 0, activeCount: 0, ca: 0, potentiel: 0, centroid: null,
       };
       cur.objectif += a.objectif_boites ?? 0;
       cur.realise += a.realise_boites ?? 0;
       cur.ca += a.ca_2026_ytd ?? 0;
+      cur.potentiel += (a.potentiel_boites ?? 0) * PRIX_MOYEN_BOITE;
       cur.count += 1;
       if (a.status === "actif") cur.activeCount += 1;
       map.set(a.department_code, cur);
@@ -227,6 +261,27 @@ export function AuraMap({
   }, [deptStats, geo, topBrandByDept]);
 
   const maxCa = useMemo(() => Math.max(...Array.from(deptStats.values()).map((s) => s.ca), 1), [deptStats]);
+  const maxPotentiel = useMemo(
+    () => Math.max(...Array.from(deptStats.values()).map((s) => s.potentiel), 1),
+    [deptStats]
+  );
+
+  function fillForDept(stats: ReturnType<typeof deptStats.get>): string {
+    if (!stats) return "#E2E8F0";
+    switch (metric) {
+      case "ecart": {
+        const ratio = stats.objectif > 0 ? (stats.realise - stats.objectif) / stats.objectif : null;
+        return deptColor(ratio, stats.ca, maxCa);
+      }
+      case "potentiel":
+        return heatColor(stats.potentiel, maxPotentiel);
+      case "couverture":
+        return heatColor(stats.count > 0 ? stats.activeCount / stats.count : 0, 1);
+      case "realise":
+      default:
+        return heatColor(stats.ca, maxCa);
+    }
+  }
 
   const geolocated = filtered.filter((a) => a.latitude !== null && a.longitude !== null);
 
@@ -311,6 +366,17 @@ export function AuraMap({
         <div className="space-y-4">
           <div className="rounded-xl border border-border bg-surface p-4">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Filtres</p>
+            <label className="mb-1 block text-xs text-muted-foreground">Colorer par</label>
+            <select
+              value={metric}
+              onChange={(e) => setMetric(e.target.value as MapMetric)}
+              className="mb-3 w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+            >
+              <option value="realise">CA réalisé</option>
+              <option value="potentiel">Potentiel</option>
+              <option value="couverture">Couverture (% actifs)</option>
+              <option value="ecart">Écart objectif</option>
+            </select>
             <label className="mb-1 block text-xs text-muted-foreground">Segment</label>
             <select
               value={segment}
@@ -355,23 +421,34 @@ export function AuraMap({
           </div>
 
           <div className="rounded-xl border border-border bg-surface p-4 text-sm">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Légende</p>
-            <LegendRow color="#4F46E5" label="Objectif atteint" />
-            <LegendRow color="#818CF8" label="Écart léger (−25%)" />
-            <LegendRow color="#FCD34D" label="Écart modéré (−50%)" />
-            <LegendRow color="#FCA5A5" label="Écart critique (< −50%)" />
-            <LegendRow color="#E2E8F0" label="Pas de donnée" />
-            <div className="mt-3 border-t border-border pt-3">
-              <p className="mb-2 text-xs font-semibold text-muted-foreground">Heatmap CA (sans objectif)</p>
-              <div className="flex h-2 rounded-full overflow-hidden">
-                {["#EEF2FF", "#C7D2FE", "#818CF8", "#4F46E5"].map((c) => (
-                  <div key={c} className="flex-1" style={{ backgroundColor: c }} />
-                ))}
-              </div>
-              <div className="mt-1 flex justify-between text-[9px] text-muted-foreground">
-                <span>Faible</span><span>Fort</span>
-              </div>
-            </div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Légende — {METRIC_LABELS[metric]}
+            </p>
+            {metric === "ecart" ? (
+              <>
+                <LegendRow color="#4F46E5" label="Objectif atteint" />
+                <LegendRow color="#818CF8" label="Écart léger (−25%)" />
+                <LegendRow color="#FCD34D" label="Écart modéré (−50%)" />
+                <LegendRow color="#FCA5A5" label="Écart critique (< −50%)" />
+                <LegendRow color="#E2E8F0" label="Pas de donnée" />
+              </>
+            ) : (
+              <>
+                <div className="flex h-2 rounded-full overflow-hidden">
+                  {["#EEF2FF", "#C7D2FE", "#818CF8", "#4F46E5"].map((c) => (
+                    <div key={c} className="flex-1" style={{ backgroundColor: c }} />
+                  ))}
+                </div>
+                <div className="mt-1 flex justify-between text-[9px] text-muted-foreground">
+                  <span>Faible</span><span>Fort</span>
+                </div>
+                <p className="mt-2 text-[10px] text-muted-foreground">
+                  {metric === "realise" && "CA réalisé YTD par département"}
+                  {metric === "potentiel" && "Potentiel € (boîtes × prix moyen)"}
+                  {metric === "couverture" && "Part de comptes actifs"}
+                </p>
+              </>
+            )}
           </div>
         </div>
 
@@ -382,12 +459,10 @@ export function AuraMap({
               ? `${selectedDeptFeature.properties.nom} (${selectedDept}) — ${selectedDeptStats?.count ?? 0} comptes`
               : "Cliquez sur un département pour filtrer"}
           </p>
-          <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} style={{ maxHeight: 340, maxWidth: 380, width: "100%" }}>
+          <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} style={{ maxHeight: 500, maxWidth: 560, width: "100%" }}>
             {geo.features.map((f) => {
               const stats = deptStats.get(f.properties.code);
-              const ratio = stats && stats.objectif > 0 ? (stats.realise - stats.objectif) / stats.objectif : null;
-              const caVal = stats?.ca ?? 0;
-              const fill = deptColor(ratio, caVal, maxCa);
+              const fill = fillForDept(stats);
               const isSelected = selectedDept === f.properties.code;
               const centroid = stats?.centroid;
 
@@ -643,6 +718,7 @@ export function AuraMap({
                 <SortableTh label="Ville" sortKey="city" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
                 <SortableTh label="Statut" sortKey="status" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
                 <SortableTh label="Score" sortKey="score" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-2" />
+                <th className="px-2 py-2 font-medium text-right">Médecins</th>
                 <th className="px-2 py-2 font-medium">Opportunité</th>
                 <SortableTh label="CA YTD" sortKey="ca_ytd" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-4" />
               </tr>
@@ -666,6 +742,20 @@ export function AuraMap({
                     <td className="px-2 py-2 text-muted-foreground">{a.city ?? "—"}</td>
                     <td className="px-2 py-2"><StatusBadge status={a.status} /></td>
                     <td className="px-2 py-2 text-right">{computeTargetingScore(a).total}/100</td>
+                    <td className="px-2 py-2 text-right">
+                      {(() => {
+                        const list = hcpsByAccount.get(a.id) ?? [];
+                        if (list.length === 0) return <span className="text-muted-foreground">—</span>;
+                        return (
+                          <span
+                            className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700"
+                            title={list.map((h) => `${h.name}${h.rpps ? ` (RPPS ${h.rpps})` : ""}`).join("\n")}
+                          >
+                            {list.length}
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="px-2 py-2">
                       {opp ? (
                         <span
@@ -684,7 +774,7 @@ export function AuraMap({
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground">
                     Aucun compte ne correspond à ces filtres.
                   </td>
                 </tr>
