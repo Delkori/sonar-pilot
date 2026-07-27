@@ -23,6 +23,8 @@ import {
   MapPin,
   Package,
   Award,
+  UserX,
+  Stethoscope,
 } from "lucide-react";
 
 type SortKey = "name" | "segment" | "city" | "status" | "score" | "ca_ytd";
@@ -114,6 +116,7 @@ export function AuraMap({
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
   const [showOnlyOpportunities, setShowOnlyOpportunities] = useState(false);
   const [metric, setMetric] = useState<MapMetric>("realise");
+  const [hovered, setHovered] = useState<{ code: string; x: number; y: number } | null>(null);
   const [planning, setPlanning] = useState(false);
   const [planned, setPlanned] = useState<Set<string>>(new Set());
 
@@ -210,6 +213,16 @@ export function AuraMap({
     return m;
   }, [accounts]);
 
+  const hcpCountByDept = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const h of hcps) {
+      const dept = h.account_id ? accountDeptMap.get(h.account_id) : undefined;
+      if (!dept) continue;
+      m.set(dept, (m.get(dept) ?? 0) + 1);
+    }
+    return m;
+  }, [hcps, accountDeptMap]);
+
   const productsByDept = useMemo(() => {
     const map = new Map<string, Map<string, number>>();
     for (const p of products) {
@@ -301,6 +314,8 @@ export function AuraMap({
   // ── KPI sectoriaux globaux
   const totalCa = useMemo(() => accounts.reduce((s, a) => s + (a.ca_2026_ytd ?? 0), 0), [accounts]);
   const totalActifs = accounts.filter((a) => a.status === "actif").length;
+  const totalLost = accounts.filter((a) => a.status === "lost").length;
+  const totalHcps = hcps.length;
   const topDept = deptRanking[0];
   const topGlobalBrand = globalBrandTotals[0];
 
@@ -315,8 +330,30 @@ export function AuraMap({
   return (
     <div className="space-y-4">
 
+      {/* ── Infobulle au survol d'un territoire ── */}
+      {hovered && (() => {
+        const st = deptStats.get(hovered.code);
+        const name = geo.features.find((f) => f.properties.code === hovered.code)?.properties.nom ?? hovered.code;
+        const couv = st && st.count > 0 ? st.activeCount / st.count : 0;
+        const top = topBrandByDept.get(hovered.code);
+        return (
+          <div
+            style={{ position: "fixed", left: hovered.x + 14, top: hovered.y + 14, zIndex: 50, pointerEvents: "none", minWidth: 190 }}
+            className="rounded-lg border border-border bg-surface p-3 text-xs shadow-lg"
+          >
+            <p className="mb-1 font-semibold text-foreground">{name} ({hovered.code})</p>
+            <TipRow label="Comptes" value={`${formatNumber(st?.count ?? 0)} (${formatNumber(st?.activeCount ?? 0)} actifs)`} />
+            <TipRow label="CA réalisé YTD" value={formatEUR(st?.ca ?? 0)} />
+            <TipRow label="Potentiel" value={formatEUR(st?.potentiel ?? 0)} />
+            <TipRow label="Couverture" value={formatPct(couv)} />
+            <TipRow label="Médecins" value={formatNumber(hcpCountByDept.get(hovered.code) ?? 0)} />
+            {top && <TipRow label="Marque #1" value={top.brand} />}
+          </div>
+        );
+      })()}
+
       {/* ── Barre de KPI Territoriaux ── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-50">
             <Users size={16} className="text-primary" />
@@ -355,6 +392,26 @@ export function AuraMap({
             <p className="text-xs text-muted-foreground">Marque #1</p>
             <p className="text-base font-bold text-foreground truncate">{topGlobalBrand?.[0] ?? "—"}</p>
             <p className="text-[10px] text-muted-foreground">{topGlobalBrand ? formatEUR(topGlobalBrand[1]) : "Données manquantes"}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-50">
+            <UserX size={16} className="text-rose-600" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Clients perdus</p>
+            <p className="text-lg font-bold text-foreground">{formatNumber(totalLost)}</p>
+            <p className="text-[10px] text-muted-foreground">statut Lost</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50">
+            <Stethoscope size={16} className="text-indigo-600" />
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Médecins secteur</p>
+            <p className="text-lg font-bold text-foreground">{formatNumber(totalHcps)}</p>
+            <p className="text-[10px] text-muted-foreground">HCP rattachés</p>
           </div>
         </div>
       </div>
@@ -476,6 +533,8 @@ export function AuraMap({
                     opacity={selectedDept && !isSelected ? 0.3 : 1}
                     className="cursor-pointer transition-all duration-150 hover:brightness-110"
                     onClick={() => setSelectedDept(isSelected ? null : f.properties.code)}
+                    onMouseMove={(e) => setHovered({ code: f.properties.code, x: e.clientX, y: e.clientY })}
+                    onMouseLeave={() => setHovered(null)}
                   >
                     <title>{f.properties.nom} — {formatNumber(stats?.count ?? 0)} comptes · {formatEUR(stats?.ca ?? 0)}</title>
                   </path>
@@ -868,6 +927,15 @@ function LegendRow({ color, label }: { color: string; label: string }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between py-1">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium text-foreground">{value}</span>
+    </div>
+  );
+}
+
+function TipRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-4 py-0.5">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium text-foreground">{value}</span>
     </div>
