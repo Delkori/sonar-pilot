@@ -2,26 +2,20 @@ import { TopBar } from "@/components/layout/TopBar";
 import { PersonaClient } from "@/components/personas/PersonaClient";
 import type { PersonaAccountRow } from "@/components/personas/PersonaClient";
 import { createClient } from "@/lib/supabase/server";
-import { getSpecialitesByRpps } from "@/lib/nexora/queries";
-import {
-  personaFromSpecialty,
-  dominantPersona,
-  computePersonaModels,
-  personaRecommendations,
-  type Persona,
-} from "@/lib/persona";
-import type { Account, Hcp } from "@/types/database";
+import { computePersonaModels, personaRecommendations, PERSONAS, type Persona } from "@/lib/persona";
+import type { Account } from "@/types/database";
 
 export const dynamic = "force-dynamic";
+
+function isPersona(v: string | null): v is Persona {
+  return v !== null && (PERSONAS as readonly string[]).includes(v);
+}
 
 export default async function PersonasPage() {
   const supabase = await createClient();
 
-  const { data: accountsRaw } = await supabase.from("accounts").select("id, name, ca_2026_ytd");
-  const accounts = (accountsRaw ?? []) as Pick<Account, "id" | "name" | "ca_2026_ytd">[];
-
-  const { data: hcpsRaw } = await supabase.from("hcps").select("account_id, rpps");
-  const hcps = (hcpsRaw ?? []) as Pick<Hcp, "account_id" | "rpps">[];
+  const { data: accountsRaw } = await supabase.from("accounts").select("id, name, ca_2026_ytd, persona");
+  const accounts = (accountsRaw ?? []) as Pick<Account, "id" | "name" | "ca_2026_ytd" | "persona">[];
 
   const { data: productsRaw } = await supabase
     .from("account_products")
@@ -33,27 +27,10 @@ export default async function PersonasPage() {
     sales_value_cy: number | null;
   }[];
 
-  // Spécialité par RPPS depuis Nexora → persona par médecin → persona du compte.
-  const rppsList = Array.from(new Set(hcps.map((h) => h.rpps).filter((r): r is string => !!r)));
-  const specialties = await getSpecialitesByRpps(rppsList);
-  const personaByRpps = new Map<string, Persona | null>();
-  for (const s of specialties) {
-    personaByRpps.set(s.rpps, personaFromSpecialty(s));
-  }
-
-  const hcpPersonasByAccount = new Map<string, (Persona | null)[]>();
-  for (const h of hcps) {
-    if (!h.account_id) continue;
-    const persona = h.rpps ? personaByRpps.get(h.rpps) ?? null : null;
-    const arr = hcpPersonasByAccount.get(h.account_id);
-    if (arr) arr.push(persona);
-    else hcpPersonasByAccount.set(h.account_id, [persona]);
-  }
-
+  // Persona STOCKÉ sur le compte (synchronisé depuis Nexora dans Paramètres).
   const personaByAccount = new Map<string, Persona>();
-  for (const [accId, personas] of hcpPersonasByAccount) {
-    const p = dominantPersona(personas);
-    if (p) personaByAccount.set(accId, p);
+  for (const a of accounts) {
+    if (isPersona(a.persona)) personaByAccount.set(a.id, a.persona);
   }
 
   const caByAccount = new Map(accounts.map((a) => [a.id, a.ca_2026_ytd ?? 0] as const));

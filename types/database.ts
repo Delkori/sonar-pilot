@@ -52,6 +52,7 @@ export type Account = {
   nom_concurrent: string | null;
   objectif_filler: number | null;
   objectif_cosmetique: number | null;
+  persona: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -161,6 +162,8 @@ export type Hcp = {
   email: string | null;
   telephone: string | null;
   nom_concurrent: string | null;
+  specialite: string | null;
+  persona: string | null;
   created_at: string;
   updated_at: string;
 };

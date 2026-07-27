@@ -112,6 +112,7 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
               <Row label="Potentiel (boîtes)" value={formatNumber(acc.potentiel_boites)} />
               <Row label="Silence (jours)" value={formatNumber(acc.jours_silence)} />
               <Row label="Dernier appel" value={acc.last_call_date ? new Date(acc.last_call_date).toLocaleDateString("fr-FR") : "—"} />
+              {acc.persona && <Row label="Persona" value={acc.persona} />}
               {acc.nom_concurrent && <Row label="Concurrent" value={acc.nom_concurrent} />}
             </CardContent>
           </Card>

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { TopBar } from "@/components/layout/TopBar";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { SectorObjectivesEditor } from "@/components/parametres/SectorObjectivesEditor";
+import { SyncPersonasButton } from "@/components/parametres/SyncPersonasButton";
 import { ImportForm } from "@/components/admin/ImportForm";
 import { ImportLogsTable } from "@/components/admin/ImportLogsTable";
 import { createClient } from "@/lib/supabase/server";
@@ -43,6 +44,25 @@ export default async function ParametresPage() {
               </CardDescription>
             </CardHeader>
             <SectorObjectivesEditor initial={objectives} />
+          </Card>
+        </section>
+
+        {/* ── Personas ──────────────────────────────────────────── */}
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Personas</h2>
+          <Card>
+            <CardHeader>
+              <CardTitle>Spécialités & personas des médecins</CardTitle>
+              <CardDescription>
+                Récupère depuis Nexora (par RPPS) la spécialité de chaque médecin, en déduit le persona du compte
+                (dermatologue / chirurgien plasticien / médecin esthétique) et le <strong>stocke en base</strong>. La
+                donnée reste disponible même après une mise à jour des ventes. À relancer après un nouvel import de
+                médecins.
+              </CardDescription>
+            </CardHeader>
+            <div className="px-6 pb-6">
+              <SyncPersonasButton />
+            </div>
           </Card>
         </section>
 
