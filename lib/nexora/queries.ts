@@ -78,6 +78,23 @@ export async function getSponsoringByRpps(rpps: string[]): Promise<SponsoringTot
   return (data ?? []) as SponsoringTotals[];
 }
 
+export interface SpecialtyByRpps {
+  rpps: string;
+  specialite: string | null;
+  is_esth: boolean;
+  is_derm: boolean;
+  is_chir: boolean;
+  is_gene: boolean;
+}
+
+export async function getSpecialitesByRpps(rpps: string[]): Promise<SpecialtyByRpps[]> {
+  const nexora = createNexoraClient();
+  if (!nexora || rpps.length === 0) return [];
+  const { data, error } = await nexora.rpc("sonar_specialite_by_rpps", { p_rpps: rpps });
+  if (error) return [];
+  return (data ?? []) as SpecialtyByRpps[];
+}
+
 export async function getLabsByRpps(rpps: string[]): Promise<LabByRpps[]> {
   const nexora = createNexoraClient();
   if (!nexora || rpps.length === 0) return [];

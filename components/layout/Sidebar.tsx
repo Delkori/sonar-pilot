@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Map, Radar, LogOut, Grid3x3, Gamepad2, CalendarDays, PhoneCall, HandCoins, Settings } from "lucide-react";
+import { LayoutDashboard, Users, Map, Radar, LogOut, Grid3x3, Gamepad2, CalendarDays, PhoneCall, HandCoins, Settings, Fingerprint } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
@@ -11,6 +11,7 @@ const items = [
   { href: "/relances", label: "Relances téléphoniques", icon: PhoneCall },
   { href: "/comptes", label: "Comptes", icon: Users },
   { href: "/matrice", label: "Matrice Produit", icon: Grid3x3 },
+  { href: "/personas", label: "Personas", icon: Fingerprint },
   { href: "/mapping", label: "Mapping AURA", icon: Map },
   { href: "/sponsoring", label: "Sponsoring & concurrence", icon: HandCoins },
   { href: "/calendrier", label: "Calendrier", icon: CalendarDays },
