@@ -10,6 +10,10 @@ import { UpcomingActionsCard } from "@/components/dashboard/UpcomingActionsCard"
 import { HcpOverviewCard } from "@/components/dashboard/HcpOverviewCard";
 import { InteractiveMonthlyChart } from "@/components/dashboard/InteractiveMonthlyChart";
 import { ProductSalesComparison, type ProductRow } from "@/components/dashboard/ProductSalesComparison";
+import { AnnualObjectiveCard } from "@/components/dashboard/AnnualObjectiveCard";
+import { OrderRecurrenceCard } from "@/components/dashboard/OrderRecurrenceCard";
+import { CompetitorShareCard } from "@/components/dashboard/CompetitorShareCard";
+import type { CompetitorAmount } from "@/lib/nexora/queries";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { suggestMonthlyForecast } from "@/lib/forecast";
 import { computeTargetingScore, ACTION_META } from "@/lib/scoring";
@@ -65,6 +69,7 @@ export function DashboardClient({
   actions = [],
   hcps = [],
   sponsorships = [],
+  competitorAmounts = [],
   lastImportLabel,
 }: {
   accounts: Account[];
@@ -75,6 +80,7 @@ export function DashboardClient({
   actions?: AccountAction[];
   hcps?: Hcp[];
   sponsorships?: HcpSponsorship[];
+  competitorAmounts?: CompetitorAmount[];
   lastImportLabel: string;
 }) {
   const [year, setYear] = useState(2026);
@@ -436,6 +442,15 @@ export function DashboardClient({
             onSelectMonth={setMonth}
           />
         )}
+
+        {/* Objectif annuel + atterrissage */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <AnnualObjectiveCard caByMonth={caByMonthOfYear} objectifByMonth={objectifByMonthOfYear} year={year} />
+          <OrderRecurrenceCard monthlySales={monthlySales} accountIds={filteredAccountIds} />
+        </div>
+
+        {/* Sponsoring : Teoxane vs concurrents (Transparence Santé) */}
+        <CompetitorShareCard amounts={competitorAmounts} />
 
         {/* Widget 3 : Synthèse Départementale */}
         <DepartmentBreakdown

@@ -1,6 +1,7 @@
 import { TopBar } from "@/components/layout/TopBar";
 import { DashboardClient } from "@/components/dashboard/DashboardClient";
 import { createClient } from "@/lib/supabase/server";
+import { getCompetitorAmounts, SECTEUR_REGION } from "@/lib/nexora/queries";
 import type { Account, AccountAction, Hcp, HcpSponsorship } from "@/types/database";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +58,8 @@ export default async function DashboardPage() {
     ? `Dernière mise à jour : ${new Date(lastImport.data.imported_at).toLocaleString("fr-FR")} (${lastImport.data.filename})`
     : "Aucun import réalisé pour le moment — rendez-vous dans Import";
 
+  const competitorAmounts = await getCompetitorAmounts(SECTEUR_REGION);
+
   return (
     <div>
       <TopBar title="Dashboard — Secteur Auvergne-Rhône-Alpes" />
@@ -69,6 +72,7 @@ export default async function DashboardPage() {
         actions={actions}
         hcps={hcps}
         sponsorships={sponsorships}
+        competitorAmounts={competitorAmounts}
         lastImportLabel={lastImportLabel}
       />
     </div>
