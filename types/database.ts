@@ -212,6 +212,7 @@ export type PlanningEvent = {
   start_at: string;
   end_at: string;
   source: ForecastSource;
+  confirmed: boolean;
   created_at: string;
   updated_at: string;
 };

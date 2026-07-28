@@ -18,7 +18,7 @@ import { isProspect } from "@/lib/accounts";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import type { Account, AccountAction, AccountForecast, PlanningEvent, PlanningEventType } from "@/types/database";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Wand2, Trash2, Loader2, Phone, FileText, MapPin, Compass, X, Target, CalendarClock } from "lucide-react";
+import { ChevronLeft, ChevronRight, Wand2, Trash2, Loader2, Phone, FileText, MapPin, Compass, X, Target, CalendarClock, Check } from "lucide-react";
 
 const locales = { fr };
 const localizer = dateFnsLocalizer({
@@ -155,6 +155,14 @@ export function WeeklyPlanner({
     await supabase.from("planning_events").delete().eq("id", id);
   }
 
+  async function toggleConfirmed(id: string, confirmed: boolean) {
+    // Un rendez-vous validé est conservé tel quel — jamais recalculé,
+    // déplacé ou supprimé par une régénération automatique.
+    setEvents((prev) => prev.map((e) => (e.id === id ? { ...e, confirmed, source: "manuel" } : e)));
+    const supabase = createClient();
+    await supabase.from("planning_events").update({ confirmed, source: "manuel" as const }).eq("id", id);
+  }
+
   async function createEvent(
     accountId: string | null,
     type: PlanningEventType,
@@ -190,7 +198,13 @@ export function WeeklyPlanner({
     const weekEndExclusive = new Date(date);
     weekEndExclusive.setDate(weekEndExclusive.getDate() + 5);
     const staleIds = events
-      .filter((e) => e.source === "auto" && new Date(e.start_at) >= date && new Date(e.start_at) < weekEndExclusive)
+      .filter(
+        (e) =>
+          e.source === "auto" &&
+          !e.confirmed &&
+          new Date(e.start_at) >= date &&
+          new Date(e.start_at) < weekEndExclusive
+      )
       .map((e) => e.id);
     if (staleIds.length > 0) {
       await supabase.from("planning_events").delete().in("id", staleIds);
@@ -333,13 +347,18 @@ export function WeeklyPlanner({
             max={new Date(1970, 0, 1, 19, 0)}
             style={{ height: "100%" }}
             eventPropGetter={(event: CalEvent) => ({
-              style: { backgroundColor: TYPE_META[event.resource.type].color, border: "none" },
+              style: {
+                backgroundColor: TYPE_META[event.resource.type].color,
+                border: event.resource.confirmed ? "2px solid #ffffff" : "none",
+              },
             })}
             components={{
               event: ({ event }: { event: CalEvent }) => {
                 const timeLabel = event.start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+                const displayTitle = event.resource.confirmed ? `✓ ${event.title}` : event.title;
                 const fullText = [
                   timeLabel,
+                  event.resource.confirmed ? "Validé" : null,
                   event.title,
                   event.resource.note,
                 ]
@@ -363,7 +382,7 @@ export function WeeklyPlanner({
                         padding: "1px 16px 1px 4px",
                       }}
                     >
-                      {event.title}
+                      {displayTitle}
                     </span>
                     <button
                       onClick={(e) => { e.stopPropagation(); deleteEvent(event.id); }}
@@ -496,8 +515,18 @@ export function WeeklyPlanner({
             )}
 
             <button
+              onClick={() => toggleConfirmed(selectedEvent.id, !selectedEvent.confirmed)}
+              className={`mt-auto flex items-center justify-center gap-1.5 rounded-lg border py-2 text-sm font-medium ${
+                selectedEvent.confirmed
+                  ? "border-success/40 bg-success/10 text-success hover:bg-success/15"
+                  : "border-primary/30 text-primary-700 hover:bg-primary-50"
+              }`}
+            >
+              <Check size={14} /> {selectedEvent.confirmed ? "Rendez-vous validé" : "Marquer comme validé"}
+            </button>
+            <button
               onClick={() => { deleteEvent(selectedEvent.id); setSelectedId(null); }}
-              className="mt-auto flex items-center justify-center gap-1.5 rounded-lg border border-danger/30 py-2 text-sm font-medium text-danger hover:bg-danger/5"
+              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-danger/30 py-2 text-sm font-medium text-danger hover:bg-danger/5"
             >
               <Trash2 size={14} /> Supprimer ce créneau
             </button>

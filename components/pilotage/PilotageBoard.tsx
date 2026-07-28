@@ -487,7 +487,7 @@ export function PilotageBoard({
     const supabase = createClient();
     const [{ data: actionsRaw }, { data: eventsRaw }] = await Promise.all([
       supabase.from("account_actions").select("account_id, type, due_date, done"),
-      supabase.from("planning_events").select("id, account_id, start_at, source"),
+      supabase.from("planning_events").select("id, account_id, start_at, source, confirmed"),
     ]);
 
     const manuelForecasts = forecasts.filter((f) => f.kind === "prevision" && f.source === "manuel");
@@ -502,7 +502,13 @@ export function PilotageBoard({
       { min: null as Date | null, max: null as Date | null }
     );
 
-    const existingEvents = (eventsRaw ?? []) as { id: string; account_id: string | null; start_at: string; source: string }[];
+    const existingEvents = (eventsRaw ?? []) as {
+      id: string;
+      account_id: string | null;
+      start_at: string;
+      source: string;
+      confirmed: boolean;
+    }[];
     const draft = generateMonthlyPlan(
       monthsList,
       accounts,
@@ -517,6 +523,7 @@ export function PilotageBoard({
       .filter(
         (e) =>
           e.source === "auto" &&
+          !e.confirmed &&
           range.min &&
           range.max &&
           new Date(e.start_at) >= range.min &&
