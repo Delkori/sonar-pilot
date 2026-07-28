@@ -329,18 +329,27 @@ export function WeeklyPlanner({
               style: { backgroundColor: TYPE_META[event.resource.type].color, border: "none" },
             })}
             components={{
-              event: ({ event }: { event: CalEvent }) => (
-                <div className="flex h-full flex-col overflow-hidden px-1 text-[10px] leading-tight text-white">
-                  <span className="font-semibold">{event.title}</span>
-                  {event.resource.note && <span className="opacity-90">{event.resource.note}</span>}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); deleteEvent(event.id); }}
-                    className="absolute right-0.5 top-0.5 text-white/70 hover:text-white"
+              event: ({ event }: { event: CalEvent }) => {
+                const durationMin = (event.end.getTime() - event.start.getTime()) / 60000;
+                const fullText = [event.title, event.resource.note].filter(Boolean).join(" — ");
+                return (
+                  <div
+                    title={fullText}
+                    className="group flex h-full flex-col gap-0.5 overflow-hidden px-1.5 py-0.5 leading-tight text-white"
                   >
-                    <Trash2 size={10} />
-                  </button>
-                </div>
-              ),
+                    <span className="truncate text-[11px] font-semibold">{event.title}</span>
+                    {event.resource.note && durationMin >= 30 && (
+                      <span className="line-clamp-2 text-[10px] opacity-90">{event.resource.note}</span>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteEvent(event.id); }}
+                      className="absolute right-0.5 top-0.5 rounded bg-black/10 p-0.5 text-white/0 group-hover:text-white/80 hover:!text-white"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                );
+              },
             }}
             onEventDrop={({ event, start, end }: EventInteractionArgs<CalEvent>) =>
               persistUpdate(event.id, { start_at: new Date(start).toISOString(), end_at: new Date(end).toISOString() })
