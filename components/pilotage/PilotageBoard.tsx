@@ -397,6 +397,7 @@ export function PilotageBoard({
         (f) =>
           f.kind === "prevision" &&
           f.source === "auto" &&
+          !f.commentaire &&
           monthKeySet.has(`${f.year}-${f.month}`) &&
           !predictedKeys.has(keyOf(f))
       )
@@ -456,6 +457,14 @@ export function PilotageBoard({
     setForecasts((prev) => prev.map((f) => (f.id === id ? { ...f, ca_prevu, source: "manuel" } : f)));
     const supabase = createClient();
     await supabase.from("account_forecasts").update({ ca_prevu, source: "manuel" as const }).eq("id", id);
+  }
+
+  async function updateForecastCommentaire(id: string, commentaire: string) {
+    // Champ libre distinct de la note générée par le modèle : jamais réécrit
+    // par le générateur, donc jamais perdu au clic sur "Générer".
+    setForecasts((prev) => prev.map((f) => (f.id === id ? { ...f, commentaire } : f)));
+    const supabase = createClient();
+    await supabase.from("account_forecasts").update({ commentaire }).eq("id", id);
   }
 
   function exportToExcel() {
@@ -893,6 +902,13 @@ export function PilotageBoard({
                           {f.note}
                         </p>
                       )}
+                      <input
+                        type="text"
+                        defaultValue={f.commentaire ?? ""}
+                        placeholder="Commentaire — quoi proposer..."
+                        onBlur={(e) => updateForecastCommentaire(f.id, e.target.value)}
+                        className="mt-1 w-full rounded border border-dashed border-border bg-transparent px-1.5 py-1 text-[10px] text-foreground placeholder:text-muted-foreground/60 hover:border-primary/50 focus:border-primary focus:outline-none"
+                      />
                     </div>
                   );
                 })}

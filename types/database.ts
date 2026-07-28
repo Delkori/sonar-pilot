@@ -125,6 +125,7 @@ export type AccountForecast = {
   boites_prevues: number | null;
   ca_prevu: number | null;
   note: string | null;
+  commentaire: string | null;
   source: ForecastSource;
   created_by: string | null;
   created_at: string;

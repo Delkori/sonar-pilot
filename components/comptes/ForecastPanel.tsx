@@ -174,6 +174,17 @@ export function ForecastPanel({
     });
   }
 
+  function updateCommentaire(id: string, commentaire: string) {
+    // Champ distinct de `note` (généré par le modèle) : jamais touché par la
+    // génération auto, donc pas besoin de figer la ligne en "manuel" — le
+    // commentaire survit même si les chiffres sont ensuite réactualisés.
+    setForecasts((prev) => prev.map((f) => (f.id === id ? { ...f, commentaire } : f)));
+    const supabase = createClient();
+    startTransition(async () => {
+      await supabase.from("account_forecasts").update({ commentaire }).eq("id", id);
+    });
+  }
+
   function removeForecast(id: string) {
     setForecasts((prev) => prev.filter((f) => f.id !== id));
     const supabase = createClient();
@@ -348,6 +359,7 @@ export function ForecastPanel({
               <SortableTh label="CA" sortKey="ca" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
               <th className="px-3 py-2 text-right font-medium">Cumul CA</th>
               {period === "mois" && <th className="px-3 py-2 font-medium">Note</th>}
+              {period === "mois" && <th className="px-3 py-2 font-medium">Commentaire</th>}
               {period === "mois" && <th className="w-8" />}
             </tr>
           </thead>
@@ -380,6 +392,15 @@ export function ForecastPanel({
                         defaultValue={r.forecast.note ?? ""}
                         placeholder={kind === "objectif" ? "ex. objectif révisé..." : "ex. offre prévue, RDV programmé..."}
                         onBlur={(e) => updateForecast(r.forecast!.id, { note: e.target.value || null })}
+                        className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-border focus:border-primary focus:outline-none"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="text"
+                        defaultValue={r.forecast.commentaire ?? ""}
+                        placeholder="ex. proposer RHA2, insister sur la gamme lèvres..."
+                        onBlur={(e) => updateCommentaire(r.forecast!.id, e.target.value)}
                         className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-border focus:border-primary focus:outline-none"
                       />
                     </td>
