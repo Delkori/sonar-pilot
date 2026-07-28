@@ -364,24 +364,23 @@ export function WeeklyPlanner({
                 ]
                   .filter(Boolean)
                   .join(" — ");
+                const lineStyle = {
+                  display: "block",
+                  width: "100%",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                };
                 return (
                   <div
                     title={fullText}
                     className="group relative h-full text-white"
                     style={{ overflow: "hidden", width: "100%" }}
                   >
-                    <span
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        fontSize: "10px",
-                        lineHeight: "1.2",
-                        padding: "1px 16px 1px 4px",
-                      }}
-                    >
+                    <span style={{ ...lineStyle, fontSize: "9px", lineHeight: "1.2", padding: "1px 16px 0 4px", opacity: 0.85 }}>
+                      {timeLabel}
+                    </span>
+                    <span style={{ ...lineStyle, fontSize: "10px", lineHeight: "1.2", padding: "0 16px 1px 4px", fontWeight: 500 }}>
                       {displayTitle}
                     </span>
                     <button
