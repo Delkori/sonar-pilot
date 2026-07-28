@@ -451,9 +451,11 @@ export function PilotageBoard({
   }
 
   async function updateForecastCa(id: string, ca_prevu: number) {
-    setForecasts((prev) => prev.map((f) => (f.id === id ? { ...f, ca_prevu } : f)));
+    // Une modification manuelle doit être marquée "manuel" : sinon la ligne
+    // reste taguée "auto" et le prochain "Générer" l'écrase silencieusement.
+    setForecasts((prev) => prev.map((f) => (f.id === id ? { ...f, ca_prevu, source: "manuel" } : f)));
     const supabase = createClient();
-    await supabase.from("account_forecasts").update({ ca_prevu }).eq("id", id);
+    await supabase.from("account_forecasts").update({ ca_prevu, source: "manuel" as const }).eq("id", id);
   }
 
   function exportToExcel() {

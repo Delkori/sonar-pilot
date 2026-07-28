@@ -14,6 +14,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { Package, TrendingUp, TrendingDown } from "lucide-react";
+import { SortableTh } from "@/components/ui/SortableTh";
+import { useSortableTable } from "@/lib/hooks/useSortableTable";
 
 export interface ProductRow {
   account_id: string;
@@ -75,6 +77,22 @@ export function ProductSalesComparison({
       })
       .sort((a, b) => b.cyVal - a.cyVal);
   }, [products, filteredAccountIds]);
+
+  type BrandSortKey = "brand" | "lyVal" | "cyVal" | "diffVal" | "growthVal" | "lyQty" | "cyQty" | "growthQty";
+  const { sorted: sortedBrandStats, sortKey, dir, toggle } = useSortableTable<(typeof brandStats)[number], BrandSortKey>(
+    brandStats,
+    {
+      brand: (r) => r.brand,
+      lyVal: (r) => r.lyVal,
+      cyVal: (r) => r.cyVal,
+      diffVal: (r) => r.diffVal,
+      growthVal: (r) => r.growthVal,
+      lyQty: (r) => r.lyQty,
+      cyQty: (r) => r.cyQty,
+      growthQty: (r) => r.growthQty,
+    },
+    "cyVal"
+  );
 
   const totalCyVal = useMemo(() => brandStats.reduce((s, b) => s + b.cyVal, 0), [brandStats]);
   const totalLyVal = useMemo(() => brandStats.reduce((s, b) => s + b.lyVal, 0), [brandStats]);
@@ -238,18 +256,18 @@ export function ProductSalesComparison({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="pb-2 font-medium">Marque</th>
-                <th className="pb-2 font-medium text-right">CA N-1</th>
-                <th className="pb-2 font-medium text-right">CA En cours</th>
-                <th className="pb-2 font-medium text-right">Écart €</th>
-                <th className="pb-2 font-medium text-right">Évol. CA</th>
-                <th className="pb-2 font-medium text-right">Volume N-1</th>
-                <th className="pb-2 font-medium text-right">Volume N</th>
-                <th className="pb-2 font-medium text-right">Évol. Vol.</th>
+                <SortableTh label="Marque" sortKey="brand" activeKey={sortKey} dir={dir} onSort={toggle} className="pb-2" />
+                <SortableTh label="CA N-1" sortKey="lyVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
+                <SortableTh label="CA En cours" sortKey="cyVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
+                <SortableTh label="Écart €" sortKey="diffVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
+                <SortableTh label="Évol. CA" sortKey="growthVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
+                <SortableTh label="Volume N-1" sortKey="lyQty" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
+                <SortableTh label="Volume N" sortKey="cyQty" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
+                <SortableTh label="Évol. Vol." sortKey="growthQty" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
               </tr>
             </thead>
             <tbody>
-              {brandStats.map((b) => (
+              {sortedBrandStats.map((b) => (
                 <tr key={b.brand} className="border-b border-border last:border-0 hover:bg-surface-muted/50">
                   <td className="py-2.5 font-medium text-foreground">{b.brand}</td>
                   <td className="py-2.5 text-right text-muted-foreground">{formatEUR(b.lyVal)}</td>
