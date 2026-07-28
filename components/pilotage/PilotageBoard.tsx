@@ -373,6 +373,26 @@ export function PilotageBoard({
     if (!error && data) setForecasts((prev) => [...prev, data as AccountForecast]);
   }
 
+  async function moveForecast(forecastId: string, year: number, month: number) {
+    setDropTarget(null);
+    setDragging(null);
+    const existing = forecasts.find((f) => f.id === forecastId);
+    if (!existing) return;
+    if (existing.year === year && existing.month === month) return;
+    // Déjà une ligne sur le mois cible pour ce compte : on ne fusionne pas
+    // silencieusement, mieux vaut que l'utilisateur les traite à la main.
+    if (forecasts.some((f) => f.account_id === existing.account_id && f.year === year && f.month === month)) return;
+
+    setIsSaving(true);
+    // Déplacer un compte d'un mois à l'autre est une décision manuelle
+    // explicite : la ligne est marquée "manuel", elle ne sera jamais
+    // réécrite par le générateur portefeuille.
+    setForecasts((prev) => prev.map((f) => (f.id === forecastId ? { ...f, year, month, source: "manuel" } : f)));
+    const supabase = createClient();
+    await supabase.from("account_forecasts").update({ year, month, source: "manuel" as const }).eq("id", forecastId);
+    setIsSaving(false);
+  }
+
   const [autoFilling, setAutoFilling] = useState(false);
 
   async function autoFillPortfolio() {
@@ -820,6 +840,11 @@ export function PilotageBoard({
               onDragLeave={() => setDropTarget((t) => (t === key ? null : t))}
               onDrop={(e) => {
                 e.preventDefault();
+                const forecastId = e.dataTransfer.getData("text/forecast-id");
+                if (forecastId) {
+                  moveForecast(forecastId, year, month);
+                  return;
+                }
                 const accountId = e.dataTransfer.getData("text/account-id");
                 if (accountId) handleDrop(accountId, year, month);
               }}
@@ -908,9 +933,16 @@ export function PilotageBoard({
                   return (
                     <div
                       key={f.id}
-                      className={`rounded-lg border p-2.5 ${
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("text/forecast-id", f.id);
+                        e.dataTransfer.effectAllowed = "move";
+                        setDragging(f.id);
+                      }}
+                      onDragEnd={() => { setDragging(null); setDropTarget(null); }}
+                      className={`cursor-grab rounded-lg border p-2.5 transition-opacity active:cursor-grabbing ${
                         commande ? "border-success/40 bg-success/5" : "border-border bg-surface-muted"
-                      }`}
+                      } ${dragging === f.id ? "opacity-40" : ""}`}
                     >
                       <div className="flex items-start justify-between gap-1">
                         <Link
@@ -927,6 +959,30 @@ export function PilotageBoard({
                           <Trash2 size={12} />
                         </button>
                       </div>
+                      {months.length > 1 && (
+                        <div className="mt-1 flex items-center gap-1">
+                          <select
+                            defaultValue={`${year}-${month}`}
+                            className="flex-1 rounded border border-border bg-surface px-1 py-0.5 text-[10px] outline-none focus:border-primary"
+                          >
+                            {months.map((m) => (
+                              <option key={`${m.year}-${m.month}`} value={`${m.year}-${m.month}`}>
+                                {MONTH_LABELS[m.month - 1]} {m.year}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={(e) => {
+                              const select = e.currentTarget.previousElementSibling as HTMLSelectElement;
+                              const [y, m] = select.value.split("-").map(Number);
+                              moveForecast(f.id, y, m);
+                            }}
+                            className="shrink-0 rounded bg-surface px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-primary-50 hover:text-primary-700"
+                          >
+                            Déplacer
+                          </button>
+                        </div>
+                      )}
                       <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
                         <Target size={11} />
                         {formatNumber(f.boites_prevues)} boîtes ·
