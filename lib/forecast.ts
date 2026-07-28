@@ -1,6 +1,7 @@
 import type { Account } from "@/types/database";
-import { PRIX_MOYEN_BOITE, computeTargetingScore, ACTION_META } from "./scoring";
-import type { ActionCode } from "./scoring";
+import { PRIX_MOYEN_BOITE, computeTargetingScore } from "./scoring";
+import { recurrenceBucket, isProspect } from "./accounts";
+import type { RecurrenceBucket } from "./accounts";
 
 export interface SuggestedForecast {
   year: number;
@@ -89,38 +90,105 @@ export interface PredictedForecast {
   hcp: HcpShare[];
 }
 
-// Facteur de croissance appliqué au run-rate selon l'action recommandée :
-// un compte à conquérir/développer a plus d'upside qu'un compte déjà fidèle.
-// Facteurs volontairement prudents : on part du rythme réel de commandes
-// (run-rate) et on n'ajoute qu'une croissance modérée selon l'action. Objectif :
-// un prévisionnel crédible, pas gonflé.
-const GROWTH_BY_ACTION: Record<ActionCode, number> = {
-  visite_urgente: 1.15,
-  developper_pdm: 1.12,
-  reconquete: 1.1,
-  cross_sell: 1.08,
-  relance: 1.05,
-  fideliser: 1.0,
-};
-
 export function allocateToHcps(hcps: HcpLite[], boites: number, ca: number): HcpShare[] {
   if (hcps.length === 0) return [];
   const totalPot = hcps.reduce((s, h) => s + (h.potentiel_boites ?? 0), 0);
-  return hcps.map((h) => {
-    const share = totalPot > 0 ? (h.potentiel_boites ?? 0) / totalPot : 1 / hcps.length;
-    return { hcpId: h.id, name: h.name, boites: Math.round(boites * share), ca: Math.round(ca * share) };
-  });
+  return hcps
+    .map((h) => {
+      const share = totalPot > 0 ? (h.potentiel_boites ?? 0) / totalPot : 1 / hcps.length;
+      return { hcpId: h.id, name: h.name, boites: Math.round(boites * share), ca: Math.round(ca * share) };
+    })
+    // Un médecin dont la part est négligeable n'apporte rien à la lecture —
+    // on ne garde que ceux qui pèsent réellement dans la répartition.
+    .filter((h) => totalPot === 0 || (h.boites ?? 0) > 0 || (h.ca ?? 0) > 0)
+    .sort((a, b) => b.ca - a.ca)
+    .slice(0, 3);
+}
+
+// Nombre de mois attendu entre deux commandes selon la cadence observée du
+// compte — sert à décider si le mois cible "tombe" dans son rythme habituel.
+const RECURRENCE_GAP_MONTHS: Record<RecurrenceBucket, number | null> = {
+  Mensuelle: 1,
+  Bimestrielle: 2,
+  Trimestrielle: 3,
+  Espacée: 6,
+  Unique: null,
+};
+
+const SILENCE_MODERE_SEMAINES = 8;
+
+interface MonthSignal {
+  weight: number;
+  reason: string;
+}
+
+function monthIndex(year: number, month: number): number {
+  return year * 12 + month;
+}
+
+function orderedMonthIndices(sales: MonthlySaleRow[]): number[] {
+  return sales
+    .filter((s) => s.ca > 0)
+    .map((s) => monthIndex(s.year, s.month))
+    .sort((a, b) => a - b);
 }
 
 /**
- * Prévision mensuelle prédictive pour un compte :
- *  - base = run-rate annuel réel (somme des 12 derniers mois de commandes),
- *    à défaut CA 2026 annualisé, à défaut CA 2025 ; un prospect sans
- *    historique est amorcé sur 20 % de son potentiel ;
- *  - amplifiée par un facteur de croissance selon l'action recommandée ;
- *  - plafonnée à 110 % du potentiel annuel (on ne prévoit pas l'impossible) ;
- *  - répartie sur les mois cibles selon la saisonnalité observée (lissée),
- *    puis éclatée par médecin au prorata de leur potentiel.
+ * Décide si un compte mérite une prévision sur un mois donné, et avec quel
+ * poids — selon des critères de récurrence réels plutôt qu'un lissage
+ * générique :
+ *  1. Le mois cible tombe dans le rythme de commande habituel du compte
+ *     (mensuel/bimestriel/trimestriel) → poids plein.
+ *  2. Le compte n'a pas commandé le mois précédent cette année, mais
+ *     commandait déjà ce même mois calendaire l'an dernier → relance
+ *     saisonnière, poids modéré (retard probable, pas un vrai silence).
+ *  3. Silence prolongé (≥ 8 semaines) sur un compte déjà actif (pas un pur
+ *     prospect) → relance possible mais poids modéré, pour ne pas sur-prédire.
+ *  4. Prospect sans historique réel → poids volontairement léger.
+ * Sinon, aucune prévision n'est générée pour ce mois : mieux vaut un tableau
+ * plus court mais fiable qu'une prévision sur chaque médecin par défaut.
+ */
+function evaluateMonthSignal(account: Account, orderedMonths: number[], tmIdx: number): MonthSignal | null {
+  // Une commande réelle existe déjà ce mois-ci : le réalisé suffit, inutile
+  // de la doubler d'une prévision.
+  if (orderedMonths.includes(tmIdx)) return null;
+
+  const lastOrderIdx = orderedMonths.length > 0 ? orderedMonths[orderedMonths.length - 1] : null;
+  const bucket = recurrenceBucket(orderedMonths);
+  const expectedGap = RECURRENCE_GAP_MONTHS[bucket];
+
+  if (lastOrderIdx !== null && expectedGap !== null && tmIdx - lastOrderIdx >= expectedGap) {
+    return { weight: 1, reason: `Récurrence ${bucket.toLowerCase()} — dû ce mois-ci` };
+  }
+
+  const sameMonthLastYear = tmIdx - 12;
+  const prevMonthThisYear = tmIdx - 1;
+  if (orderedMonths.includes(sameMonthLastYear) && !orderedMonths.includes(prevMonthThisYear)) {
+    return { weight: 0.7, reason: "Relance saisonnière — commandait ce mois-ci l'an dernier" };
+  }
+
+  const prospect = isProspect(account);
+  const silenceWeeks = account.jours_silence != null ? account.jours_silence / 7 : null;
+  if (!prospect && silenceWeeks !== null && silenceWeeks >= SILENCE_MODERE_SEMAINES) {
+    return { weight: 0.45, reason: `Silence prolongé (${Math.round(silenceWeeks)} sem.) — relance modérée` };
+  }
+
+  if (prospect) {
+    const score = computeTargetingScore(account);
+    if (score.action !== "fideliser") {
+      return { weight: 0.3, reason: "Prospect à développer — montant volontairement prudent" };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Prévision mensuelle prédictive pour un compte, mois par mois : chaque mois
+ * cible est évalué indépendamment (récurrence, relance saisonnière, silence,
+ * prospect) et n'apparaît que s'il y a un signal réel — voir
+ * `evaluateMonthSignal`. Le montant est plafonné au potentiel du compte et
+ * réparti par médecin au prorata de leur potentiel.
  */
 export function predictMonthlyForecast(
   account: Account,
@@ -128,61 +196,37 @@ export function predictMonthlyForecast(
   sales: MonthlySaleRow[],
   targetMonths: { year: number; month: number }[]
 ): PredictedForecast[] {
-  const score = computeTargetingScore(account);
-  const growth = GROWTH_BY_ACTION[score.action];
-
-  const monthlyTotals = new Array(12).fill(0) as number[];
-  for (const s of sales) monthlyTotals[s.month - 1] += s.ca;
-
+  const orderedMonths = orderedMonthIndices(sales);
+  const potentielAnnual = (account.potentiel_boites ?? 0) * PRIX_MOYEN_BOITE;
   const runRate = [...sales]
     .sort((a, b) => b.year * 12 + b.month - (a.year * 12 + a.month))
     .slice(0, 12)
     .reduce((s, r) => s + r.ca, 0);
-
-  const monthsElapsed = new Date().getMonth() + 1;
-  let baseAnnual =
-    runRate > 0
-      ? runRate
-      : account.ca_2026_ytd && account.ca_2026_ytd > 0
-      ? account.ca_2026_ytd * (12 / monthsElapsed)
-      : account.ca_2025 ?? 0;
-
-  const potentielAnnual = (account.potentiel_boites ?? 0) * PRIX_MOYEN_BOITE;
-  // Prospect sans historique : amorce sur une petite fraction du potentiel.
-  if (baseAnnual === 0 && potentielAnnual > 0) baseAnnual = potentielAnnual * 0.1;
-
-  let projectedAnnual = baseAnnual * growth;
-  // Plafond prudent : on ne prévoit pas plus que ~50 % du potentiel annuel,
-  // tout en ne coupant jamais sous le rythme réel déjà observé (+30 % max).
-  if (potentielAnnual > 0) {
-    const plafond = Math.max(runRate * 1.3, potentielAnnual * 0.5);
-    projectedAnnual = Math.min(projectedAnnual, plafond);
-  }
-
+  const baselineMonthly = potentielAnnual > 0 ? potentielAnnual / 12 : runRate > 0 ? runRate / 12 : 0;
   const caParBoite =
     account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
       ? account.ca_2026_ytd / account.realise_boites
       : PRIX_MOYEN_BOITE;
 
-  const seasonalSum = monthlyTotals.reduce((s, v) => s + v, 0);
-
-  return targetMonths.map((tm) => {
-    // poids saisonnier lissé (60 % saisonnalité réelle, 40 % uniforme) pour
-    // éviter qu'un mois jamais commandé tombe à zéro
-    const weight =
-      seasonalSum > 0 ? 0.6 * (monthlyTotals[tm.month - 1] / seasonalSum) + 0.4 * (1 / 12) : 1 / 12;
-    const ca = Math.round(projectedAnnual * weight);
+  const out: PredictedForecast[] = [];
+  for (const tm of targetMonths) {
+    const tmIdx = monthIndex(tm.year, tm.month);
+    const signal = evaluateMonthSignal(account, orderedMonths, tmIdx);
+    if (!signal) continue;
+    const ca = Math.round(baselineMonthly * signal.weight);
+    if (ca <= 0) continue;
     const boites = caParBoite > 0 ? Math.round(ca / caParBoite) : 0;
-    return {
+    out.push({
       account_id: account.id,
       year: tm.year,
       month: tm.month,
       ca_prevu: ca,
       boites_prevues: boites,
-      note: `${ACTION_META[score.action].label} — prévision IA (run-rate ${Math.round(baseAnnual).toLocaleString("fr-FR")} €/an ×${growth})`,
+      note: signal.reason,
       hcp: allocateToHcps(hcps, boites, ca),
-    };
-  });
+    });
+  }
+  return out;
 }
 
 /**
