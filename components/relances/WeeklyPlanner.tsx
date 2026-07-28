@@ -348,14 +348,26 @@ export function WeeklyPlanner({
                 return (
                   <div
                     title={fullText}
-                    className="group flex h-full items-center gap-1 overflow-hidden px-1.5 text-white"
+                    className="group relative h-full text-white"
+                    style={{ overflow: "hidden", width: "100%" }}
                   >
-                    <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[11px] font-medium">
+                    <span
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        fontSize: "10px",
+                        lineHeight: "1.2",
+                        padding: "1px 16px 1px 4px",
+                      }}
+                    >
                       {event.title}
                     </span>
                     <button
                       onClick={(e) => { e.stopPropagation(); deleteEvent(event.id); }}
-                      className="shrink-0 rounded bg-black/10 p-0.5 text-white/0 group-hover:text-white/80 hover:!text-white"
+                      className="absolute right-0 top-0 rounded bg-black/10 p-0.5 text-white/0 group-hover:text-white/80 hover:!text-white"
                     >
                       <Trash2 size={10} />
                     </button>
