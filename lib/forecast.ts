@@ -90,17 +90,38 @@ export interface PredictedForecast {
   hcp: HcpShare[];
 }
 
+/**
+ * Répartit le prévisionnel d'un compte sur ses médecins, uniquement parmi
+ * ceux dont le potentiel est renseigné — sans base réelle, un médecin
+ * n'obtient ni une part fantôme (arrondie à 0), ni une part inventée : il
+ * n'apparaît simplement pas dans la répartition. Les boîtes entières sont
+ * réparties par la méthode du plus grand reste pour que la somme reste
+ * exacte, sans qu'aucun médecin retenu ne se retrouve à 0 par arrondi.
+ */
 export function allocateToHcps(hcps: HcpLite[], boites: number, ca: number): HcpShare[] {
-  if (hcps.length === 0) return [];
-  const totalPot = hcps.reduce((s, h) => s + (h.potentiel_boites ?? 0), 0);
-  return hcps
-    .map((h) => {
-      const share = totalPot > 0 ? (h.potentiel_boites ?? 0) / totalPot : 1 / hcps.length;
-      return { hcpId: h.id, name: h.name, boites: Math.round(boites * share), ca: Math.round(ca * share) };
-    })
-    // Un médecin dont la part est négligeable n'apporte rien à la lecture —
-    // on ne garde que ceux qui pèsent réellement dans la répartition.
-    .filter((h) => totalPot === 0 || (h.boites ?? 0) > 0 || (h.ca ?? 0) > 0)
+  const eligible = hcps.filter((h) => (h.potentiel_boites ?? 0) > 0);
+  if (eligible.length === 0 || boites <= 0) return [];
+
+  const totalPot = eligible.reduce((s, h) => s + (h.potentiel_boites ?? 0), 0);
+  const shares = eligible.map((h) => (h.potentiel_boites ?? 0) / totalPot);
+  const exactBoites = shares.map((s) => boites * s);
+  const floors = exactBoites.map((v) => Math.floor(v));
+  const remainder = boites - floors.reduce((s, v) => s + v, 0);
+
+  const byRemainder = floors
+    .map((_, i) => ({ i, frac: exactBoites[i] - floors[i] }))
+    .sort((a, b) => b.frac - a.frac);
+  const finalBoites = [...floors];
+  for (let k = 0; k < remainder && k < byRemainder.length; k++) finalBoites[byRemainder[k].i] += 1;
+
+  return eligible
+    .map((h, i) => ({
+      hcpId: h.id,
+      name: h.name,
+      boites: finalBoites[i],
+      ca: Math.round(ca * shares[i]),
+    }))
+    .filter((h) => h.boites > 0)
     .sort((a, b) => b.ca - a.ca)
     .slice(0, 3);
 }

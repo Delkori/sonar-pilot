@@ -24,8 +24,14 @@ export default async function PilotagePage() {
 
   const { data: productsRaw } = await supabase
     .from("account_products")
-    .select("brand, sales_value_ly, sales_value_cy");
-  const products = (productsRaw ?? []) as { brand: string; sales_value_ly: number | null; sales_value_cy: number | null }[];
+    .select("account_id, brand, sales_value_ly, sales_value_cy, qty_ordered_cy");
+  const products = (productsRaw ?? []) as {
+    account_id: string;
+    brand: string;
+    sales_value_ly: number | null;
+    sales_value_cy: number | null;
+    qty_ordered_cy: number | null;
+  }[];
 
   const { data: objRaw } = await supabase.from("sector_objectives").select("*");
   const sectorObjectives = (objRaw ?? []) as SectorObjective[];

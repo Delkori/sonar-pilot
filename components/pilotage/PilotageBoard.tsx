@@ -7,8 +7,10 @@ import { predictPortfolioForecast, suggestMonthlyForecast, allocateToHcps } from
 import type { HcpLite } from "@/lib/forecast";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
 import type { Opportunity } from "@/lib/opportunities";
-import { computeTargetingScore, PRIX_MOYEN_BOITE } from "@/lib/scoring";
+import { computeTargetingScore, PRIX_MOYEN_BOITE, ACTION_META } from "@/lib/scoring";
 import { isProspect } from "@/lib/accounts";
+import { computePersonaModels, personaRecommendations, PERSONAS } from "@/lib/persona";
+import type { Persona } from "@/lib/persona";
 import { SegmentBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
@@ -17,7 +19,13 @@ import { GripVertical, Trash2, Loader2, Target, Wand2, Stethoscope, FileDown } f
 import * as XLSX from "xlsx";
 
 type HcpRow = Pick<Hcp, "id" | "account_id" | "name" | "potentiel_boites">;
-type ProductRow = { brand: string; sales_value_ly: number | null; sales_value_cy: number | null };
+type ProductRow = {
+  account_id: string;
+  brand: string;
+  sales_value_ly: number | null;
+  sales_value_cy: number | null;
+  qty_ordered_cy: number | null;
+};
 type CardSort = "ca" | "boites" | "score" | "nom" | "silence";
 const SEGMENTS = ["A", "B", "C", "D", "E"] as const;
 
@@ -63,7 +71,7 @@ export function PilotageBoard({
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
-  const [horizon, setHorizon] = useState<1 | 3 | 6>(3);
+  const [horizon, setHorizon] = useState<1 | 3 | 6 | 12>(3);
   const [cardSort, setCardSort] = useState<CardSort>("ca");
 
   const months = useMemo(() => nextMonths(horizon), [horizon]);
@@ -79,6 +87,43 @@ export function PilotageBoard({
     }
     return map;
   }, [hcps]);
+
+  // ── Mission par compte : une recommandation concrète à mener (référence à
+  // proposer selon le modèle du persona, ou à défaut l'action du score), pour
+  // que chaque médecin listé soit accompagné d'une action réelle plutôt que
+  // d'un simple chiffre.
+  const personaByAccount = useMemo(() => {
+    const map = new Map<string, Persona>();
+    for (const a of accounts) {
+      if (a.persona && (PERSONAS as readonly string[]).includes(a.persona)) map.set(a.id, a.persona as Persona);
+    }
+    return map;
+  }, [accounts]);
+  const caByAccount = useMemo(() => new Map(accounts.map((a) => [a.id, a.ca_2026_ytd ?? 0] as const)), [accounts]);
+  const brandsByAccount = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const p of products) {
+      if ((p.qty_ordered_cy ?? 0) <= 0) continue;
+      const set = map.get(p.account_id) ?? new Set<string>();
+      set.add(p.brand);
+      map.set(p.account_id, set);
+    }
+    return map;
+  }, [products]);
+  const personaModels = useMemo(
+    () => computePersonaModels(personaByAccount, products, caByAccount),
+    [personaByAccount, products, caByAccount]
+  );
+  const modelByPersona = useMemo(() => new Map(personaModels.map((m) => [m.persona, m] as const)), [personaModels]);
+
+  function missionForAccount(account: Account): string {
+    const persona = personaByAccount.get(account.id);
+    if (persona) {
+      const recos = personaRecommendations(modelByPersona.get(persona), brandsByAccount.get(account.id) ?? new Set(), 0.4, 1);
+      if (recos.length > 0) return `Proposer ${recos[0].brand} (référence-clé des ${persona.toLowerCase()}s)`;
+    }
+    return ACTION_META[computeTargetingScore(account).action].label;
+  }
 
   const opportunities = useMemo(() => detectOpportunities(accounts), [accounts]);
   const opportunityByAccount = useMemo(
@@ -135,7 +180,7 @@ export function PilotageBoard({
     return { totalCa, totalBoites, comptes: accountIds.size, prospects, tiers, realise, objectif };
   }, [forecasts, months, accountById, realiseByMonth, sectorObjectives]);
 
-  const periodLabel = horizon === 1 ? "ce mois" : horizon === 3 ? "ce trimestre" : "ce semestre";
+  const periodLabel = horizon === 1 ? "ce mois" : horizon === 3 ? "ce trimestre" : horizon === 6 ? "ce semestre" : "cette année";
 
   const accountSegment = useMemo(
     () => new Map(accounts.map((a) => [a.id, a.segment] as const)),
@@ -353,6 +398,7 @@ export function PilotageBoard({
           Score: account ? computeTargetingScore(account).total : "",
           "Boîtes prévues": f.boites_prevues ?? 0,
           "CA prévu (€)": f.ca_prevu ?? 0,
+          Mission: account ? missionForAccount(account) : "",
           "Médecins (répartition)": allocation.map((h) => `${h.name} (${h.boites} b · ${Math.round(h.ca)} €)`).join(" ; "),
           Note: f.note ?? "",
         };
@@ -361,11 +407,11 @@ export function PilotageBoard({
 
     const sheet = XLSX.utils.json_to_sheet(rows);
     sheet["!cols"] = [
-      { wch: 14 }, { wch: 30 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 50 }, { wch: 40 },
+      { wch: 14 }, { wch: 30 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 35 }, { wch: 50 }, { wch: 40 },
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, "Prévisionnel");
-    const label = horizon === 1 ? "mois" : horizon === 3 ? "trimestre" : "semestre";
+    const label = horizon === 1 ? "mois" : horizon === 3 ? "trimestre" : horizon === 6 ? "semestre" : "annee";
     XLSX.writeFile(workbook, `previsionnel-pilotage-${label}-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
@@ -378,7 +424,7 @@ export function PilotageBoard({
             Planification — {periodLabel} <span className="ml-1 text-xs font-normal text-muted-foreground">({periodRange})</span>
           </h3>
           <span className="text-xs text-muted-foreground">
-            Horizon : {horizon === 1 ? "1 mois" : horizon === 3 ? "trimestre" : "semestre"}
+            Horizon : {horizon === 1 ? "1 mois" : horizon === 3 ? "trimestre" : horizon === 6 ? "semestre" : "année"}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -618,7 +664,7 @@ export function PilotageBoard({
             <option value="nom">Nom</option>
           </select>
           <span className="text-xs text-muted-foreground">Horizon :</span>
-          {([1, 3, 6] as const).map((h) => (
+          {([1, 3, 6, 12] as const).map((h) => (
             <button
               key={h}
               onClick={() => setHorizon(h)}
@@ -628,13 +674,19 @@ export function PilotageBoard({
                   : "border-border text-muted-foreground hover:bg-surface-muted"
               }`}
             >
-              {h === 1 ? "1 mois" : h === 3 ? "Trimestre (3 mois)" : "Semestre (6 mois)"}
+              {h === 1 ? "1 mois" : h === 3 ? "Trimestre (3 mois)" : h === 6 ? "Semestre (6 mois)" : "Année (12 mois)"}
             </button>
           ))}
         </div>
         <div
           className={`grid grid-cols-1 gap-3 ${
-            horizon === 1 ? "" : horizon === 3 ? "sm:grid-cols-2 xl:grid-cols-3" : "sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6"
+            horizon === 1
+              ? ""
+              : horizon === 3
+              ? "sm:grid-cols-2 xl:grid-cols-3"
+              : horizon === 6
+              ? "sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6"
+              : "sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
           }`}
         >
         {months.map(({ year, month }) => {
@@ -725,6 +777,10 @@ export function PilotageBoard({
                         />
                         €
                       </div>
+                      <p className="mt-1 flex items-start gap-1 text-[10px] font-medium text-primary-700">
+                        <Target size={10} className="mt-0.5 shrink-0" />
+                        {missionForAccount(account)}
+                      </p>
                       {allocation.length > 0 && (
                         <div className="mt-1.5 space-y-0.5 rounded-md bg-surface px-2 py-1">
                           <p className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
