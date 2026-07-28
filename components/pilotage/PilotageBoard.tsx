@@ -302,6 +302,18 @@ export function PilotageBoard({
   }, [monthlySales]);
   const recurrenceTotal = Object.values(recurrence).reduce((s, v) => s + v, 0) || 1;
 
+  // Comptes ayant réellement commandé ce mois-ci mais absents du prévisionnel
+  // (jamais prédits, ou prédits sur un autre mois) — sans ça, une commande
+  // "surprise" reste invisible dans le tableau, noyée dans le seul total
+  // "Réalisé" agrégé de la colonne.
+  function unforecastedOrdersFor(year: number, month: number) {
+    const forecastedAccountIds = new Set(forecastsFor(year, month).map((f) => f.account_id));
+    return monthlySales
+      .filter((s) => s.year === year && s.month === month && s.ca > 0 && !forecastedAccountIds.has(s.account_id))
+      .map((s) => ({ account_id: s.account_id, ca: s.ca }))
+      .sort((a, b) => b.ca - a.ca);
+  }
+
   function forecastsFor(year: number, month: number) {
     const rows = forecasts.filter((f) => f.year === year && f.month === month);
     return rows.sort((a, b) => {
@@ -683,9 +695,11 @@ export function PilotageBoard({
             <OpportunityCard
               key={opp.account.id}
               opportunity={opp}
+              months={months}
               isDragging={dragging === opp.account.id}
               onDragStart={() => setDragging(opp.account.id)}
               onDragEnd={() => { setDragging(null); setDropTarget(null); }}
+              onPlan={(year, month) => handleDrop(opp.account.id, year, month)}
             />
           ))}
         </div>
@@ -797,7 +811,7 @@ export function PilotageBoard({
               </div>
 
               <div className="flex-1 space-y-2 overflow-y-auto p-2">
-                {monthForecasts.length === 0 && (
+                {monthForecasts.length === 0 && unforecastedOrdersFor(year, month).length === 0 && (
                   <div className="flex h-full min-h-24 items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
                     Déposez un compte ici
                   </div>
@@ -880,6 +894,26 @@ export function PilotageBoard({
                     </div>
                   );
                 })}
+                {unforecastedOrdersFor(year, month).map((o) => {
+                  const account = accountById.get(o.account_id);
+                  if (!account) return null;
+                  return (
+                    <div key={`unforecasted-${o.account_id}`} className="rounded-lg border border-success/40 bg-success/5 p-2.5">
+                      <Link
+                        href={`/comptes/${account.id}`}
+                        className="flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-primary"
+                      >
+                        {account.name}
+                        <ScoreBadge score={computeTargetingScore(account).total} />
+                      </Link>
+                      <div className="mt-1 flex items-center justify-between text-[10px] font-medium text-success">
+                        <span>Réalisé</span>
+                        <span>✓ {formatEUR(o.ca)} commandé</span>
+                      </div>
+                      <p className="mt-1 text-[10px] text-muted-foreground/70">Commande non prévue ce mois-ci</p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           );
@@ -922,16 +956,21 @@ function Gauge({ label, value, left, right }: { label: string; value: number; le
 
 function OpportunityCard({
   opportunity,
+  months,
   isDragging,
   onDragStart,
   onDragEnd,
+  onPlan,
 }: {
   opportunity: Opportunity;
+  months: { year: number; month: number }[];
   isDragging: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
+  onPlan: (year: number, month: number) => void;
 }) {
   const meta = OPPORTUNITY_META[opportunity.type];
+  const [selected, setSelected] = useState(`${months[0]?.year}-${months[0]?.month}`);
   return (
     <div
       draggable
@@ -960,6 +999,30 @@ function OpportunityCard({
         <span className="text-[10px] font-medium text-muted-foreground">{formatEUR(opportunity.value)}</span>
       </div>
       <p className="mt-1 line-clamp-2 text-[10px] text-muted-foreground">{opportunity.reason}</p>
+      {/* Alternative fiable au glisser-déposer (peu fiable sur trackpad/Safari) :
+          planifier directement via un sélecteur de mois + bouton. */}
+      <div className="mt-1.5 flex items-center gap-1">
+        <select
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+          className="flex-1 rounded border border-border bg-surface px-1.5 py-1 text-[10px] outline-none focus:border-primary"
+        >
+          {months.map((m) => (
+            <option key={`${m.year}-${m.month}`} value={`${m.year}-${m.month}`}>
+              {MONTH_LABELS[m.month - 1]} {m.year}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => {
+            const [y, m] = selected.split("-").map(Number);
+            onPlan(y, m);
+          }}
+          className="shrink-0 rounded bg-primary px-2 py-1 text-[10px] font-medium text-white hover:bg-primary-600"
+        >
+          Planifier
+        </button>
+      </div>
     </div>
   );
 }
