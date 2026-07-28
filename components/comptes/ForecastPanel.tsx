@@ -51,7 +51,7 @@ export function ForecastPanel({
     startTransition(async () => {
       const { data, error } = await supabase
         .from("account_forecasts")
-        .insert({ account_id: accountId, year: newYear, month: newMonth, kind, boites_prevues: 0, ca_prevu: 0 })
+        .insert({ account_id: accountId, year: newYear, month: newMonth, kind, boites_prevues: 0, ca_prevu: 0, source: "manuel" as const })
         .select()
         .single();
       if (!error && data) {
@@ -68,6 +68,7 @@ export function ForecastPanel({
       kind,
       boites_prevues: 0,
       ca_prevu: 0,
+      source: "manuel" as const,
     })).filter((r) => !forecasts.some((f) => f.year === r.year && f.month === r.month));
     if (rows.length === 0) return;
     const supabase = createClient();
@@ -97,7 +98,7 @@ export function ForecastPanel({
     startTransition(async () => {
       const { data, error } = await supabase
         .from("account_forecasts")
-        .insert(suggestions.map((s) => ({ account_id: accountId, kind, ...s })))
+        .insert(suggestions.map((s) => ({ account_id: accountId, kind, source: "manuel" as const, ...s })))
         .select();
       if (!error && data) {
         setForecasts((prev) =>
@@ -118,6 +119,7 @@ export function ForecastPanel({
       kind,
       boites_prevues: perMonth,
       ca_prevu: 0,
+      source: "manuel" as const,
     })).filter((r) => !forecasts.some((f) => f.year === r.year && f.month === r.month));
     if (rows.length === 0) return;
     const supabase = createClient();
@@ -147,6 +149,7 @@ export function ForecastPanel({
         boites_prevues: caParBoite > 0 ? Math.round(s.ca / caParBoite) : 0,
         ca_prevu: Math.round(s.ca),
         note: "Réalisé recopié depuis les commandes",
+        source: "manuel" as const,
       }));
     if (rows.length === 0) return;
     const supabase = createClient();
@@ -161,10 +164,13 @@ export function ForecastPanel({
   }
 
   function updateForecast(id: string, patch: Partial<Pick<AccountForecast, "boites_prevues" | "ca_prevu" | "note">>) {
-    setForecasts((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+    // Toute modification manuelle protège la ligne d'une future régénération
+    // automatique du prévisionnel portefeuille.
+    const withSource = { ...patch, source: "manuel" as const };
+    setForecasts((prev) => prev.map((f) => (f.id === id ? { ...f, ...withSource } : f)));
     const supabase = createClient();
     startTransition(async () => {
-      await supabase.from("account_forecasts").update(patch).eq("id", id);
+      await supabase.from("account_forecasts").update(withSource).eq("id", id);
     });
   }
 

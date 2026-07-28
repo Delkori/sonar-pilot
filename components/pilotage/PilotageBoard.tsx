@@ -321,6 +321,8 @@ export function PilotageBoard({
 
     setIsSaving(true);
     const supabase = createClient();
+    // Action explicite de l'utilisateur (glisser-déposer) : marquée "manuel",
+    // ne sera jamais recalculée par le générateur portefeuille.
     const { data, error } = await supabase
       .from("account_forecasts")
       .insert({
@@ -330,6 +332,7 @@ export function PilotageBoard({
         boites_prevues: suggestion.boites_prevues,
         ca_prevu: suggestion.ca_prevu,
         note,
+        source: "manuel" as const,
       })
       .select()
       .single();
@@ -341,23 +344,29 @@ export function PilotageBoard({
 
   async function autoFillPortfolio() {
     setAutoFilling(true);
-    const predictions = predictPortfolioForecast(
-      accounts,
-      hcpsByAccount,
-      monthlySales,
-      forecasts.map((f) => ({ account_id: f.account_id, year: f.year, month: f.month })),
-      months
-    );
+    const existingEntries = forecasts
+      .filter((f) => f.kind === "prevision")
+      .map((f) => ({
+        account_id: f.account_id,
+        year: f.year,
+        month: f.month,
+        boites_prevues: f.boites_prevues,
+        source: f.source,
+      }));
+    const predictions = predictPortfolioForecast(accounts, hcpsByAccount, monthlySales, existingEntries, months);
     if (predictions.length === 0) {
       setAutoFilling(false);
       return;
     }
     const supabase = createClient();
+    // upsert sur (account_id, year, month, kind) : crée les mois manquants et
+    // actualise ceux déjà générés par l'IA (source='auto') — jamais les mois
+    // saisis à la main, exclus en amont par predictMonthlyForecast.
     // La répartition par médecin est calculée pour l'affichage, pas stockée :
     // seuls le CA et les boîtes au niveau compte partent en base.
     const { data, error } = await supabase
       .from("account_forecasts")
-      .insert(
+      .upsert(
         predictions.map((p) => ({
           account_id: p.account_id,
           year: p.year,
@@ -366,11 +375,18 @@ export function PilotageBoard({
           ca_prevu: p.ca_prevu,
           note: p.note,
           kind: "prevision" as const,
-        }))
+          source: "auto" as const,
+        })),
+        { onConflict: "account_id,year,month,kind" }
       )
       .select();
     setAutoFilling(false);
-    if (!error && data) setForecasts((prev) => [...prev, ...(data as AccountForecast[])]);
+    if (!error && data) {
+      const written = data as AccountForecast[];
+      const keyOf = (f: { account_id: string; year: number; month: number }) => `${f.account_id}-${f.year}-${f.month}`;
+      const writtenKeys = new Set(written.map(keyOf));
+      setForecasts((prev) => [...prev.filter((f) => f.kind !== "prevision" || !writtenKeys.has(keyOf(f))), ...written]);
+    }
   }
 
   async function removeForecast(id: string) {

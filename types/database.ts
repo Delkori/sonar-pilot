@@ -114,6 +114,7 @@ export type AccountMonthlySale = {
 };
 
 export type ForecastKind = "objectif" | "prevision" | "realise";
+export type ForecastSource = "auto" | "manuel";
 
 export type AccountForecast = {
   id: string;
@@ -124,6 +125,7 @@ export type AccountForecast = {
   boites_prevues: number | null;
   ca_prevu: number | null;
   note: string | null;
+  source: ForecastSource;
   created_by: string | null;
   created_at: string;
   updated_at: string;

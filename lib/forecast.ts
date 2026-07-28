@@ -204,62 +204,95 @@ function evaluateMonthSignal(account: Account, orderedMonths: number[], tmIdx: n
   return null;
 }
 
+export interface ExistingForecastEntry {
+  account_id: string;
+  year: number;
+  month: number;
+  boites_prevues: number | null;
+  source: "auto" | "manuel";
+}
+
 /**
- * Prévision mensuelle prédictive pour un compte, mois par mois : chaque mois
- * cible est évalué indépendamment (récurrence, relance saisonnière, silence,
- * prospect) et n'apparaît que s'il y a un signal réel — voir
- * `evaluateMonthSignal`. Le montant est plafonné au potentiel du compte et
- * réparti par médecin au prorata de leur potentiel.
+ * Prévision mensuelle prédictive pour un compte — modèle "top-down" : on part
+ * de l'objectif restant à faire (objectif_boites − réalisé ; à défaut, le
+ * potentiel du compte sert d'objectif implicite), et on le répartit sur les
+ * mois qui ont un signal réel (récurrence, relance saisonnière, silence,
+ * prospect — voir `evaluateMonthSignal`), au prorata du poids de chaque
+ * signal. Résultat : la somme des mois générés correspond exactement à ce
+ * qu'il reste à faire, au lieu d'un montant mensuel déconnecté de l'objectif.
+ *
+ * Les mois déjà saisis à la main (`source: 'manuel'`) sont exclus de la
+ * répartition et leurs boîtes sont déduites du restant à répartir — l'IA
+ * complète autour de ce que l'utilisateur a déjà décidé, elle ne le double
+ * pas.
  */
 export function predictMonthlyForecast(
   account: Account,
   hcps: HcpLite[],
   sales: MonthlySaleRow[],
-  targetMonths: { year: number; month: number }[]
+  targetMonths: { year: number; month: number }[],
+  existingForAccount: ExistingForecastEntry[] = []
 ): PredictedForecast[] {
   const orderedMonths = orderedMonthIndices(sales);
-  const potentielAnnual = (account.potentiel_boites ?? 0) * PRIX_MOYEN_BOITE;
-  const runRate = [...sales]
-    .sort((a, b) => b.year * 12 + b.month - (a.year * 12 + a.month))
-    .slice(0, 12)
-    .reduce((s, r) => s + r.ca, 0);
-  const baselineMonthly = potentielAnnual > 0 ? potentielAnnual / 12 : runRate > 0 ? runRate / 12 : 0;
+
+  const objectifBoites = account.objectif_boites ?? 0;
+  const potentielBoites = account.potentiel_boites ?? 0;
+  // Objectif implicite = potentiel du compte quand aucun objectif n'est saisi.
+  const cibleBoites = objectifBoites > 0 ? objectifBoites : potentielBoites;
+
+  const manuelBoitesSum = existingForAccount
+    .filter((e) => e.source === "manuel")
+    .reduce((s, e) => s + (e.boites_prevues ?? 0), 0);
+  const manuelMonthKeys = new Set(
+    existingForAccount.filter((e) => e.source === "manuel").map((e) => monthIndex(e.year, e.month))
+  );
+
+  const restant = Math.max(cibleBoites - (account.realise_boites ?? 0) - manuelBoitesSum, 0);
+  if (restant <= 0) return [];
+
   const caParBoite =
     account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
       ? account.ca_2026_ytd / account.realise_boites
       : PRIX_MOYEN_BOITE;
 
-  const out: PredictedForecast[] = [];
-  for (const tm of targetMonths) {
-    const tmIdx = monthIndex(tm.year, tm.month);
-    const signal = evaluateMonthSignal(account, orderedMonths, tmIdx);
-    if (!signal) continue;
-    const ca = Math.round(baselineMonthly * signal.weight);
-    if (ca <= 0) continue;
-    const boites = caParBoite > 0 ? Math.round(ca / caParBoite) : 0;
-    out.push({
-      account_id: account.id,
-      year: tm.year,
-      month: tm.month,
-      ca_prevu: ca,
-      boites_prevues: boites,
-      note: signal.reason,
-      hcp: allocateToHcps(hcps, boites, ca),
-    });
-  }
-  return out;
+  const workable = targetMonths.filter((tm) => !manuelMonthKeys.has(monthIndex(tm.year, tm.month)));
+  const withSignal = workable
+    .map((tm) => ({ tm, signal: evaluateMonthSignal(account, orderedMonths, monthIndex(tm.year, tm.month)) }))
+    .filter((x): x is { tm: { year: number; month: number }; signal: MonthSignal } => x.signal !== null);
+  if (withSignal.length === 0) return [];
+
+  const weightSum = withSignal.reduce((s, x) => s + x.signal.weight, 0) || 1;
+
+  return withSignal
+    .map(({ tm, signal }) => {
+      const boites = Math.round((restant * signal.weight) / weightSum);
+      if (boites <= 0) return null;
+      const ca = Math.round(boites * caParBoite);
+      return {
+        account_id: account.id,
+        year: tm.year,
+        month: tm.month,
+        ca_prevu: ca,
+        boites_prevues: boites,
+        note: signal.reason,
+        hcp: allocateToHcps(hcps, boites, ca),
+      };
+    })
+    .filter((p): p is PredictedForecast => p !== null);
 }
 
 /**
- * Applique le modèle prédictif à tout le portefeuille, en sautant les
- * comptes "lost", ceux dont la prévision ressort à 0 sur toute la période,
- * et les mois déjà renseignés (jamais d'écrasement).
+ * Applique le modèle prédictif à tout le portefeuille. Chaque mois cible est
+ * recalculé pour les comptes non "lost" — y compris les mois déjà remplis
+ * par une précédente exécution du générateur (`source: 'auto'`), qui sont
+ * ainsi actualisés avec les données les plus fraîches. Les mois saisis à la
+ * main (`source: 'manuel'`) ne sont jamais recalculés ni écrasés.
  */
 export function predictPortfolioForecast(
   accounts: Account[],
   hcpsByAccount: Map<string, HcpLite[]>,
   sales: MonthlySaleRow[],
-  existing: { account_id: string; year: number; month: number }[],
+  existing: ExistingForecastEntry[],
   targetMonths: { year: number; month: number }[]
 ): PredictedForecast[] {
   const salesByAccount = new Map<string, MonthlySaleRow[]>();
@@ -268,21 +301,23 @@ export function predictPortfolioForecast(
     if (arr) arr.push(s);
     else salesByAccount.set(s.account_id, [s]);
   }
-  const existingKey = new Set(existing.map((f) => `${f.account_id}-${f.year}-${f.month}`));
+  const existingByAccount = new Map<string, ExistingForecastEntry[]>();
+  for (const e of existing) {
+    const arr = existingByAccount.get(e.account_id);
+    if (arr) arr.push(e);
+    else existingByAccount.set(e.account_id, [e]);
+  }
 
   const out: PredictedForecast[] = [];
   for (const account of accounts) {
     if (account.status === "lost") continue;
-    const remaining = targetMonths.filter((tm) => !existingKey.has(`${account.id}-${tm.year}-${tm.month}`));
-    if (remaining.length === 0) continue;
-
     const preds = predictMonthlyForecast(
       account,
       hcpsByAccount.get(account.id) ?? [],
       salesByAccount.get(account.id) ?? [],
-      remaining
+      targetMonths,
+      existingByAccount.get(account.id) ?? []
     );
-    if (preds.every((p) => p.ca_prevu === 0)) continue;
     out.push(...preds);
   }
   return out;

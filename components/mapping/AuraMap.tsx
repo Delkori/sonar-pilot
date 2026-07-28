@@ -147,6 +147,8 @@ export function AuraMap({
         boites_prevues: suggestion.boites_prevues,
         ca_prevu: suggestion.ca_prevu,
         note: opp ? `${opp.label} — ${opp.reason}` : suggestion.note,
+        // Action explicite depuis la carte : protégée d'une future régénération.
+        source: "manuel" as const,
       },
       { onConflict: "account_id,year,month,kind" }
     );

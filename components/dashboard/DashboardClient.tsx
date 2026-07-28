@@ -273,10 +273,12 @@ export function DashboardClient({
     }
 
     const existingKeys = new Set(forecasts.map((f) => `${f.account_id}|${f.year}|${f.month}`));
+    // Action explicite depuis le dashboard : protégée d'une future
+    // régénération automatique du prévisionnel portefeuille.
     const rows = priorityAccounts.flatMap((account) =>
       suggestMonthlyForecast(account, targetMonths)
         .filter((s) => !existingKeys.has(`${account.id}|${s.year}|${s.month}`))
-        .map((s) => ({ account_id: account.id, kind: "prevision" as const, ...s }))
+        .map((s) => ({ account_id: account.id, kind: "prevision" as const, source: "manuel" as const, ...s }))
     );
 
     if (rows.length === 0) {
