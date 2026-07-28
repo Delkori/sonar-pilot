@@ -59,11 +59,12 @@ export async function POST(req: NextRequest) {
   const nexoraFile = formData.get("nexora") as File | null;
   const importedBy = (formData.get("importedBy") as string) || null;
 
-  // Le fichier Nexora (sponsoring) peut être importé seul ; les autres
-  // fichiers ont besoin d'un référentiel compte (PAS ou Salesforce).
-  if (!pasFile && !salesforceFile && !nexoraFile) {
+  // Salesforce/PAS ne sont plus obligatoires : Account Detail, Invoice
+  // Number et Product et KPI peuvent être importés seuls et se rapprochent
+  // des comptes déjà en base par nom.
+  if (!pasFile && !salesforceFile && !accountDetailFile && !invoiceProductsFile && !kpiFile && !nexoraFile) {
     return NextResponse.json(
-      { error: "Un référentiel compte est requis : fichier PAS ou Rapport Salesforce." },
+      { error: "Sélectionnez au moins un fichier à importer." },
       { status: 400 }
     );
   }
@@ -72,7 +73,15 @@ export async function POST(req: NextRequest) {
   const allErrors: ImportLogEntry[] = [];
   let rowsTotal = 0;
   let rowsSuccess = 0;
-  const mainFilename = pasFile?.name ?? salesforceFile?.name ?? nexoraFile?.name ?? "import";
+  const mainFilename =
+    pasFile?.name ??
+    salesforceFile?.name ??
+    accountDetailFile?.name ??
+    invoiceProductsFile?.name ??
+    kpiFile?.name ??
+    nexoraFile?.name ??
+    "import";
+  const importSource = pasFile ? "PAS" : salesforceFile ? "SALESFORCE" : kpiFile ? "KPI" : "PRODUCTS";
 
   try {
     const accountsByRef = new Map<string, Record<string, unknown>>();
@@ -169,7 +178,7 @@ export async function POST(req: NextRequest) {
       .from("imports")
       .insert({
         filename: mainFilename,
-        source: pasFile ? "PAS" : "SALESFORCE",
+        source: importSource,
         imported_by: importedBy,
         status: "success",
         rows_total: rowsTotal,
@@ -184,21 +193,25 @@ export async function POST(req: NextRequest) {
       throw new Error(importInsertError?.message ?? "Échec de création de l'import.");
     }
 
-    // upsert accounts by external_ref
+    // upsert accounts by external_ref — pas de fichier référentiel (Salesforce/
+    // PAS/KPI) dans cet import : rien à upserter, on garde les comptes existants.
     const accountsPayload = Array.from(accountsByRef.values()).map(({ _comment, ...acc }) => ({
       ...acc,
       import_id: importRow.id,
     }));
 
-    const { data: upserted, error: upsertError } = await supabase
-      .from("accounts")
-      .upsert(accountsPayload, { onConflict: "external_ref" })
-      .select("id, external_ref, name");
-
-    if (upsertError) {
-      throw new Error(upsertError.message);
+    let upserted: { id: string; external_ref: string; name: string }[] = [];
+    if (accountsPayload.length > 0) {
+      const { data, error: upsertError } = await supabase
+        .from("accounts")
+        .upsert(accountsPayload, { onConflict: "external_ref" })
+        .select("id, external_ref, name");
+      if (upsertError) {
+        throw new Error(upsertError.message);
+      }
+      upserted = data ?? [];
     }
-    rowsSuccess = upserted?.length ?? 0;
+    rowsSuccess = upserted.length;
 
     // comments issus du PAS (si présent)
     const refToId = new Map((upserted ?? []).map((a) => [a.external_ref, a.id] as const));
@@ -532,7 +545,7 @@ export async function POST(req: NextRequest) {
     const message = err instanceof Error ? err.message : "Erreur d'import inconnue.";
     await supabase.from("imports").insert({
       filename: mainFilename,
-      source: pasFile ? "PAS" : "SALESFORCE",
+      source: importSource,
       imported_by: importedBy,
       status: "failed",
       rows_total: rowsTotal,
