@@ -52,30 +52,58 @@ function atHour(day: Date, h: number, m = 0): Date {
   return d;
 }
 
+export interface ExistingPlanningEvent {
+  account_id: string | null;
+  start_at: string;
+}
+
 /**
  * Génère un planning brut (non enregistré) pour la semaine (lundi→vendredi)
  * démarrant à `weekStart` :
  *  - Visites clients : comptes ayant une prévision (mois courant ou suivant)
- *    non encore réalisée, triés par CA prévu, regroupés par département pour
- *    limiter les trajets depuis Lyon (un département "cible" par jour).
+ *    non encore réalisée, triés par CA prévu. Un compte n'est exclu que s'il
+ *    a déjà été planifié DANS LE MÊME MOIS calendaire (pas indéfiniment) —
+ *    une prévision doit se traduire par une visite ce mois-ci, mais les
+ *    comptes redeviennent disponibles le mois suivant.
+ *  - Départements cibles de la semaine choisis par valeur totale de
+ *    prévision, puis ORDONNÉS par temps de trajet croissant depuis Lyon sur
+ *    les jours de la semaine — pour enchaîner les zones proches plutôt que
+ *    de sauter d'un bout à l'autre de la région d'un jour à l'autre (ex:
+ *    Clermont-Ferrand puis Grenoble).
  *  - Au moins une visite prospect par jour comportant une visite client,
  *    dans le même département si possible.
  *  - 1h d'appels (comptes à relancer, cf. getPhoneFollowUps) + 1h
  *    d'administratif/mails en fin de journée.
- * `existingAccountIds` exclut les comptes déjà planifiés cette semaine
- * (lignes manuelles ou d'une génération précédente) pour ne pas les doubler.
+ * `existingEvents` sert uniquement à exclure les comptes déjà planifiés ce
+ * mois-ci ; la régénération elle-même (suppression des anciennes lignes
+ * 'auto' avant réinsertion) est gérée par l'appelant, pas ici.
  */
 export function generateWeeklyPlan(
   weekStart: Date,
   accounts: Account[],
   forecasts: AccountForecast[],
   actions: { account_id: string; type: string; due_date: string | null; done: boolean }[],
-  existingAccountIds: Set<string>
+  existingEvents: ExistingPlanningEvent[]
 ): DraftPlanningEvent[] {
   const monthKey = (y: number, m: number) => `${y}-${m}`;
   const thisMonthKey = monthKey(weekStart.getFullYear(), weekStart.getMonth() + 1);
   const nextMonthDate = new Date(weekStart.getFullYear(), weekStart.getMonth() + 1, 1);
   const nextMonthKey = monthKey(nextMonthDate.getFullYear(), nextMonthDate.getMonth() + 1);
+
+  // Un compte n'est "déjà pris" que s'il a une visite dans le même mois
+  // calendaire que la semaine générée — sinon le pool se vide au bout de
+  // 2-3 semaines et plus rien ne se génère ensuite.
+  const monthStart = new Date(weekStart.getFullYear(), weekStart.getMonth(), 1);
+  const monthEnd = new Date(weekStart.getFullYear(), weekStart.getMonth() + 1, 1);
+  const existingAccountIds = new Set(
+    existingEvents
+      .filter((e) => {
+        if (!e.account_id) return false;
+        const d = new Date(e.start_at);
+        return d >= monthStart && d < monthEnd;
+      })
+      .map((e) => e.account_id as string)
+  );
 
   const bestForecastByAccount = new Map<string, AccountForecast>();
   for (const f of forecasts) {
@@ -106,6 +134,20 @@ export function generateWeeklyPlan(
     actions as never
   );
 
+  // Départements cibles de la semaine : les mieux valorisés d'abord, puis
+  // réordonnés par proximité croissante pour un enchaînement cohérent.
+  const deptTotals = new Map<string, number>();
+  for (const c of clientCandidates) {
+    const d = c.account.department_code;
+    if (!d) continue;
+    deptTotals.set(d, (deptTotals.get(d) ?? 0) + (c.forecast.ca_prevu ?? 0));
+  }
+  const weekDepts = Array.from(deptTotals.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([d]) => d)
+    .sort((a, b) => travelMinutesFor(a) - travelMinutesFor(b));
+
   const events: DraftPlanningEvent[] = [];
   const usedClientIds = new Set<string>();
   const usedProspectIds = new Set<string>();
@@ -113,8 +155,7 @@ export function generateWeeklyPlan(
   for (let day = 0; day < 5; day++) {
     const dayDate = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + day);
 
-    const nextClient = clientCandidates.find((c) => !usedClientIds.has(c.account.id));
-    const targetDept = nextClient?.account.department_code ?? null;
+    const targetDept = weekDepts[day] ?? null;
     const travelMin = travelMinutesFor(targetDept);
 
     const appelStart = atHour(dayDate, JOUR_FIN_H - 2);

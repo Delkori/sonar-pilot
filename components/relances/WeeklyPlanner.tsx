@@ -76,17 +76,24 @@ export function WeeklyPlanner({
     return d;
   }, [date]);
 
-  const scheduledAccountIds = useMemo(
-    () => new Set(events.filter((e) => e.account_id).map((e) => e.account_id as string)),
-    [events]
-  );
+  // Un compte n'est retiré du pool que s'il a déjà une visite dans le même
+  // mois calendaire que la semaine affichée — sinon le pool se vide
+  // définitivement après 2-3 semaines de génération.
+  const scheduledAccountIds = useMemo(() => {
+    const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+    const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+    return new Set(
+      events
+        .filter((e) => e.account_id && new Date(e.start_at) >= monthStart && new Date(e.start_at) < monthEnd)
+        .map((e) => e.account_id as string)
+    );
+  }, [events, date]);
 
   // ── Panneau latéral : candidats non encore planifiés ────────────────────
   const clientCandidates = useMemo(() => {
     const monthKey = (y: number, m: number) => `${y}-${m}`;
-    const now = new Date();
-    const thisMonthKey = monthKey(now.getFullYear(), now.getMonth() + 1);
-    const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const thisMonthKey = monthKey(date.getFullYear(), date.getMonth() + 1);
+    const nextMonthDate = new Date(date.getFullYear(), date.getMonth() + 1, 1);
     const nextMonthKey = monthKey(nextMonthDate.getFullYear(), nextMonthDate.getMonth() + 1);
     const bestByAccount = new Map<string, AccountForecast>();
     for (const f of forecasts) {
@@ -161,8 +168,28 @@ export function WeeklyPlanner({
 
   async function generate() {
     setGenerating(true);
-    const draft = generateWeeklyPlan(date, accounts, forecasts, actions, scheduledAccountIds);
     const supabase = createClient();
+
+    // Idempotent : un second clic ne doit pas doubler les créneaux admin/
+    // appels déjà générés. On supprime d'abord les lignes 'auto' de la
+    // semaine affichée avant de réinsérer le nouveau planning.
+    const weekEndExclusive = new Date(date);
+    weekEndExclusive.setDate(weekEndExclusive.getDate() + 5);
+    const staleIds = events
+      .filter((e) => e.source === "auto" && new Date(e.start_at) >= date && new Date(e.start_at) < weekEndExclusive)
+      .map((e) => e.id);
+    if (staleIds.length > 0) {
+      await supabase.from("planning_events").delete().in("id", staleIds);
+    }
+    const remainingEvents = events.filter((e) => !staleIds.includes(e.id));
+
+    const draft = generateWeeklyPlan(
+      date,
+      accounts,
+      forecasts,
+      actions,
+      remainingEvents.map((e) => ({ account_id: e.account_id, start_at: e.start_at }))
+    );
     const { data, error } = await supabase
       .from("planning_events")
       .insert(
@@ -178,7 +205,9 @@ export function WeeklyPlanner({
       )
       .select();
     setGenerating(false);
-    if (!error && data) setEvents((prev) => [...prev, ...(data as PlanningEvent[])]);
+    if (!error && data) {
+      setEvents((prev) => [...prev.filter((e) => !staleIds.includes(e.id)), ...(data as PlanningEvent[])]);
+    }
   }
 
   return (
