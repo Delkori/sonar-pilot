@@ -127,7 +127,10 @@ export function allocateToHcps(hcps: HcpLite[], boites: number, ca: number): Hcp
 }
 
 // Nombre de mois attendu entre deux commandes selon la cadence observée du
-// compte — sert à décider si le mois cible "tombe" dans son rythme habituel.
+// compte — sert à décider si le mois cible "tombe" dans son rythme habituel,
+// et surtout comme ESPACEMENT MINIMUM entre deux mois prévus : un compte qui
+// vient de commander a besoin de ce délai pour écouler son stock avant d'être
+// re-sollicité, même si l'objectif restant est encore loin d'être atteint.
 const RECURRENCE_GAP_MONTHS: Record<RecurrenceBucket, number | null> = {
   Mensuelle: 1,
   Bimestrielle: 2,
@@ -135,6 +138,9 @@ const RECURRENCE_GAP_MONTHS: Record<RecurrenceBucket, number | null> = {
   Espacée: 6,
   Unique: null,
 };
+// Écart par défaut quand la cadence est inconnue/unique — mieux vaut espacer
+// prudemment que de proposer deux mois consécutifs à un compte trop rare.
+const GAP_MOIS_PAR_DEFAUT = 3;
 
 const SILENCE_MODERE_SEMAINES = 8;
 
@@ -293,6 +299,29 @@ function implicitTargetBoites(
   return potentielBoites > 0 ? Math.min(Math.round(runRateAnnuel), potentielBoites) : Math.round(runRateAnnuel);
 }
 
+/**
+ * Taille réaliste d'UNE commande pour ce compte — le CA historique moyen par
+ * commande, ajusté par la tendance et le tier, jamais le restant divisé par
+ * le nombre de mois éligibles. C'est ce montant (borné par ce qu'il reste à
+ * faire) qui est proposé à chaque mois retenu, pas plus : un compte ne
+ * commande jamais "tout ce qu'il reste à faire sur l'année" en une fois.
+ */
+function typicalOrderBoites(
+  orderedMonths: number[],
+  sales: MonthlySaleRow[],
+  caParBoite: number,
+  potentielBoites: number,
+  tierAdj: number,
+  trendAdj: number
+): number {
+  if (orderedMonths.length === 0 || caParBoite <= 0) {
+    return Math.max(1, Math.round(potentielBoites * PART_AMORCAGE_PROSPECT));
+  }
+  const totalCaHistorique = sales.filter((s) => s.ca > 0).reduce((s, v) => s + v.ca, 0);
+  const avgOrderBoites = totalCaHistorique / orderedMonths.length / caParBoite;
+  return Math.max(1, Math.round(avgOrderBoites * CROISSANCE_PRUDENTE * tierAdj * trendAdj));
+}
+
 export function predictMonthlyForecast(
   account: Account,
   hcps: HcpLite[],
@@ -321,38 +350,79 @@ export function predictMonthlyForecast(
     existingForAccount.filter((e) => e.source === "manuel").map((e) => monthIndex(e.year, e.month))
   );
 
-  const restant = Math.max(cibleBoites - (account.realise_boites ?? 0) - manuelBoitesSum, 0);
-  if (restant <= 0) return [];
+  let restantLeft = Math.max(cibleBoites - (account.realise_boites ?? 0) - manuelBoitesSum, 0);
+  if (restantLeft <= 0) return [];
 
   const caParBoite =
     account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
       ? account.ca_2026_ytd / account.realise_boites
       : PRIX_MOYEN_BOITE;
 
-  const workable = targetMonths.filter((tm) => !manuelMonthKeys.has(monthIndex(tm.year, tm.month)));
-  const withSignal = workable
-    .map((tm) => ({ tm, signal: evaluateMonthSignal(account, orderedMonths, monthIndex(tm.year, tm.month)) }))
-    .filter((x): x is { tm: { year: number; month: number }; signal: MonthSignal } => x.signal !== null);
-  if (withSignal.length === 0) return [];
+  const tierAdj = TIER_FACTOR[account.price_list ?? ""] ?? 1;
+  const trendAdj = trendFactor(orderedMonths, nowIdx);
+  const typicalOrder = typicalOrderBoites(
+    orderedMonths,
+    sales,
+    caParBoite,
+    account.potentiel_boites ?? 0,
+    tierAdj,
+    trendAdj
+  );
 
-  const weightSum = withSignal.reduce((s, x) => s + x.signal.weight, 0) || 1;
+  const bucket = recurrenceBucket(orderedMonths);
+  const minGapMonths = RECURRENCE_GAP_MONTHS[bucket] ?? GAP_MOIS_PAR_DEFAUT;
 
-  return withSignal
-    .map(({ tm, signal }) => {
-      const boites = Math.round((restant * signal.weight) / weightSum);
-      if (boites <= 0) return null;
-      const ca = Math.round(boites * caParBoite);
-      return {
-        account_id: account.id,
-        year: tm.year,
-        month: tm.month,
-        ca_prevu: ca,
-        boites_prevues: boites,
-        note: signal.reason,
-        hcp: allocateToHcps(hcps, boites, ca),
-      };
-    })
-    .filter((p): p is PredictedForecast => p !== null);
+  // Simulation mois par mois (chronologique) plutôt qu'une répartition
+  // proportionnelle du restant : chaque mois retenu reçoit au plus une
+  // commande de taille réaliste (`typicalOrder`), et un mois est ignoré s'il
+  // tombe trop tôt après le dernier point de consommation du compte (vraie
+  // commande, prévision déjà générée, ou saisie manuelle) — le temps que le
+  // stock déjà livré soit écoulé avant de re-solliciter le compte.
+  const manuelSorted = [...manuelMonthKeys].sort((a, b) => a - b);
+  let manuelPtr = 0;
+  let lastIdx = orderedMonths.length > 0 ? orderedMonths[orderedMonths.length - 1] : null;
+
+  const sortedTargets = [...targetMonths].sort(
+    (a, b) => monthIndex(a.year, a.month) - monthIndex(b.year, b.month)
+  );
+
+  const results: PredictedForecast[] = [];
+  for (const tm of sortedTargets) {
+    const tmIdx = monthIndex(tm.year, tm.month);
+
+    while (manuelPtr < manuelSorted.length && manuelSorted[manuelPtr] < tmIdx) {
+      if (lastIdx === null || manuelSorted[manuelPtr] > lastIdx) lastIdx = manuelSorted[manuelPtr];
+      manuelPtr++;
+    }
+
+    if (manuelMonthKeys.has(tmIdx)) continue; // saisi à la main, jamais écrasé
+    if (orderedMonths.includes(tmIdx)) continue; // commande réelle déjà là
+
+    if (lastIdx !== null && tmIdx - lastIdx < minGapMonths) continue; // stock pas encore écoulé
+
+    const signal = evaluateMonthSignal(account, orderedMonths, tmIdx);
+    if (!signal) continue;
+
+    const boites = Math.min(Math.round(typicalOrder * signal.weight), restantLeft);
+    if (boites <= 0) continue;
+
+    const ca = Math.round(boites * caParBoite);
+    results.push({
+      account_id: account.id,
+      year: tm.year,
+      month: tm.month,
+      ca_prevu: ca,
+      boites_prevues: boites,
+      note: signal.reason,
+      hcp: allocateToHcps(hcps, boites, ca),
+    });
+
+    restantLeft -= boites;
+    lastIdx = tmIdx;
+    if (restantLeft <= 0) break;
+  }
+
+  return results;
 }
 
 /**
