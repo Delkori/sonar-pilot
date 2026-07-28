@@ -311,7 +311,14 @@ export function WeeklyPlanner({
           </button>
         </div>
 
-        <div className="flex-1">
+        <div className="planner-calendar flex-1">
+          <style>{`
+            .planner-calendar .rbc-timeslot-group { min-height: 64px; }
+            .planner-calendar .rbc-time-slot { min-height: 16px; }
+            .planner-calendar .rbc-event { padding: 0; }
+            .planner-calendar .rbc-event-label { display: none; }
+            .planner-calendar .rbc-day-slot .rbc-event { border-radius: 6px; }
+          `}</style>
           <DnDCalendar
             localizer={localizer}
             events={calEvents}
@@ -330,20 +337,25 @@ export function WeeklyPlanner({
             })}
             components={{
               event: ({ event }: { event: CalEvent }) => {
-                const durationMin = (event.end.getTime() - event.start.getTime()) / 60000;
-                const fullText = [event.title, event.resource.note].filter(Boolean).join(" — ");
+                const timeLabel = event.start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+                const fullText = [
+                  timeLabel,
+                  event.title,
+                  event.resource.note,
+                ]
+                  .filter(Boolean)
+                  .join(" — ");
                 return (
                   <div
                     title={fullText}
-                    className="group flex h-full flex-col gap-0.5 overflow-hidden px-1.5 py-0.5 leading-tight text-white"
+                    className="group flex h-full items-center gap-1 overflow-hidden px-1.5 text-white"
                   >
-                    <span className="truncate text-[11px] font-semibold">{event.title}</span>
-                    {event.resource.note && durationMin >= 30 && (
-                      <span className="line-clamp-2 text-[10px] opacity-90">{event.resource.note}</span>
-                    )}
+                    <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[11px] font-medium">
+                      {event.title}
+                    </span>
                     <button
                       onClick={(e) => { e.stopPropagation(); deleteEvent(event.id); }}
-                      className="absolute right-0.5 top-0.5 rounded bg-black/10 p-0.5 text-white/0 group-hover:text-white/80 hover:!text-white"
+                      className="shrink-0 rounded bg-black/10 p-0.5 text-white/0 group-hover:text-white/80 hover:!text-white"
                     >
                       <Trash2 size={10} />
                     </button>

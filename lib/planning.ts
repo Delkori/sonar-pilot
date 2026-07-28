@@ -20,6 +20,9 @@ export const DEPT_TRAVEL_MINUTES: Record<string, number> = {
   "15": 150,
 };
 const DEFAULT_TRAVEL_MINUTES = 90;
+// Au-delà, l'aller-retour dans la journée n'est plus réaliste — le
+// département n'est pas proposé en visite automatique cette semaine-là.
+const MAX_TRAVEL_MINUTES = 100;
 
 export function travelMinutesFor(departmentCode: string | null | undefined): number {
   if (!departmentCode) return DEFAULT_TRAVEL_MINUTES;
@@ -149,6 +152,11 @@ export function generateWeeklyPlan(
     deptTotals.set(d, (deptTotals.get(d) ?? 0) + (c.forecast.ca_prevu ?? 0));
   }
   const weekDepts = Array.from(deptTotals.entries())
+    // Un département trop loin pour un aller-retour dans la journée n'est
+    // jamais proposé en visite automatique — mieux vaut le laisser de côté
+    // (l'utilisateur peut toujours le planifier manuellement s'il prévoit
+    // une journée entière dédiée) que suggérer une route infaisable.
+    .filter(([d]) => travelMinutesFor(d) <= MAX_TRAVEL_MINUTES)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([d]) => d)
@@ -164,11 +172,11 @@ export function generateWeeklyPlan(
     const targetDept = weekDepts[day] ?? null;
     const travelMin = travelMinutesFor(targetDept);
 
-    const appelStart = atHour(dayDate, JOUR_FIN_H - 2);
-    const appelEnd = atHour(dayDate, JOUR_FIN_H - 1);
-    const adminStart = appelEnd;
-    const adminEnd = atHour(dayDate, JOUR_FIN_H);
-    const visiteLimit = appelStart;
+    // Plus de créneau appel/admin figé en fin de journée : ils démarrent
+    // juste après les visites du jour (variable selon le nombre de visites),
+    // avec une journée qui reste bornée à 19h au plus tard.
+    const dayHardEnd = atHour(dayDate, JOUR_FIN_H + 1);
+    const visiteSoftLimit = atHour(dayDate, JOUR_FIN_H - 1); // laisse au moins 2h pour appels+admin
 
     let cursor = addMin(atHour(dayDate, JOUR_DEBUT_H), travelMin);
 
@@ -179,7 +187,7 @@ export function generateWeeklyPlan(
     let placedClientToday = false;
     for (const c of dayClients) {
       const end = addMin(cursor, VISITE_MIN);
-      if (end > visiteLimit) break;
+      if (end > visiteSoftLimit) break;
       events.push({
         account_id: c.account.id,
         type: "visite",
@@ -201,7 +209,7 @@ export function generateWeeklyPlan(
         prospectCandidates.find((p) => !usedProspectIds.has(p.id));
       if (prospect) {
         const end = addMin(cursor, VISITE_MIN);
-        if (end <= visiteLimit) {
+        if (end <= visiteSoftLimit) {
           events.push({
             account_id: prospect.id,
             type: "visite_prospect",
@@ -211,8 +219,26 @@ export function generateWeeklyPlan(
             end_at: end,
           });
           usedProspectIds.add(prospect.id);
+          cursor = addMin(end, BUFFER_MIN);
         }
       }
+    }
+
+    // Journée sans visite : les appels démarrent en milieu de matinée plutôt
+    // qu'à l'heure d'arrivée théorique (qui n'a pas de sens sans trajet réel).
+    if (!placedClientToday) cursor = atHour(dayDate, 10);
+
+    const appelStart = cursor;
+    let appelEnd = addMin(appelStart, 60);
+    let adminStart = addMin(appelEnd, BUFFER_MIN);
+    let adminEnd = addMin(adminStart, 60);
+    if (adminEnd > dayHardEnd) {
+      // Journée déjà bien remplie : on raccourcit plutôt que déborder au-delà
+      // d'une heure raisonnable.
+      const overflow = (adminEnd.getTime() - dayHardEnd.getTime()) / 60000;
+      adminEnd = new Date(adminEnd.getTime() - overflow * 60000);
+      adminStart = new Date(adminStart.getTime() - Math.max(0, overflow - 30) * 60000);
+      appelEnd = new Date(appelEnd.getTime() - Math.max(0, overflow - 60) * 60000);
     }
 
     const callsToday = followUps.slice(day * 3, day * 3 + 3);
