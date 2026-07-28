@@ -27,7 +27,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Jeton invalide" }, { status: 401 });
   }
 
-  const { data: accountsRaw } = await supabase.from("accounts").select("id, name");
+  const { data: accountsRaw } = await supabase
+    .from("accounts")
+    .select("id, name, last_order_date, potentiel_boites");
+  const accountById = new Map((accountsRaw ?? []).map((a) => [a.id, a] as const));
   const nameById = new Map((accountsRaw ?? []).map((a) => [a.id, a.name] as const));
 
   const events: IcsEvent[] = [];
@@ -69,6 +72,47 @@ export async function GET(req: NextRequest) {
         .join(" — "),
       date,
       url: `${req.nextUrl.origin}/comptes/${f.account_id}`,
+    });
+  }
+
+  const { data: forecastsForPlanning } = await supabase
+    .from("account_forecasts")
+    .select("account_id, year, month, boites_prevues, ca_prevu")
+    .eq("kind", "prevision");
+  const forecastByAccount = new Map<string, { boites_prevues: number | null; ca_prevu: number | null; year: number; month: number }>();
+  for (const f of forecastsForPlanning ?? []) {
+    const cur = forecastByAccount.get(f.account_id);
+    if (!cur || (f.ca_prevu ?? 0) > (cur.ca_prevu ?? 0)) forecastByAccount.set(f.account_id, f);
+  }
+
+  const TYPE_LABEL: Record<string, string> = {
+    visite: "Visite",
+    visite_prospect: "Prospection",
+    appel: "Appels",
+    admin: "Administratif",
+  };
+
+  const { data: planningEvents } = await supabase
+    .from("planning_events")
+    .select("id, account_id, type, title, note, start_at, end_at");
+
+  for (const p of planningEvents ?? []) {
+    const account = p.account_id ? accountById.get(p.account_id) : null;
+    const forecast = p.account_id ? forecastByAccount.get(p.account_id) : null;
+    const descParts = [
+      p.note,
+      forecast ? `Prévisionnel : ${forecast.boites_prevues ?? 0} boîtes · ${Math.round(forecast.ca_prevu ?? 0)} €` : null,
+      account?.last_order_date
+        ? `Dernière commande : ${new Date(account.last_order_date).toLocaleDateString("fr-FR")}`
+        : null,
+    ].filter(Boolean);
+    events.push({
+      uid: `planning-${p.id}`,
+      title: `${TYPE_LABEL[p.type] ?? p.type}${account ? ` — ${account.name}` : ""}`,
+      description: descParts.join("\n"),
+      start: p.start_at,
+      end: p.end_at,
+      url: account ? `${req.nextUrl.origin}/comptes/${account.id}` : undefined,
     });
   }
 

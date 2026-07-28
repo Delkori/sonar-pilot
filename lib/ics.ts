@@ -2,7 +2,11 @@ export interface IcsEvent {
   uid: string;
   title: string;
   description?: string;
-  date: string; // YYYY-MM-DD, événement "journée entière"
+  /** Événement "journée entière" — format YYYY-MM-DD. Ignoré si start/end fournis. */
+  date?: string;
+  /** Événement avec horaire précis — ISO 8601 (avec heure). */
+  start?: string;
+  end?: string;
   url?: string;
 }
 
@@ -12,6 +16,10 @@ function escapeIcsText(text: string): string {
 
 function dateToIcsDate(date: string): string {
   return date.replace(/-/g, "");
+}
+
+function dateTimeToIcsUtc(iso: string): string {
+  return new Date(iso).toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
 }
 
 /** Construit un flux .ics minimal, compatible Apple Calendar (abonnement). */
@@ -30,13 +38,13 @@ export function buildIcsCalendar(events: IcsEvent[], calendarName: string): stri
   ];
 
   for (const ev of events) {
-    lines.push(
-      "BEGIN:VEVENT",
-      `UID:${ev.uid}@sonar-pilot`,
-      `DTSTAMP:${now}`,
-      `DTSTART;VALUE=DATE:${dateToIcsDate(ev.date)}`,
-      `SUMMARY:${escapeIcsText(ev.title)}`
-    );
+    lines.push("BEGIN:VEVENT", `UID:${ev.uid}@sonar-pilot`, `DTSTAMP:${now}`);
+    if (ev.start && ev.end) {
+      lines.push(`DTSTART:${dateTimeToIcsUtc(ev.start)}`, `DTEND:${dateTimeToIcsUtc(ev.end)}`);
+    } else if (ev.date) {
+      lines.push(`DTSTART;VALUE=DATE:${dateToIcsDate(ev.date)}`);
+    }
+    lines.push(`SUMMARY:${escapeIcsText(ev.title)}`);
     if (ev.description) lines.push(`DESCRIPTION:${escapeIcsText(ev.description)}`);
     if (ev.url) lines.push(`URL:${ev.url}`);
     lines.push("END:VEVENT");

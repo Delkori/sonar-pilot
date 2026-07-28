@@ -17,8 +17,8 @@ export function CalendarSubscribeCard({ feedUrl }: { feedUrl: string }) {
     <div className="rounded-xl border border-border bg-surface p-5">
       <h3 className="mb-1 text-sm font-semibold text-foreground">Abonnement iPhone / Apple Calendar</h3>
       <p className="mb-3 text-sm text-muted-foreground">
-        Les actions à échéance et le prévisionnel s&apos;ajoutent automatiquement à votre agenda, mis à jour toutes
-        les 6h par iOS.
+        Les actions à échéance, le prévisionnel et le planning hebdomadaire (visites, appels, administratif)
+        s&apos;ajoutent automatiquement à votre agenda, mis à jour toutes les 6h par iOS.
       </p>
       <ol className="mb-3 list-decimal space-y-1 pl-5 text-xs text-muted-foreground">
         <li>Copiez le lien ci-dessous</li>

@@ -15,9 +15,10 @@ import { generateWeeklyPlan, mondayOf } from "@/lib/planning";
 import { getPhoneFollowUps } from "@/lib/followups";
 import { computeTargetingScore } from "@/lib/scoring";
 import { isProspect } from "@/lib/accounts";
-import { formatEUR } from "@/lib/utils";
+import { formatEUR, formatNumber } from "@/lib/utils";
 import type { Account, AccountAction, AccountForecast, PlanningEvent, PlanningEventType } from "@/types/database";
-import { ChevronLeft, ChevronRight, Wand2, Trash2, Loader2, Phone, FileText, MapPin, Compass } from "lucide-react";
+import Link from "next/link";
+import { ChevronLeft, ChevronRight, Wand2, Trash2, Loader2, Phone, FileText, MapPin, Compass, X, Target, CalendarClock } from "lucide-react";
 
 const locales = { fr };
 const localizer = dateFnsLocalizer({
@@ -27,6 +28,8 @@ const localizer = dateFnsLocalizer({
   getDay,
   locales,
 });
+
+const MONTH_LABELS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 
 const TYPE_META: Record<PlanningEventType, { label: string; color: string; icon: typeof MapPin }> = {
   visite: { label: "Visite", color: "#4f46e5", icon: MapPin },
@@ -66,6 +69,7 @@ export function WeeklyPlanner({
   const [generating, setGenerating] = useState(false);
   const [dragCandidate, setDragCandidate] = useState<{ account_id: string; type: PlanningEventType; title: string } | null>(null);
   const [filter, setFilter] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a] as const)), [accounts]);
   const calEvents = useMemo(() => events.map(toCalEvent), [events]);
@@ -108,7 +112,7 @@ export function WeeklyPlanner({
       .map(([accountId, forecast]) => ({ account: accountById.get(accountId), forecast }))
       .filter((c): c is { account: Account; forecast: AccountForecast } => !!c.account && !scheduledAccountIds.has(c.account.id))
       .sort((a, b) => (b.forecast.ca_prevu ?? 0) - (a.forecast.ca_prevu ?? 0));
-  }, [forecasts, accountById, scheduledAccountIds]);
+  }, [forecasts, accountById, scheduledAccountIds, date]);
 
   const prospectCandidates = useMemo(
     () =>
@@ -127,6 +131,16 @@ export function WeeklyPlanner({
   const filteredClients = clientCandidates.filter((c) => c.account.name.toLowerCase().includes(filter.toLowerCase()));
   const filteredProspects = prospectCandidates.filter((a) => a.name.toLowerCase().includes(filter.toLowerCase()));
   const filteredCalls = callCandidates.filter((f) => f.account.name.toLowerCase().includes(filter.toLowerCase()));
+
+  // ── Fiche détaillée (clic sur un rendez-vous) ───────────────────────────
+  const selectedEvent = selectedId ? events.find((e) => e.id === selectedId) ?? null : null;
+  const selectedAccount = selectedEvent?.account_id ? accountById.get(selectedEvent.account_id) ?? null : null;
+  const selectedForecast = useMemo(() => {
+    if (!selectedAccount) return null;
+    const relevant = forecasts.filter((f) => f.kind === "prevision" && f.account_id === selectedAccount.id);
+    if (relevant.length === 0) return null;
+    return relevant.sort((a, b) => (b.ca_prevu ?? 0) - (a.ca_prevu ?? 0))[0];
+  }, [forecasts, selectedAccount]);
 
   // ── Persistance ──────────────────────────────────────────────────────────
   async function persistUpdate(id: string, patch: Partial<Pick<PlanningEvent, "start_at" | "end_at">>) {
@@ -336,6 +350,7 @@ export function WeeklyPlanner({
             }
             resizable
             selectable
+            onSelectEvent={(event: CalEvent) => setSelectedId(event.id)}
             draggableAccessor={() => true}
             onDropFromOutside={({ start, end }: DragFromOutsideItemArgs) => {
               if (!dragCandidate) return;
@@ -363,6 +378,99 @@ export function WeeklyPlanner({
           />
         </div>
       </div>
+
+      {/* ── Fiche détaillée : ce qu'il faut faire chez ce compte ─────────── */}
+      {selectedEvent && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setSelectedId(null)} />
+          <div className="fixed right-0 top-0 z-50 flex h-full w-96 flex-col overflow-y-auto border-l border-border bg-surface p-5 shadow-xl">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: TYPE_META[selectedEvent.type].color }}>
+                  {TYPE_META[selectedEvent.type].label}
+                </p>
+                <h3 className="mt-0.5 text-base font-semibold text-foreground">{selectedEvent.title}</h3>
+              </div>
+              <button onClick={() => setSelectedId(null)} className="text-muted-foreground hover:text-foreground">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <CalendarClock size={13} />
+              {new Date(selectedEvent.start_at).toLocaleString("fr-FR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}
+              {" → "}
+              {new Date(selectedEvent.end_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+
+            {selectedAccount && (
+              <div className="mt-4 space-y-3">
+                <Link
+                  href={`/comptes/${selectedAccount.id}`}
+                  className="block rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-sm font-medium text-primary-700 hover:bg-primary-100"
+                >
+                  Ouvrir la fiche compte →
+                </Link>
+
+                <div className="rounded-lg border border-border p-3">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <Target size={12} /> Quoi faire chez ce compte
+                  </p>
+                  <p className="mt-1.5 text-sm text-foreground">
+                    {selectedEvent.note || "Aucune mission spécifique — se référer au score de ciblage sur la fiche compte."}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-border p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Prévisionnel</p>
+                  {selectedForecast ? (
+                    <p className="mt-1.5 text-sm text-foreground">
+                      {formatNumber(selectedForecast.boites_prevues)} boîtes · {formatEUR(selectedForecast.ca_prevu)}
+                      {" "}
+                      ({MONTH_LABELS[selectedForecast.month - 1]} {selectedForecast.year})
+                      {selectedForecast.commentaire && (
+                        <span className="mt-1 block text-xs text-muted-foreground">{selectedForecast.commentaire}</span>
+                      )}
+                    </p>
+                  ) : (
+                    <p className="mt-1.5 text-sm text-muted-foreground">Aucune prévision en cours pour ce compte.</p>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-border p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dernière commande</p>
+                  <p className="mt-1.5 text-sm text-foreground">
+                    {selectedAccount.last_order_date
+                      ? new Date(selectedAccount.last_order_date).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })
+                      : "Aucune commande enregistrée"}
+                    {selectedAccount.jours_silence != null && (
+                      <span className="ml-1 text-xs text-muted-foreground">({selectedAccount.jours_silence} j sans commande)</span>
+                    )}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-border p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Score de ciblage</p>
+                  <p className="mt-1.5 text-sm text-foreground">{computeTargetingScore(selectedAccount).total}/100</p>
+                </div>
+              </div>
+            )}
+
+            {!selectedAccount && selectedEvent.type !== "visite" && selectedEvent.type !== "visite_prospect" && (
+              <div className="mt-4 rounded-lg border border-border p-3">
+                <p className="text-sm text-foreground">{selectedEvent.note || "Créneau sans détail particulier."}</p>
+              </div>
+            )}
+
+            <button
+              onClick={() => { deleteEvent(selectedEvent.id); setSelectedId(null); }}
+              className="mt-auto flex items-center justify-center gap-1.5 rounded-lg border border-danger/30 py-2 text-sm font-medium text-danger hover:bg-danger/5"
+            >
+              <Trash2 size={14} /> Supprimer ce créneau
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
