@@ -369,11 +369,35 @@ export function PilotageBoard({
         source: f.source,
       }));
     const predictions = predictPortfolioForecast(accounts, hcpsByAccount, monthlySales, existingEntries, months);
+    const supabase = createClient();
+
+    // Un mois que le modèle jugeait éligible lors d'une génération précédente
+    // peut ne plus l'être (compte désormais trop proche d'une commande déjà
+    // prévue, espacement minimum non respecté, etc.) — sans nettoyage, cette
+    // ancienne ligne 'auto' reste affichée à côté de la nouvelle et double le
+    // compte pour ce mois-là. On supprime donc les lignes 'auto' du mois
+    // ciblé qui ne font plus partie du résultat avant d'écrire les nouvelles.
+    const keyOf = (f: { account_id: string; year: number; month: number }) => `${f.account_id}-${f.year}-${f.month}`;
+    const predictedKeys = new Set(predictions.map(keyOf));
+    const monthKeySet = new Set(months.map((m) => `${m.year}-${m.month}`));
+    const staleIds = forecasts
+      .filter(
+        (f) =>
+          f.kind === "prevision" &&
+          f.source === "auto" &&
+          monthKeySet.has(`${f.year}-${f.month}`) &&
+          !predictedKeys.has(keyOf(f))
+      )
+      .map((f) => f.id);
+    if (staleIds.length > 0) {
+      await supabase.from("account_forecasts").delete().in("id", staleIds);
+      setForecasts((prev) => prev.filter((f) => !staleIds.includes(f.id)));
+    }
+
     if (predictions.length === 0) {
       setAutoFilling(false);
       return;
     }
-    const supabase = createClient();
     // upsert sur (account_id, year, month, kind) : crée les mois manquants et
     // actualise ceux déjà générés par l'IA (source='auto') — jamais les mois
     // saisis à la main, exclus en amont par predictMonthlyForecast.

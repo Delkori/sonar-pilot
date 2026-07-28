@@ -165,7 +165,12 @@ function orderedMonthIndices(sales: MonthlySaleRow[]): number[] {
  * poids — selon des critères de récurrence réels plutôt qu'un lissage
  * générique :
  *  1. Le mois cible tombe dans le rythme de commande habituel du compte
- *     (mensuel/bimestriel/trimestriel) → poids plein.
+ *     (mensuel/bimestriel/trimestriel), avec un retard modéré (moins de 2
+ *     cycles) → poids plein. Au-delà, la confiance décroît avec le nombre de
+ *     cycles manqués : un compte en retard de 25 mois sur un rythme
+ *     trimestriel n'est plus "dû ce mois-ci" avec la même certitude qu'un
+ *     compte en retard de 3 mois — c'est un compte qu'il faut re-conquérir,
+ *     pas relancer sur son rythme habituel.
  *  2. Le compte n'a pas commandé le mois précédent cette année, mais
  *     commandait déjà ce même mois calendaire l'an dernier → relance
  *     saisonnière, poids modéré (retard probable, pas un vrai silence).
@@ -184,8 +189,19 @@ function evaluateMonthSignal(account: Account, orderedMonths: number[], tmIdx: n
   const bucket = recurrenceBucket(orderedMonths);
   const expectedGap = RECURRENCE_GAP_MONTHS[bucket];
 
-  if (lastOrderIdx !== null && expectedGap !== null && tmIdx - lastOrderIdx >= expectedGap) {
-    return { weight: 1, reason: `Récurrence ${bucket.toLowerCase()} — dû ce mois-ci` };
+  if (lastOrderIdx !== null && expectedGap !== null) {
+    const overdue = tmIdx - lastOrderIdx;
+    if (overdue >= expectedGap && overdue < expectedGap * 2) {
+      return { weight: 1, reason: `Récurrence ${bucket.toLowerCase()} — dû ce mois-ci` };
+    }
+    if (overdue >= expectedGap * 2) {
+      const cyclesMissed = Math.floor(overdue / expectedGap);
+      const weight = Math.max(0.15, 1 / cyclesMissed);
+      return {
+        weight,
+        reason: `Rythme ${bucket.toLowerCase()} dépassé depuis longtemps (${cyclesMissed} cycles manqués) — relance prudente`,
+      };
+    }
   }
 
   const sameMonthLastYear = tmIdx - 12;
