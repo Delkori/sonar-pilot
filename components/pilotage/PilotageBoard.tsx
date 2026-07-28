@@ -317,6 +317,12 @@ export function PilotageBoard({
   function forecastsFor(year: number, month: number) {
     const rows = forecasts.filter((f) => f.year === year && f.month === month);
     return rows.sort((a, b) => {
+      // Une commande réellement passée ce mois-ci reste toujours épinglée en
+      // haut de la colonne, prévision et commentaire compris — c'est le signal
+      // le plus important du mois, pas une ligne parmi d'autres.
+      const realiseA = realiseByAccountMonth.get(`${a.account_id}-${year}-${month}`) ?? 0;
+      const realiseB = realiseByAccountMonth.get(`${b.account_id}-${year}-${month}`) ?? 0;
+      if ((realiseA > 0) !== (realiseB > 0)) return realiseA > 0 ? -1 : 1;
       const accA = accountById.get(a.account_id);
       const accB = accountById.get(b.account_id);
       switch (cardSort) {
@@ -465,6 +471,29 @@ export function PilotageBoard({
     setForecasts((prev) => prev.map((f) => (f.id === id ? { ...f, commentaire } : f)));
     const supabase = createClient();
     await supabase.from("account_forecasts").update({ commentaire }).eq("id", id);
+  }
+
+  async function createForecastComment(accountId: string, year: number, month: number, commentaire: string) {
+    // Un compte qui a commandé sans avoir été prévu n'a pas de ligne en base
+    // pour porter le commentaire — on en crée une (0 boîte/0 €, manuelle),
+    // qui rejoint alors le tableau normal des prévisions et remonte en haut
+    // grâce au tri "réalisé ce mois-ci en premier".
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("account_forecasts")
+      .insert({
+        account_id: accountId,
+        year,
+        month,
+        kind: "prevision" as const,
+        boites_prevues: 0,
+        ca_prevu: 0,
+        commentaire,
+        source: "manuel" as const,
+      })
+      .select()
+      .single();
+    if (!error && data) setForecasts((prev) => [...prev, data as AccountForecast]);
   }
 
   function exportToExcel() {
@@ -827,6 +856,34 @@ export function PilotageBoard({
                     Déposez un compte ici
                   </div>
                 )}
+                {unforecastedOrdersFor(year, month).map((o) => {
+                  const account = accountById.get(o.account_id);
+                  if (!account) return null;
+                  return (
+                    <div key={`unforecasted-${o.account_id}`} className="rounded-lg border border-success/40 bg-success/5 p-2.5">
+                      <Link
+                        href={`/comptes/${account.id}`}
+                        className="flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-primary"
+                      >
+                        {account.name}
+                        <ScoreBadge score={computeTargetingScore(account).total} />
+                      </Link>
+                      <div className="mt-1 flex items-center justify-between text-[10px] font-medium text-success">
+                        <span>Réalisé</span>
+                        <span>✓ {formatEUR(o.ca)} commandé</span>
+                      </div>
+                      <p className="mt-1 text-[10px] text-muted-foreground/70">Commande non prévue ce mois-ci</p>
+                      <input
+                        type="text"
+                        placeholder="Commentaire — quoi proposer..."
+                        onBlur={(e) => {
+                          if (e.target.value.trim()) createForecastComment(account.id, year, month, e.target.value);
+                        }}
+                        className="mt-1 w-full rounded border border-dashed border-border bg-transparent px-1.5 py-1 text-[10px] text-foreground placeholder:text-muted-foreground/60 hover:border-primary/50 focus:border-primary focus:outline-none"
+                      />
+                    </div>
+                  );
+                })}
                 {monthForecasts.map((f) => {
                   const account = accountById.get(f.account_id);
                   if (!account) return null;
@@ -909,26 +966,6 @@ export function PilotageBoard({
                         onBlur={(e) => updateForecastCommentaire(f.id, e.target.value)}
                         className="mt-1 w-full rounded border border-dashed border-border bg-transparent px-1.5 py-1 text-[10px] text-foreground placeholder:text-muted-foreground/60 hover:border-primary/50 focus:border-primary focus:outline-none"
                       />
-                    </div>
-                  );
-                })}
-                {unforecastedOrdersFor(year, month).map((o) => {
-                  const account = accountById.get(o.account_id);
-                  if (!account) return null;
-                  return (
-                    <div key={`unforecasted-${o.account_id}`} className="rounded-lg border border-success/40 bg-success/5 p-2.5">
-                      <Link
-                        href={`/comptes/${account.id}`}
-                        className="flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-primary"
-                      >
-                        {account.name}
-                        <ScoreBadge score={computeTargetingScore(account).total} />
-                      </Link>
-                      <div className="mt-1 flex items-center justify-between text-[10px] font-medium text-success">
-                        <span>Réalisé</span>
-                        <span>✓ {formatEUR(o.ca)} commandé</span>
-                      </div>
-                      <p className="mt-1 text-[10px] text-muted-foreground/70">Commande non prévue ce mois-ci</p>
                     </div>
                   );
                 })}

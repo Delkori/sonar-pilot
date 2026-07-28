@@ -255,6 +255,10 @@ const CROISSANCE_PRUDENTE = 1.15;
 // Un compte sans aucun historique de commande ne peut pas se voir prédire une
 // part du potentiel : seule une commande d'amorçage est réaliste.
 const PART_AMORCAGE_PROSPECT = 0.05;
+// En dessous de ce seuil, la commande ne justifie pas le déplacement/l'effort
+// commercial : mieux vaut ne rien proposer ce mois-là que de suggérer un
+// passage pour 1-2 boîtes.
+const MIN_BOITES_RENTABLE = 5;
 
 const COMMANDES_PAR_AN: Record<RecurrenceBucket, number> = {
   Mensuelle: 12,
@@ -420,7 +424,10 @@ export function predictMonthlyForecast(
     if (!signal) continue;
 
     const boites = Math.min(Math.round(typicalOrder * signal.weight), restantLeft);
-    if (boites <= 0) continue;
+    // Pas rentable de proposer un passage pour une commande symbolique — on
+    // saute ce mois plutôt que d'afficher un chiffre qui ne justifie pas
+    // l'effort commercial.
+    if (boites < MIN_BOITES_RENTABLE) continue;
 
     const ca = Math.round(boites * caParBoite);
     results.push({
