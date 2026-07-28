@@ -1,9 +1,7 @@
 import { TopBar } from "@/components/layout/TopBar";
-import { Card } from "@/components/ui/Card";
-import { RelancesTable } from "@/components/relances/RelancesTable";
+import { WeeklyPlanner } from "@/components/relances/WeeklyPlanner";
 import { createClient } from "@/lib/supabase/server";
-import { getPhoneFollowUps } from "@/lib/followups";
-import type { Account, AccountAction } from "@/types/database";
+import type { Account, AccountAction, AccountForecast, PlanningEvent } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
@@ -19,19 +17,22 @@ export default async function RelancesPage() {
     .in("type", ["relance", "action"]);
   const actions = (actionsRaw ?? []) as AccountAction[];
 
-  const followUps = getPhoneFollowUps(accounts, actions);
+  const { data: forecastsRaw } = await supabase
+    .from("account_forecasts")
+    .select("*")
+    .eq("kind", "prevision");
+  const forecasts = (forecastsRaw ?? []) as AccountForecast[];
+
+  const { data: eventsRaw } = await supabase.from("planning_events").select("*");
+  const events = (eventsRaw ?? []) as PlanningEvent[];
 
   return (
     <div>
       <TopBar
-        title="Relances téléphoniques"
-        subtitle="Comptes à rappeler cette semaine pour planifier une visite — silence prolongé ou action prioritaire du score de ciblage"
+        title="Planning hebdomadaire"
+        subtitle="Visites clients & prospects, appels et temps administratif — glissez un compte dans le calendrier"
       />
-      <main className="px-8 py-6">
-        <Card className="overflow-hidden">
-          <RelancesTable followUps={followUps} />
-        </Card>
-      </main>
+      <WeeklyPlanner initialEvents={events} accounts={accounts} forecasts={forecasts} actions={actions} />
     </div>
   );
 }

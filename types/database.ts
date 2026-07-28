@@ -201,6 +201,21 @@ export type CalendarFeedToken = {
   created_at: string;
 };
 
+export type PlanningEventType = "visite" | "visite_prospect" | "appel" | "admin";
+
+export type PlanningEvent = {
+  id: string;
+  account_id: string | null;
+  type: PlanningEventType;
+  title: string;
+  note: string | null;
+  start_at: string;
+  end_at: string;
+  source: ForecastSource;
+  created_at: string;
+  updated_at: string;
+};
+
 // Minimal Database type for the Supabase client generics. Run
 // `supabase gen types typescript` against the real project to replace this
 // with a fully generated definition once the schema is applied.
@@ -222,6 +237,7 @@ export type Database = {
       hcps: Table<Hcp>;
       hcp_sponsorships: Table<HcpSponsorship>;
       sector_objectives: Table<SectorObjective>;
+      planning_events: Table<PlanningEvent>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
