@@ -12,7 +12,29 @@ import type { Account } from "@/types/database";
  * quand le silence s'allonge ou qu'un nouvel import actualise les CA.
  */
 
-export const PRIX_MOYEN_BOITE = 133.66;
+// Prix catalogue TTC moyen des références (skinboosters, cernes, volumes,
+// rides, lèvres — 10 réf.), converti en HT (TVA 20%) puis remisé selon le
+// tier de contrat du compte (41% Premium / 45% Pro / 50% Pro+), remises
+// négociées communiquées par l'utilisateur. Remplace l'ancien prix moyen
+// unique (133,66 €) qui ignorait entièrement le tier — un compte Premium
+// payait donc, dans le modèle, le même prix par boîte qu'un Pro+ alors que
+// l'écart réel est de 41% à 50% de remise.
+const PRIX_CATALOGUE_MOYEN_TTC = 231.52;
+const TVA = 1.2;
+const PRIX_CATALOGUE_MOYEN_HT = PRIX_CATALOGUE_MOYEN_TTC / TVA;
+const REMISE_PAR_TIER: Record<string, number> = { Premium: 0.41, Pro: 0.45, "Pro+": 0.5 };
+const REMISE_PAR_DEFAUT =
+  Object.values(REMISE_PAR_TIER).reduce((s, r) => s + r, 0) / Object.keys(REMISE_PAR_TIER).length;
+
+/** Prix HT réaliste d'une boîte pour ce tier de contrat (moyenne catalogue si tier inconnu). */
+export function prixBoiteHT(tier: string | null | undefined): number {
+  const remise = tier ? REMISE_PAR_TIER[tier] : undefined;
+  return PRIX_CATALOGUE_MOYEN_HT * (1 - (remise ?? REMISE_PAR_DEFAUT));
+}
+
+// Repli générique (tier inconnu) — gardé pour les rares appels sans compte
+// en contexte. Préférer `prixBoiteHT(account.price_list)` partout ailleurs.
+export const PRIX_MOYEN_BOITE = prixBoiteHT(null);
 export const NB_REFS_FILLERS = 10;
 
 export type ActionCode =
@@ -106,7 +128,8 @@ export function computeTargetingScore(
   });
 
   // 3. CA non capté — 20 pts
-  const potentielEUR = (account.potentiel_boites ?? 0) * PRIX_MOYEN_BOITE;
+  const prixBoite = prixBoiteHT(account.price_list);
+  const potentielEUR = (account.potentiel_boites ?? 0) * prixBoite;
   const caNonCapte = Math.max(potentielEUR - (account.ca_2025 ?? 0), 0);
   const cncPts = caNonCapte >= 50000 ? 20 : caNonCapte >= 20000 ? 14 : caNonCapte > 5000 ? 8 : 2;
   criteria.push({
@@ -114,7 +137,7 @@ export function computeTargetingScore(
     label: "CA non capté",
     points: cncPts,
     max: 20,
-    detail: `${Math.round(caNonCapte).toLocaleString("fr-FR")} € (potentiel × ${PRIX_MOYEN_BOITE} € − CA 2025)`,
+    detail: `${Math.round(caNonCapte).toLocaleString("fr-FR")} € (potentiel × ${prixBoite.toFixed(2)} € HT − CA 2025)`,
   });
 
   // 4. Références manquantes — 15 pts

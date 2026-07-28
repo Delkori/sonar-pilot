@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import { suggestMonthlyForecast } from "@/lib/forecast";
-import { PRIX_MOYEN_BOITE } from "@/lib/scoring";
+import { prixBoiteHT } from "@/lib/scoring";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import type { Account, AccountForecast, ForecastKind } from "@/types/database";
@@ -138,7 +138,7 @@ export function ForecastPanel({
     const caParBoite =
       account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
         ? account.ca_2026_ytd / account.realise_boites
-        : PRIX_MOYEN_BOITE;
+        : prixBoiteHT(account.price_list);
     const rows = monthlySales
       .filter((s) => s.ca > 0 && !forecasts.some((f) => f.year === s.year && f.month === s.month))
       .map((s) => ({

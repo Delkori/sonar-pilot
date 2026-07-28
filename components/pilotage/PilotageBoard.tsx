@@ -7,7 +7,7 @@ import { predictPortfolioForecast, suggestMonthlyForecast, allocateToHcps } from
 import type { HcpLite } from "@/lib/forecast";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
 import type { Opportunity } from "@/lib/opportunities";
-import { computeTargetingScore, PRIX_MOYEN_BOITE, ACTION_META } from "@/lib/scoring";
+import { computeTargetingScore, prixBoiteHT, ACTION_META } from "@/lib/scoring";
 import { isProspect } from "@/lib/accounts";
 import { computePersonaModels, personaRecommendations, PERSONAS } from "@/lib/persona";
 import type { Persona } from "@/lib/persona";
@@ -255,7 +255,7 @@ export function PilotageBoard({
       const list = accounts.filter((a) => a.price_list === tier);
       const objectifBoites = list.reduce((s, a) => s + (a.objectif_boites ?? 0), 0);
       const realiseBoites = list.reduce(
-        (s, a) => s + (a.realise_boites ?? (a.ca_2026_ytd ? a.ca_2026_ytd / PRIX_MOYEN_BOITE : 0)),
+        (s, a) => s + (a.realise_boites ?? (a.ca_2026_ytd ? a.ca_2026_ytd / prixBoiteHT(tier) : 0)),
         0
       );
       return { tier, count: list.length, objectifBoites, realiseBoites };

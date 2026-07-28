@@ -1,5 +1,5 @@
 import type { Account } from "@/types/database";
-import { PRIX_MOYEN_BOITE, computeTargetingScore } from "./scoring";
+import { prixBoiteHT, computeTargetingScore } from "./scoring";
 import { recurrenceBucket, isProspect } from "./accounts";
 import type { RecurrenceBucket } from "./accounts";
 
@@ -351,7 +351,7 @@ export function predictMonthlyForecast(
   const caParBoiteForTarget =
     account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
       ? account.ca_2026_ytd / account.realise_boites
-      : PRIX_MOYEN_BOITE;
+      : prixBoiteHT(account.price_list);
   const now = new Date();
   const nowIdx = monthIndex(now.getFullYear(), now.getMonth() + 1);
   const cibleBoites =
@@ -372,7 +372,7 @@ export function predictMonthlyForecast(
   const caParBoite =
     account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
       ? account.ca_2026_ytd / account.realise_boites
-      : PRIX_MOYEN_BOITE;
+      : prixBoiteHT(account.price_list);
 
   const tierAdj = TIER_FACTOR[account.price_list ?? ""] ?? 1;
   const trendAdj = trendFactor(orderedMonths, nowIdx);
@@ -529,13 +529,13 @@ export function autoFillPortfolioForecast(
     const objectifCa =
       restant > 0 && (account.objectif_boites ?? 0) > 0 && account.ca_2025
         ? (account.ca_2025 / account.objectif_boites!) * restant
-        : potentielRestant * PRIX_MOYEN_BOITE;
+        : potentielRestant * prixBoiteHT(account.price_list);
 
     if (historyPoints >= 3 && objectifCa > 0) {
       const caParBoite =
         account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
           ? account.ca_2026_ytd / account.realise_boites
-          : PRIX_MOYEN_BOITE;
+          : prixBoiteHT(account.price_list);
       const sum = monthlyTotals.reduce((s, v) => s + v, 0) || 1;
       for (const tm of remainingTargets) {
         const weight = monthlyTotals[tm.month - 1] / sum;

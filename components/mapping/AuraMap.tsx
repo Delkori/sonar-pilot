@@ -8,7 +8,7 @@ import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
-import { computeTargetingScore, PRIX_MOYEN_BOITE } from "@/lib/scoring";
+import { computeTargetingScore, prixBoiteHT } from "@/lib/scoring";
 import { suggestMonthlyForecast } from "@/lib/forecast";
 import { createClient } from "@/lib/supabase/client";
 import type { Account, Segment, AccountStatus } from "@/types/database";
@@ -205,7 +205,7 @@ export function AuraMap({
       cur.objectif += a.objectif_boites ?? 0;
       cur.realise += a.realise_boites ?? 0;
       cur.ca += a.ca_2026_ytd ?? 0;
-      cur.potentiel += (a.potentiel_boites ?? 0) * PRIX_MOYEN_BOITE;
+      cur.potentiel += (a.potentiel_boites ?? 0) * prixBoiteHT(a.price_list);
       cur.count += 1;
       if (a.status === "actif") cur.activeCount += 1;
       map.set(a.department_code, cur);
