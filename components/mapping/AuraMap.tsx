@@ -25,6 +25,8 @@ import {
   Award,
   UserX,
   Stethoscope,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 
 type SortKey = "name" | "segment" | "city" | "status" | "score" | "ca_ytd";
@@ -44,9 +46,11 @@ interface ProductRow {
   qty_ordered_ly: number | null;
 }
 
-// Carte plus compacte
+// Carte plus compacte — agrandie quand on zoome sur un département
 const WIDTH = 500;
 const HEIGHT = 520;
+const ZOOM_WIDTH = 760;
+const ZOOM_HEIGHT = 780;
 
 function ecartRatio(a: Account) {
   if (!a.objectif_boites) return null;
@@ -162,11 +166,23 @@ export function AuraMap({
     [accounts, segment, status, selectedDept, showOnlyOpportunities, opportunityByAccount]
   );
 
-  const projection = useMemo(
-    () => d3geo.geoConicConformal().fitExtent([[10, 10], [WIDTH - 10, HEIGHT - 10]], geo),
-    [geo]
+  const zoomedFeature = useMemo(
+    () => (selectedDept ? geo.features.find((f) => f.properties.code === selectedDept) ?? null : null),
+    [geo, selectedDept]
   );
+
+  const projection = useMemo(() => {
+    if (zoomedFeature) {
+      return d3geo.geoConicConformal().fitExtent(
+        [[24, 24], [ZOOM_WIDTH - 24, ZOOM_HEIGHT - 24]],
+        zoomedFeature as unknown as d3geo.GeoPermissibleObjects
+      );
+    }
+    return d3geo.geoConicConformal().fitExtent([[10, 10], [WIDTH - 10, HEIGHT - 10]], geo);
+  }, [geo, zoomedFeature]);
   const pathGen = useMemo(() => d3geo.geoPath(projection), [projection]);
+  const svgWidth = zoomedFeature ? ZOOM_WIDTH : WIDTH;
+  const svgHeight = zoomedFeature ? ZOOM_HEIGHT : HEIGHT;
 
   // ── Statistiques par département (comptes + CA + objectif/réalisé)
   const deptStats = useMemo(() => {
@@ -511,12 +527,30 @@ export function AuraMap({
 
         {/* ── Centre : carte SVG ── */}
         <div className="rounded-xl border border-border bg-surface p-3 flex flex-col items-center">
-          <p className="mb-2 text-xs font-semibold text-muted-foreground text-center uppercase tracking-wide">
-            {selectedDept && selectedDeptFeature
-              ? `${selectedDeptFeature.properties.nom} (${selectedDept}) — ${selectedDeptStats?.count ?? 0} comptes`
-              : "Cliquez sur un département pour filtrer"}
-          </p>
-          <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} style={{ maxHeight: 500, maxWidth: 560, width: "100%" }}>
+          <div className="mb-2 flex w-full items-center justify-between gap-2">
+            <p className="flex-1 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              {selectedDept && selectedDeptFeature
+                ? `${selectedDeptFeature.properties.nom} (${selectedDept}) — ${selectedDeptStats?.count ?? 0} comptes`
+                : "Cliquez sur un département pour zoomer"}
+            </p>
+            {selectedDept ? (
+              <button
+                onClick={() => setSelectedDept(null)}
+                title="Revenir à la vue régionale"
+                className="flex shrink-0 items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-surface-muted hover:text-foreground"
+              >
+                <ZoomOut size={12} /> Vue région
+              </button>
+            ) : (
+              <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground/60">
+                <ZoomIn size={12} /> Zoom
+              </span>
+            )}
+          </div>
+          <svg
+            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+            style={{ maxHeight: zoomedFeature ? 720 : 500, maxWidth: zoomedFeature ? 800 : 560, width: "100%" }}
+          >
             {geo.features.map((f) => {
               const stats = deptStats.get(f.properties.code);
               const fill = fillForDept(stats);

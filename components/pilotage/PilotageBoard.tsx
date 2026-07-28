@@ -13,7 +13,8 @@ import { SegmentBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import type { Account, AccountForecast, Hcp, SectorObjective } from "@/types/database";
-import { GripVertical, Trash2, Loader2, Target, Wand2, Stethoscope } from "lucide-react";
+import { GripVertical, Trash2, Loader2, Target, Wand2, Stethoscope, FileDown } from "lucide-react";
+import * as XLSX from "xlsx";
 
 type HcpRow = Pick<Hcp, "id" | "account_id" | "name" | "potentiel_boites">;
 type ProductRow = { brand: string; sales_value_ly: number | null; sales_value_cy: number | null };
@@ -339,6 +340,35 @@ export function PilotageBoard({
     await supabase.from("account_forecasts").update({ ca_prevu }).eq("id", id);
   }
 
+  function exportToExcel() {
+    const rows = months.flatMap(({ year, month }) =>
+      forecastsFor(year, month).map((f) => {
+        const account = accountById.get(f.account_id);
+        const accHcps = hcpsByAccount.get(f.account_id) ?? [];
+        const allocation = allocateToHcps(accHcps, f.boites_prevues ?? 0, f.ca_prevu ?? 0);
+        return {
+          Mois: `${MONTH_LABELS[month - 1]} ${year}`,
+          Compte: account?.name ?? "—",
+          Segment: account?.segment ?? "",
+          Score: account ? computeTargetingScore(account).total : "",
+          "Boîtes prévues": f.boites_prevues ?? 0,
+          "CA prévu (€)": f.ca_prevu ?? 0,
+          "Médecins (répartition)": allocation.map((h) => `${h.name} (${h.boites} b · ${Math.round(h.ca)} €)`).join(" ; "),
+          Note: f.note ?? "",
+        };
+      })
+    );
+
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    sheet["!cols"] = [
+      { wch: 14 }, { wch: 30 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 50 }, { wch: 40 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Prévisionnel");
+    const label = horizon === 1 ? "mois" : horizon === 3 ? "trimestre" : "semestre";
+    XLSX.writeFile(workbook, `previsionnel-pilotage-${label}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
   return (
     <div className="space-y-4">
       {/* ── Encart de planification (adapté à la période) ─────────── */}
@@ -566,6 +596,14 @@ export function PilotageBoard({
           >
             {autoFilling ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
             Générer le prévisionnel du portefeuille
+          </button>
+          <button
+            onClick={exportToExcel}
+            title="Exporte le prévisionnel affiché (période et tri en cours) au format Excel"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-muted"
+          >
+            <FileDown size={13} />
+            Exporter Excel
           </button>
           <span className="text-xs text-muted-foreground">Trier les comptes :</span>
           <select
