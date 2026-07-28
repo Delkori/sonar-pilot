@@ -226,6 +226,50 @@ export interface ExistingForecastEntry {
  * complète autour de ce que l'utilisateur a déjà décidé, elle ne le double
  * pas.
  */
+// Facteur de croissance prudent appliqué au run-rate réel pour projeter une
+// cible annuelle implicite — jamais la promesse de capter le potentiel entier
+// d'un coup.
+const CROISSANCE_PRUDENTE = 1.15;
+// Un compte sans aucun historique de commande ne peut pas se voir prédire une
+// part du potentiel : seule une commande d'amorçage est réaliste.
+const PART_AMORCAGE_PROSPECT = 0.05;
+
+const COMMANDES_PAR_AN: Record<RecurrenceBucket, number> = {
+  Mensuelle: 12,
+  Bimestrielle: 6,
+  Trimestrielle: 4,
+  Espacée: 2,
+  Unique: 1,
+};
+
+/**
+ * Cible annuelle implicite quand aucun objectif n'est saisi — jamais le
+ * potentiel brut (taille de marché théorique sur 1 an), mais une projection
+ * du run-rate réellement observé (CA historique moyen par commande × cadence
+ * de commande de l'année), avec une croissance prudente, plafonnée par le
+ * potentiel. Un compte sans aucune commande passée reçoit une cible
+ * d'amorçage minime (quelques % du potentiel), pas un objectif calqué sur un
+ * client qui achèterait déjà à pleine capacité.
+ */
+function implicitTargetBoites(
+  account: Account,
+  orderedMonths: number[],
+  sales: MonthlySaleRow[],
+  caParBoite: number
+): number {
+  const potentielBoites = account.potentiel_boites ?? 0;
+  if (orderedMonths.length === 0 || caParBoite <= 0) {
+    return Math.round(potentielBoites * PART_AMORCAGE_PROSPECT);
+  }
+
+  const totalCaHistorique = sales.filter((s) => s.ca > 0).reduce((s, v) => s + v.ca, 0);
+  const avgOrderBoites = totalCaHistorique / orderedMonths.length / caParBoite;
+  const bucket = recurrenceBucket(orderedMonths);
+  const runRateAnnuel = avgOrderBoites * COMMANDES_PAR_AN[bucket] * CROISSANCE_PRUDENTE;
+
+  return potentielBoites > 0 ? Math.min(Math.round(runRateAnnuel), potentielBoites) : Math.round(runRateAnnuel);
+}
+
 export function predictMonthlyForecast(
   account: Account,
   hcps: HcpLite[],
@@ -236,9 +280,12 @@ export function predictMonthlyForecast(
   const orderedMonths = orderedMonthIndices(sales);
 
   const objectifBoites = account.objectif_boites ?? 0;
-  const potentielBoites = account.potentiel_boites ?? 0;
-  // Objectif implicite = potentiel du compte quand aucun objectif n'est saisi.
-  const cibleBoites = objectifBoites > 0 ? objectifBoites : potentielBoites;
+  const caParBoiteForTarget =
+    account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
+      ? account.ca_2026_ytd / account.realise_boites
+      : PRIX_MOYEN_BOITE;
+  const cibleBoites =
+    objectifBoites > 0 ? objectifBoites : implicitTargetBoites(account, orderedMonths, sales, caParBoiteForTarget);
 
   const manuelBoitesSum = existingForAccount
     .filter((e) => e.source === "manuel")

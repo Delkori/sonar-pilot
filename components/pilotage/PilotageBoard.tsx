@@ -367,16 +367,20 @@ export function PilotageBoard({
     const { data, error } = await supabase
       .from("account_forecasts")
       .upsert(
-        predictions.map((p) => ({
-          account_id: p.account_id,
-          year: p.year,
-          month: p.month,
-          boites_prevues: p.boites_prevues,
-          ca_prevu: p.ca_prevu,
-          note: p.note,
-          kind: "prevision" as const,
-          source: "auto" as const,
-        })),
+        predictions.map((p) => {
+          const account = accountById.get(p.account_id);
+          const mission = account ? missionForAccount(account) : "";
+          return {
+            account_id: p.account_id,
+            year: p.year,
+            month: p.month,
+            boites_prevues: p.boites_prevues,
+            ca_prevu: p.ca_prevu,
+            note: mission ? `${p.note} · ${mission}` : p.note,
+            kind: "prevision" as const,
+            source: "auto" as const,
+          };
+        }),
         { onConflict: "account_id,year,month,kind" }
       )
       .select();
