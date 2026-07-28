@@ -242,20 +242,41 @@ const COMMANDES_PAR_AN: Record<RecurrenceBucket, number> = {
   Unique: 1,
 };
 
+// Tier de contrat → confiance sur la capacité du compte à absorber la
+// croissance projetée (un Pro+ a déjà prouvé un volume plus soutenu).
+const TIER_FACTOR: Record<string, number> = { Premium: 0.9, Pro: 1.0, "Pro+": 1.15 };
+
+/**
+ * Facteur de tendance : compare l'activité des 6 derniers mois à celle des 6
+ * mois précédents (nombre de commandes, comme proxy simple et robuste au
+ * bruit du montant unitaire). Un compte qui accélère justifie une cible plus
+ * ambitieuse ; un compte qui ralentit, une cible plus prudente. Neutre (1)
+ * dès qu'il n'y a pas assez d'historique récent pour juger.
+ */
+function trendFactor(orderedMonths: number[], nowIdx: number): number {
+  const recent = orderedMonths.filter((m) => m > nowIdx - 6 && m <= nowIdx).length;
+  const previous = orderedMonths.filter((m) => m > nowIdx - 12 && m <= nowIdx - 6).length;
+  if (recent === 0 && previous === 0) return 1;
+  if (previous === 0) return recent > 0 ? 1.2 : 1;
+  const ratio = recent / previous;
+  return Math.min(1.3, Math.max(0.7, ratio));
+}
+
 /**
  * Cible annuelle implicite quand aucun objectif n'est saisi — jamais le
  * potentiel brut (taille de marché théorique sur 1 an), mais une projection
  * du run-rate réellement observé (CA historique moyen par commande × cadence
- * de commande de l'année), avec une croissance prudente, plafonnée par le
- * potentiel. Un compte sans aucune commande passée reçoit une cible
- * d'amorçage minime (quelques % du potentiel), pas un objectif calqué sur un
- * client qui achèterait déjà à pleine capacité.
+ * de commande de l'année), ajustée par la tendance récente et le tier de
+ * contrat, plafonnée par le potentiel. Un compte sans aucune commande passée
+ * reçoit une cible d'amorçage minime (quelques % du potentiel), pas un
+ * objectif calqué sur un client qui achèterait déjà à pleine capacité.
  */
 function implicitTargetBoites(
   account: Account,
   orderedMonths: number[],
   sales: MonthlySaleRow[],
-  caParBoite: number
+  caParBoite: number,
+  nowIdx: number
 ): number {
   const potentielBoites = account.potentiel_boites ?? 0;
   if (orderedMonths.length === 0 || caParBoite <= 0) {
@@ -265,7 +286,9 @@ function implicitTargetBoites(
   const totalCaHistorique = sales.filter((s) => s.ca > 0).reduce((s, v) => s + v.ca, 0);
   const avgOrderBoites = totalCaHistorique / orderedMonths.length / caParBoite;
   const bucket = recurrenceBucket(orderedMonths);
-  const runRateAnnuel = avgOrderBoites * COMMANDES_PAR_AN[bucket] * CROISSANCE_PRUDENTE;
+  const tierAdj = TIER_FACTOR[account.price_list ?? ""] ?? 1;
+  const trendAdj = trendFactor(orderedMonths, nowIdx);
+  const runRateAnnuel = avgOrderBoites * COMMANDES_PAR_AN[bucket] * CROISSANCE_PRUDENTE * tierAdj * trendAdj;
 
   return potentielBoites > 0 ? Math.min(Math.round(runRateAnnuel), potentielBoites) : Math.round(runRateAnnuel);
 }
@@ -284,8 +307,12 @@ export function predictMonthlyForecast(
     account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
       ? account.ca_2026_ytd / account.realise_boites
       : PRIX_MOYEN_BOITE;
+  const now = new Date();
+  const nowIdx = monthIndex(now.getFullYear(), now.getMonth() + 1);
   const cibleBoites =
-    objectifBoites > 0 ? objectifBoites : implicitTargetBoites(account, orderedMonths, sales, caParBoiteForTarget);
+    objectifBoites > 0
+      ? objectifBoites
+      : implicitTargetBoites(account, orderedMonths, sales, caParBoiteForTarget, nowIdx);
 
   const manuelBoitesSum = existingForAccount
     .filter((e) => e.source === "manuel")

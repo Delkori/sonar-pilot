@@ -120,7 +120,10 @@ export function PilotageBoard({
     const persona = personaByAccount.get(account.id);
     if (persona) {
       const recos = personaRecommendations(modelByPersona.get(persona), brandsByAccount.get(account.id) ?? new Set(), 0.4, 1);
-      if (recos.length > 0) return `Proposer ${recos[0].brand} (référence-clé des ${persona.toLowerCase()}s)`;
+      if (recos.length > 0) {
+        const qty = Math.round(recos[0].medianQty);
+        return `Proposer ${recos[0].brand}${qty > 0 ? ` (~${qty} boîtes` : " (référence-clé"} des ${persona.toLowerCase()}s)`;
+      }
     }
     return ACTION_META[computeTargetingScore(account).action].label;
   }
@@ -148,6 +151,18 @@ export function PilotageBoard({
     const map = new Map<string, number>();
     for (const s of monthlySales) {
       const key = `${s.year}-${s.month}`;
+      map.set(key, (map.get(key) ?? 0) + s.ca);
+    }
+    return map;
+  }, [monthlySales]);
+
+  // Réalisé par compte × mois — permet d'afficher, ligne par ligne, si un
+  // compte prévu a effectivement commandé (visible dès le prochain import de
+  // ventes, sans action manuelle).
+  const realiseByAccountMonth = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of monthlySales) {
+      const key = `${s.account_id}-${s.year}-${s.month}`;
       map.set(key, (map.get(key) ?? 0) + s.ca);
     }
     return map;
@@ -418,6 +433,7 @@ export function PilotageBoard({
           Score: account ? computeTargetingScore(account).total : "",
           "Boîtes prévues": f.boites_prevues ?? 0,
           "CA prévu (€)": f.ca_prevu ?? 0,
+          "CA réalisé (€)": realiseByAccountMonth.get(`${f.account_id}-${year}-${month}`) ?? 0,
           Mission: account ? missionForAccount(account) : "",
           "Médecins (répartition)": allocation.map((h) => `${h.name} (${h.boites} b · ${Math.round(h.ca)} €)`).join(" ; "),
           Note: f.note ?? "",
@@ -769,8 +785,15 @@ export function PilotageBoard({
                   const allocation = allocateToHcps(accHcps, f.boites_prevues ?? 0, f.ca_prevu ?? 0)
                     .filter((h) => h.ca > 0)
                     .sort((a, b) => b.ca - a.ca);
+                  const realiseLigne = realiseByAccountMonth.get(`${account.id}-${year}-${month}`) ?? 0;
+                  const commande = realiseLigne > 0;
                   return (
-                    <div key={f.id} className="rounded-lg border border-border bg-surface-muted p-2.5">
+                    <div
+                      key={f.id}
+                      className={`rounded-lg border p-2.5 ${
+                        commande ? "border-success/40 bg-success/5" : "border-border bg-surface-muted"
+                      }`}
+                    >
                       <div className="flex items-start justify-between gap-1">
                         <Link
                           href={`/comptes/${account.id}`}
@@ -796,6 +819,14 @@ export function PilotageBoard({
                           className="w-20 rounded border border-transparent bg-transparent px-1 text-right hover:border-border focus:border-primary focus:outline-none"
                         />
                         €
+                      </div>
+                      <div
+                        className={`mt-1 flex items-center justify-between text-[10px] font-medium ${
+                          commande ? "text-success" : "text-muted-foreground/70"
+                        }`}
+                      >
+                        <span>Réalisé</span>
+                        <span>{commande ? `✓ ${formatEUR(realiseLigne)} commandé` : "— pas encore commandé"}</span>
                       </div>
                       <p className="mt-1 flex items-start gap-1 text-[10px] font-medium text-primary-700">
                         <Target size={10} className="mt-0.5 shrink-0" />
