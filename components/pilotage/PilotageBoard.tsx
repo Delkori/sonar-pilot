@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { predictPortfolioForecast, suggestMonthlyForecast, allocateToHcps } from "@/lib/forecast";
 import type { HcpLite } from "@/lib/forecast";
+import { generateMonthlyPlan } from "@/lib/planning";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
 import type { Opportunity } from "@/lib/opportunities";
 import { computeTargetingScore, prixBoiteHT, ACTION_META } from "@/lib/scoring";
@@ -462,12 +463,81 @@ export function PilotageBoard({
         { onConflict: "account_id,year,month,kind" }
       )
       .select();
-    setAutoFilling(false);
     if (!error && data) {
       const written = data as AccountForecast[];
       const keyOf = (f: { account_id: string; year: number; month: number }) => `${f.account_id}-${f.year}-${f.month}`;
       const writtenKeys = new Set(written.map(keyOf));
       setForecasts((prev) => [...prev.filter((f) => f.kind !== "prevision" || !writtenKeys.has(keyOf(f))), ...written]);
+
+      // Le prévisionnel vient d'être (ré)généré : remplit aussitôt l'agenda
+      // (/relances) sur les mêmes mois, pour ne pas avoir à repasser
+      // semaine par semaine générer le planning à la main.
+      await generatePlanningForMonths(written);
+    }
+    setAutoFilling(false);
+  }
+
+  async function generatePlanningForMonths(forecastsJustWritten: AccountForecast[]) {
+    const monthsList = Array.from(new Set(months.map((m) => `${m.year}-${m.month}`))).map((k) => {
+      const [y, mo] = k.split("-").map(Number);
+      return { year: y, month: mo };
+    });
+    if (monthsList.length === 0) return;
+
+    const supabase = createClient();
+    const [{ data: actionsRaw }, { data: eventsRaw }] = await Promise.all([
+      supabase.from("account_actions").select("account_id, type, due_date, done"),
+      supabase.from("planning_events").select("id, account_id, start_at, source"),
+    ]);
+
+    const manuelForecasts = forecasts.filter((f) => f.kind === "prevision" && f.source === "manuel");
+    const forecastsForPlanning = [...manuelForecasts, ...forecastsJustWritten];
+
+    const range = monthsList.reduce(
+      (acc, m) => {
+        const start = new Date(m.year, m.month - 1, 1);
+        const end = new Date(m.year, m.month, 1);
+        return { min: acc.min && acc.min < start ? acc.min : start, max: acc.max && acc.max > end ? acc.max : end };
+      },
+      { min: null as Date | null, max: null as Date | null }
+    );
+
+    const existingEvents = (eventsRaw ?? []) as { id: string; account_id: string | null; start_at: string; source: string }[];
+    const draft = generateMonthlyPlan(
+      monthsList,
+      accounts,
+      forecastsForPlanning,
+      (actionsRaw ?? []) as { account_id: string; type: string; due_date: string | null; done: boolean }[],
+      existingEvents.map((e) => ({ account_id: e.account_id, start_at: e.start_at }))
+    );
+
+    // Idempotent, comme pour le prévisionnel : supprime les lignes 'auto'
+    // déjà présentes sur la période couverte avant de réinsérer.
+    const staleEventIds = existingEvents
+      .filter(
+        (e) =>
+          e.source === "auto" &&
+          range.min &&
+          range.max &&
+          new Date(e.start_at) >= range.min &&
+          new Date(e.start_at) < range.max
+      )
+      .map((e) => e.id);
+    if (staleEventIds.length > 0) {
+      await supabase.from("planning_events").delete().in("id", staleEventIds);
+    }
+    if (draft.length > 0) {
+      await supabase.from("planning_events").insert(
+        draft.map((d) => ({
+          account_id: d.account_id,
+          type: d.type,
+          title: d.title,
+          note: d.note,
+          start_at: d.start_at.toISOString(),
+          end_at: d.end_at.toISOString(),
+          source: "auto" as const,
+        }))
+      );
     }
   }
 

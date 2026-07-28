@@ -87,8 +87,14 @@ export function generateWeeklyPlan(
 ): DraftPlanningEvent[] {
   const monthKey = (y: number, m: number) => `${y}-${m}`;
   const thisMonthKey = monthKey(weekStart.getFullYear(), weekStart.getMonth() + 1);
+  // Le mois suivant n'est inclus que si la semaine elle-même chevauche sur
+  // ce mois suivant (dernière semaine du mois) — sinon les comptes prévus
+  // pour le mois suivant sont "consommés" dès les premières semaines du
+  // mois en cours et il ne reste plus rien à générer une fois ce mois arrivé.
+  const weekEndFriday = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 4);
+  const straddlesNextMonth = weekEndFriday.getMonth() !== weekStart.getMonth();
   const nextMonthDate = new Date(weekStart.getFullYear(), weekStart.getMonth() + 1, 1);
-  const nextMonthKey = monthKey(nextMonthDate.getFullYear(), nextMonthDate.getMonth() + 1);
+  const nextMonthKey = straddlesNextMonth ? monthKey(nextMonthDate.getFullYear(), nextMonthDate.getMonth() + 1) : null;
 
   // Un compte n'est "déjà pris" que s'il a une visite dans le même mois
   // calendaire que la semaine générée — sinon le pool se vide au bout de
@@ -229,6 +235,51 @@ export function generateWeeklyPlan(
   }
 
   return events;
+}
+
+/** Tous les lundis dont la semaine touche au moins un des mois donnés. */
+export function mondaysCoveringMonths(monthsList: { year: number; month: number }[]): Date[] {
+  const seen = new Set<number>();
+  const mondays: Date[] = [];
+  for (const { year, month } of monthsList) {
+    const first = new Date(year, month - 1, 1);
+    const last = new Date(year, month, 0);
+    let d = mondayOf(first);
+    while (d <= last) {
+      const t = d.getTime();
+      if (!seen.has(t)) {
+        seen.add(t);
+        mondays.push(new Date(d));
+      }
+      d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7);
+    }
+  }
+  return mondays.sort((a, b) => a.getTime() - b.getTime());
+}
+
+/**
+ * Génère le planning de plusieurs mois d'un coup (toutes les semaines qui
+ * les couvrent), en propageant les comptes déjà planifiés d'une semaine sur
+ * l'autre pour ne pas les reproposer — utilisé quand le prévisionnel
+ * Pilotage vient d'être (re)généré, pour remplir l'agenda sans repasser
+ * semaine par semaine dans /relances.
+ */
+export function generateMonthlyPlan(
+  monthsList: { year: number; month: number }[],
+  accounts: Account[],
+  forecasts: AccountForecast[],
+  actions: { account_id: string; type: string; due_date: string | null; done: boolean }[],
+  existingEvents: ExistingPlanningEvent[]
+): DraftPlanningEvent[] {
+  const weeks = mondaysCoveringMonths(monthsList);
+  let running = [...existingEvents];
+  const allDrafts: DraftPlanningEvent[] = [];
+  for (const monday of weeks) {
+    const draft = generateWeeklyPlan(monday, accounts, forecasts, actions, running);
+    allDrafts.push(...draft);
+    running = [...running, ...draft.map((d) => ({ account_id: d.account_id, start_at: d.start_at.toISOString() }))];
+  }
+  return allDrafts;
 }
 
 export function mondayOf(date: Date): Date {
