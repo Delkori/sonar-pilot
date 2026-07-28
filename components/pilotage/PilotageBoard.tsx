@@ -807,7 +807,9 @@ export function PilotageBoard({
           const monthForecasts = forecastsFor(year, month);
           const totalPrevu = monthForecasts.reduce((s, f) => s + (f.ca_prevu ?? 0), 0);
           const realise = realiseByMonth.get(`${year}-${month}`) ?? 0;
+          const objectifMonth = sectorObjectives.find((o) => o.year === year && o.month === month)?.objectif_ca ?? 0;
           const atteinte = totalPrevu > 0 ? Math.min(realise / totalPrevu, 1) : 0;
+          const atteinteObjectifMonth = objectifMonth > 0 ? Math.min(realise / objectifMonth, 1) : 0;
           const key = `${year}-${month}`;
           const isTarget = dropTarget === key;
 
@@ -832,9 +834,17 @@ export function PilotageBoard({
                   </h4>
                   {isSaving && <Loader2 size={13} className="animate-spin text-muted-foreground" />}
                 </div>
-                <div className="mt-2 flex items-center justify-between text-xs">
+                {objectifMonth > 0 && (
+                  <div className="mt-2 flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Objectif</span>
+                    <span className="font-medium text-foreground">{formatEUR(objectifMonth)}</span>
+                  </div>
+                )}
+                <div className={`${objectifMonth > 0 ? "mt-1" : "mt-2"} flex items-center justify-between text-xs`}>
                   <span className="text-muted-foreground">Prévu</span>
-                  <span className="font-medium text-foreground">{formatEUR(totalPrevu)}</span>
+                  <span className={`font-medium ${objectifMonth > 0 && totalPrevu < objectifMonth ? "text-danger" : "text-foreground"}`}>
+                    {formatEUR(totalPrevu)}
+                  </span>
                 </div>
                 <div className="mt-1 flex items-center justify-between text-xs">
                   <span className="text-muted-foreground">Réalisé</span>
@@ -844,8 +854,10 @@ export function PilotageBoard({
                 </div>
                 <div className="mt-2 h-1.5 rounded-full bg-surface-muted">
                   <div
-                    className={`h-1.5 rounded-full ${atteinte >= 1 ? "bg-success" : "bg-primary"}`}
-                    style={{ width: `${atteinte * 100}%` }}
+                    className={`h-1.5 rounded-full ${
+                      objectifMonth > 0 ? (atteinteObjectifMonth >= 1 ? "bg-success" : "bg-primary") : atteinte >= 1 ? "bg-success" : "bg-primary"
+                    }`}
+                    style={{ width: `${(objectifMonth > 0 ? atteinteObjectifMonth : atteinte) * 100}%` }}
                   />
                 </div>
               </div>
