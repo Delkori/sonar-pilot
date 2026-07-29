@@ -439,7 +439,9 @@ export function DashboardClient({
             trend={
               month === null && ytdPace !== null
                 ? `${formatEUR(ytdPace.prev)} en ${year - 1} à la même période` +
-                  (ytdPace.growth !== null ? ` (${ytdPace.growth > 0 ? "+" : ""}${formatPct(ytdPace.growth)})` : "")
+                  (ytdPace.growth !== null
+                    ? ` — ${ytdPace.growth >= 0 ? "avance" : "retard"} de ${formatPct(Math.abs(ytdPace.growth))}`
+                    : "")
                 : undefined
             }
             tone={
