@@ -221,15 +221,23 @@ export interface RawInvoiceProductRow {
   valueEur: number;
 }
 
-/** "INVOICE NUMBER ET PRODUCT.xlsx" — une ligne produit par facture (+ une ligne "Total" à ignorer). */
+/**
+ * "INVOICE NUMBER ET PRODUCT.xlsx" — le numéro de facture n'apparaît QUE sur
+ * la ligne "Total" de chaque groupe (cellule fusionnée à l'export) ; les
+ * lignes produit qui suivent ont cette colonne vide. Il faut donc reporter
+ * le dernier numéro de facture rencontré sur les lignes produit, sinon
+ * elles sont toutes rejetées faute de numéro — c'était le cas jusqu'ici
+ * (aucune ligne produit n'était jamais rattachée à un compte).
+ */
 export function parseInvoiceProducts(buffer: ArrayBuffer): RawInvoiceProductRow[] {
   const wb = XLSX.read(buffer, { type: "array" });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
 
   const result: RawInvoiceProductRow[] = [];
+  let currentInvoice: string | null = null;
   for (const row of rows.slice(1)) {
-    const invoiceNumber = row[0] ? String(row[0]).trim() : null;
+    if (row[0]) currentInvoice = String(row[0]).trim();
     const description = row[1] ? String(row[1]).trim() : null;
     const rawDate = row[2];
     const date =
@@ -238,9 +246,9 @@ export function parseInvoiceProducts(buffer: ArrayBuffer): RawInvoiceProductRow[
         : typeof rawDate === "number"
         ? excelSerialToISODate(rawDate)
         : null;
-    if (!invoiceNumber || !description || description === "Total" || !date) continue;
+    if (!currentInvoice || !description || description === "Total" || !date) continue;
     result.push({
-      invoiceNumber,
+      invoiceNumber: currentInvoice,
       description,
       date,
       qty: typeof row[3] === "number" ? row[3] : 0,
