@@ -668,8 +668,8 @@ export function DashboardClient({
               label: "Top 10 / Flop 10 clients — CA 2026 vs 2025",
               node: (
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <TopFlopClientsCard title="Top 10 clients (CA 2026)" rows={top10Clients2026} tone="positive" />
-                  <TopFlopClientsCard title="Flop 10 clients (CA 2026 vs 2025)" rows={flop10Clients2026} tone="negative" />
+                  <TopFlopClientsCard title="Top 10 clients (CA 2026 YTD)" rows={top10Clients2026} tone="positive" />
+                  <TopFlopClientsCard title="Flop 10 clients (CA 2026 YTD vs 2025)" rows={flop10Clients2026} tone="negative" />
                 </div>
               ),
             },

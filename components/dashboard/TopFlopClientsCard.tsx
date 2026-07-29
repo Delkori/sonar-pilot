@@ -20,7 +20,7 @@ export function TopFlopClientsCard({ title, rows, tone }: { title: string; rows:
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle>{title}</CardTitle>
-          <CardDescription>CA 2026 (YTD) vs CA 2025</CardDescription>
+          <CardDescription>CA 2026 (YTD, jusqu&apos;à aujourd&apos;hui) vs CA 2025 (année complète)</CardDescription>
         </div>
         <Icon size={18} className={tone === "positive" ? "text-success" : "text-danger"} />
       </CardHeader>

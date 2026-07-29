@@ -257,12 +257,12 @@ export function ProductSalesComparison({
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <SortableTh label="Marque" sortKey="brand" activeKey={sortKey} dir={dir} onSort={toggle} className="pb-2" />
-                <SortableTh label="CA N-1" sortKey="lyVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
-                <SortableTh label="CA En cours" sortKey="cyVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
+                <SortableTh label="CA N-1 (YTD)" sortKey="lyVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
+                <SortableTh label="CA en cours (YTD)" sortKey="cyVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
                 <SortableTh label="Écart €" sortKey="diffVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
                 <SortableTh label="Évol. CA" sortKey="growthVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
-                <SortableTh label="Volume N-1" sortKey="lyQty" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
-                <SortableTh label="Volume N" sortKey="cyQty" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
+                <SortableTh label="Volume N-1 (YTD)" sortKey="lyQty" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
+                <SortableTh label="Volume N (YTD)" sortKey="cyQty" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
                 <SortableTh label="Évol. Vol." sortKey="growthQty" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
               </tr>
             </thead>

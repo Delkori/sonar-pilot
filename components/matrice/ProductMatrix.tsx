@@ -173,7 +173,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
 
         <div className="rounded-xl border border-border bg-surface p-3">
           <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <TrendingDown size={13} className="text-danger" /> Flop 10 clients (retard vs N-1)
+            <TrendingDown size={13} className="text-danger" /> Flop 10 clients (retard YTD vs N-1)
           </p>
           {flop10Retard.length === 0 ? (
             <p className="text-sm text-muted-foreground">Aucun compte en retard sur son rythme de l&apos;an dernier.</p>
@@ -248,7 +248,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
                 {brands.map((b) => (
                   <th key={b} className="px-2 py-2 text-center font-medium whitespace-nowrap">{b}</th>
                 ))}
-                <SortableTh label="Boîtes" sortKey="boites" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+                <SortableTh label="Boîtes (YTD)" sortKey="boites" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
                 <SortableTh label="Retard" sortKey="retard" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
                 <SortableTh label="Réfs manq." sortKey="missing" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
                 <SortableTh label="CA non capté" sortKey="ca_nc" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
