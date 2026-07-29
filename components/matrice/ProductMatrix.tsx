@@ -20,7 +20,7 @@ interface ProductRow {
   sales_value_ly: number | null;
 }
 
-type SortKey = "name" | "segment" | "score" | "missing" | "ca_nc" | "boites" | "retard";
+type SortKey = "name" | "segment" | "score" | "missing" | "ca_nc" | "boites" | "retard" | "croissance";
 
 // Références retirées du catalogue — un "retard" sur ces marques ne reflète
 // pas une baisse de consommation réelle, juste l'arrêt du produit. Exclues
@@ -76,18 +76,19 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
     return totalBoites > 0 ? totalCa / totalBoites : 0;
   }, [accounts]);
 
-  // ── Par compte : boîtes totales (toutes marques) et "retard cumulé" —
-  // somme, marque par marque, des boîtes en dessous du rythme de l'an
-  // dernier (qty_ordered_ly - qty_ordered_cy quand positif). Donnée réelle
-  // (pas une estimation), calculée à partir du même import de factures que
-  // le reste de l'app.
+  // ── Par compte : boîtes totales (toutes marques), "retard cumulé" (boîtes
+  // en dessous du rythme N-1) et "croissance cumulée" (boîtes au-dessus du
+  // rythme N-1) — sommées marque par marque. Données réelles (pas une
+  // estimation), calculées à partir du même import de factures que le reste
+  // de l'app. Les deux excluent les références retirées du catalogue.
   const perAccountStats = useMemo(() => {
-    const map = new Map<string, { boites: number; retard: number }>();
+    const map = new Map<string, { boites: number; retard: number; croissance: number }>();
     for (const p of products) {
-      const cur = map.get(p.account_id) ?? { boites: 0, retard: 0 };
+      const cur = map.get(p.account_id) ?? { boites: 0, retard: 0, croissance: 0 };
       cur.boites += p.qty_ordered_cy ?? 0;
       if (!DISCONTINUED_BRANDS.has(p.brand)) {
         cur.retard += Math.max((p.qty_ordered_ly ?? 0) - (p.qty_ordered_cy ?? 0), 0);
+        cur.croissance += Math.max((p.qty_ordered_cy ?? 0) - (p.qty_ordered_ly ?? 0), 0);
       }
       map.set(p.account_id, cur);
     }
@@ -112,6 +113,16 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
       .slice(0, 10);
   }, [accounts, perAccountStats]);
 
+  // ── Top 10 clients en croissance vs N-1 (boîtes cumulées au-dessus du
+  // rythme de l'an dernier, hors références retirées du catalogue).
+  const top10Croissance = useMemo(() => {
+    return accounts
+      .map((a) => ({ account: a, stats: perAccountStats.get(a.id) }))
+      .filter((r) => (r.stats?.croissance ?? 0) > 0)
+      .sort((a, b) => (b.stats?.croissance ?? 0) - (a.stats?.croissance ?? 0))
+      .slice(0, 10);
+  }, [accounts, perAccountStats]);
+
   const filteredRows = useMemo(() => {
     const min = minBoites ? Number(minBoites) : null;
     const minCaNum = minCa ? Number(minCa) : null;
@@ -123,8 +134,8 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
         const missing = brands.filter((b) => !bought.has(b) || (bought.get(b)?.qtyCy ?? 0) === 0).length;
         const caNonCapte = Math.max((a.potentiel_boites ?? 0) * avgPricePerBox - (a.ca_2026_ytd ?? 0), 0);
         const score = computeTargetingScore(a).total;
-        const stats = perAccountStats.get(a.id) ?? { boites: 0, retard: 0 };
-        return { account: a, bought, missing, caNonCapte, score, boites: stats.boites, retard: stats.retard };
+        const stats = perAccountStats.get(a.id) ?? { boites: 0, retard: 0, croissance: 0 };
+        return { account: a, bought, missing, caNonCapte, score, boites: stats.boites, retard: stats.retard, croissance: stats.croissance };
       })
       .filter((r) => (min !== null ? r.boites >= min : true))
       .filter((r) => (minCaNum !== null ? (r.account.ca_2026_ytd ?? 0) >= minCaNum : true))
@@ -141,6 +152,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
       ca_nc: (r) => r.caNonCapte,
       boites: (r) => r.boites,
       retard: (r) => r.retard,
+      croissance: (r) => r.croissance,
     },
     "missing"
   );
@@ -156,7 +168,33 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
   return (
     <div className="space-y-4">
       {/* ── Top 10 / Flop 10 clients — boîtes cette année (YTD) ── */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="rounded-xl border border-border bg-surface p-3">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <TrendingUp size={13} className="text-success" /> Top 10 clients en croissance (YTD vs N-1)
+          </p>
+          {top10Croissance.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aucun compte en croissance sur son rythme de l&apos;an dernier.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {top10Croissance.map(({ account, stats }, idx) => (
+                <div key={account.id} className="flex items-center justify-between text-sm">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="w-4 shrink-0 text-xs text-muted-foreground">{idx + 1}.</span>
+                    <Link href={`/comptes/${account.id}`} className="truncate text-foreground hover:text-primary">
+                      {account.name}
+                    </Link>
+                  </div>
+                  <span className="shrink-0 font-medium text-success">+{formatNumber(stats?.croissance ?? 0)} boîtes</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            Hors références retirées du catalogue (Global Action, Ultimate, Kiss).
+          </p>
+        </div>
+
         <div className="rounded-xl border border-border bg-surface p-3">
           <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <TrendingUp size={13} className="text-success" /> Top 10 clients (boîtes YTD)
@@ -282,12 +320,13 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
                 ))}
                 <SortableTh label="Boîtes (YTD)" sortKey="boites" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
                 <SortableTh label="Retard" sortKey="retard" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+                <SortableTh label="Croissance" sortKey="croissance" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
                 <SortableTh label="Réfs manq." sortKey="missing" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
                 <SortableTh label="CA non capté" sortKey="ca_nc" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ account, bought, missing, caNonCapte, score, boites, retard }) => (
+              {rows.map(({ account, bought, missing, caNonCapte, score, boites, retard, croissance }) => (
                 <tr key={account.id} className="border-b border-border last:border-0 hover:bg-surface-muted">
                   <td className="sticky left-0 z-10 bg-surface px-4 py-2">
                     <div className="flex items-center gap-2">
@@ -304,6 +343,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
                     const ly = cellMetric === "boites" ? cell?.qtyLy ?? 0 : cell?.caLy ?? 0;
                     const isDiscontinued = DISCONTINUED_BRANDS.has(b);
                     const retardCell = !isDiscontinued && ly > cy ? ly - cy : 0;
+                    const croissanceCell = !isDiscontinued && cy > ly ? cy - ly : 0;
                     return (
                       <td key={b} className={`px-2 py-2 text-center ${cy > 0 ? "bg-primary-50" : ""}`}>
                         {cy > 0 ? (
@@ -314,6 +354,11 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
                             {retardCell > 0 && (
                               <div className="text-[10px] font-medium text-danger">
                                 −{cellMetric === "boites" ? formatNumber(retardCell) : formatEUR(retardCell)} vs 2025
+                              </div>
+                            )}
+                            {croissanceCell > 0 && (
+                              <div className="text-[10px] font-medium text-success">
+                                +{cellMetric === "boites" ? formatNumber(croissanceCell) : formatEUR(croissanceCell)} vs 2025
                               </div>
                             )}
                           </div>
@@ -327,6 +372,9 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
                   <td className="px-3 py-2 text-right">
                     {retard > 0 ? <span className="font-medium text-danger">−{formatNumber(retard)}</span> : <span className="text-muted-foreground">—</span>}
                   </td>
+                  <td className="px-3 py-2 text-right">
+                    {croissance > 0 ? <span className="font-medium text-success">+{formatNumber(croissance)}</span> : <span className="text-muted-foreground">—</span>}
+                  </td>
                   <td className="px-3 py-2 text-right font-medium text-foreground">{missing}</td>
                   <td className="px-3 py-2 text-right text-muted-foreground">{formatEUR(caNonCapte)}</td>
                 </tr>
@@ -338,8 +386,8 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
         <div className="flex flex-wrap items-center gap-4 border-t border-border bg-surface-muted px-5 py-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-primary-50" /> Acheté (bascule boîtes/CA ci-dessus)</span>
           <span className="flex items-center gap-1.5"><span className="text-danger">✕</span> Non acheté — opportunité cross-sell</span>
-          <span className="text-danger">−N vs 2025</span> sous une cellule = en retard sur cette référence précise
-          <span>· Retard (colonne) = cumulé sur toutes les marques</span>
+          <span className="text-danger">−N vs 2025</span> = en retard sur cette référence · <span className="text-success">+N vs 2025</span> = en croissance
+          <span>· Retard/Croissance (colonnes) = cumulé sur toutes les marques</span>
           <span className="ml-auto">CA non capté = potentiel (boîtes) × prix moyen/boîte du portefeuille ({formatEUR(avgPricePerBox)}) − CA 2026 YTD</span>
         </div>
       </div>
