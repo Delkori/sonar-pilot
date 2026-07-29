@@ -1,5 +1,6 @@
 import type { AccountStatus, Segment } from "@/types/database";
 import { excelSerialToISODate } from "./parser";
+import { canonicalizeBrand } from "./salesforceParser";
 import type { RawCallsRow, RawGrowthByBrandRow, RawKpiDataRow, RawKpiRow, RawPasRow } from "./parser";
 
 export function normalizeSegment(value: unknown): Segment | null {
@@ -159,7 +160,10 @@ export function mapGrowthByBrandRow(row: RawGrowthByBrandRow): { name: string; p
   return {
     name: normalizeName(String(row["Customer Name"])),
     product: {
-      brand: String(row.Brand_Ml).trim(),
+      // Même canonicalisation que les lignes de facture : "Teosyal RHA 4
+      // (2X1.2ml) MDR" et "Teosyal RHA 4 (2x1.2ml)" doivent tomber sur la
+      // même référence "RHA 4", pas fragmenter le CA sur deux lignes.
+      brand: canonicalizeBrand(String(row.Brand_Ml)),
       sales_value_ly: toNumber(getColumn(r, "Sales Value LY")),
       sales_value_cy: toNumber(getColumn(r, "Sales Value CY")),
       qty_ordered_ly: toNumber(getColumn(r, "Sales Qty Ordered LY")),

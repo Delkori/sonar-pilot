@@ -132,14 +132,23 @@ export function DashboardClient({
     () => filteredAccounts.reduce((sum, a) => sum + ((a[YEAR_FIELDS[year]] as number | null) ?? 0), 0),
     [filteredAccounts, year]
   );
-  const caPrevYear = useMemo(() => {
-    const field = YEAR_FIELDS[year - 1];
-    if (!field) return null;
-    return filteredAccounts.reduce((sum, a) => sum + ((a[field] as number | null) ?? 0), 0);
-  }, [filteredAccounts, year]);
-  const caYoyGrowth = caPrevYear && caPrevYear > 0 ? (caYear - caPrevYear) / caPrevYear : null;
-
   const filteredAccountIds = useMemo(() => new Set(filteredAccounts.map((a) => a.id)), [filteredAccounts]);
+
+  // ── Rythme YTD vs N-1 : comparer le CA depuis le 1er janvier jusqu'au même
+  // mois l'an dernier (pas le total de l'année entière, qui rend l'année en
+  // cours artificiellement "en retard" puisqu'elle n'est pas terminée).
+  const ytdPace = useMemo(() => {
+    if (monthsForYear.length === 0) return null;
+    const cutoffMonth = Math.max(...monthsForYear);
+    const sumThroughMonth = (y: number) =>
+      monthlySales
+        .filter((s) => s.year === y && s.month <= cutoffMonth && filteredAccountIds.has(s.account_id))
+        .reduce((sum, s) => sum + s.ca, 0);
+    const cur = sumThroughMonth(year);
+    const prev = sumThroughMonth(year - 1);
+    const growth = prev > 0 ? (cur - prev) / prev : null;
+    return { cutoffMonth, cur, prev, growth };
+  }, [monthlySales, year, filteredAccountIds, monthsForYear]);
 
   const caMonth = useMemo(() => {
     if (month === null) return null;
@@ -405,8 +414,18 @@ export function DashboardClient({
           <KpiCard
             label={displayedCaLabel}
             value={formatEUR(displayedCa)}
-            trend={month === null && caYoyGrowth !== null ? `${caYoyGrowth > 0 ? "+" : ""}${formatPct(caYoyGrowth)} vs ${year - 1}` : undefined}
-            tone={month === null && caYoyGrowth !== null ? (caYoyGrowth >= 0 ? "positive" : "negative") : "default"}
+            trend={
+              month === null && ytdPace?.growth !== null && ytdPace !== null
+                ? `${ytdPace.growth! > 0 ? "+" : ""}${formatPct(ytdPace.growth)} vs ${year - 1} à fin ${MONTH_LABELS[ytdPace.cutoffMonth - 1]} (rythme YTD)`
+                : undefined
+            }
+            tone={
+              month === null && ytdPace?.growth !== null && ytdPace !== null
+                ? ytdPace.growth! >= 0
+                  ? "positive"
+                  : "negative"
+                : "default"
+            }
             icon={TrendingUp}
           />
           {hasObjectifData ? (
