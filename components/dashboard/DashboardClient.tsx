@@ -8,6 +8,7 @@ import { QuickActionCard } from "@/components/dashboard/QuickActionCard";
 import { DepartmentBreakdown, DEPT_NAMES } from "@/components/dashboard/DepartmentBreakdown";
 import { InteractiveMonthlyChart } from "@/components/dashboard/InteractiveMonthlyChart";
 import { CustomizableLayout, type LayoutBlock } from "@/components/dashboard/CustomizableLayout";
+import { TopFlopClientsCard } from "@/components/dashboard/TopFlopClientsCard";
 import { ProductSalesComparison, type ProductRow } from "@/components/dashboard/ProductSalesComparison";
 import { AnnualObjectiveCard } from "@/components/dashboard/AnnualObjectiveCard";
 import { OrderRecurrenceCard } from "@/components/dashboard/OrderRecurrenceCard";
@@ -244,6 +245,23 @@ export function DashboardClient({
   );
   const topCroissance = [...withEvolution].sort((a, b) => b.evolution - a.evolution).slice(0, 5);
   const topDeclin = [...withEvolution].sort((a, b) => a.evolution - b.evolution).slice(0, 5);
+
+  // ── Top 10 / Flop 10 clients : CA 2026 (YTD) vs CA 2025
+  const withEvolution2026 = useMemo(
+    () =>
+      filteredAccounts.map((a) => ({
+        account: a,
+        ca2026: a.ca_2026_ytd ?? 0,
+        ca2025: a.ca_2025 ?? 0,
+        evolution: (a.ca_2025 ?? 0) > 0 ? ((a.ca_2026_ytd ?? 0) - (a.ca_2025 ?? 0)) / (a.ca_2025 ?? 1) : null,
+      })),
+    [filteredAccounts]
+  );
+  const top10Clients2026 = [...withEvolution2026].sort((a, b) => b.ca2026 - a.ca2026).slice(0, 10);
+  const flop10Clients2026 = withEvolution2026
+    .filter((r) => r.ca2025 > 0)
+    .sort((a, b) => (a.evolution ?? 0) - (b.evolution ?? 0))
+    .slice(0, 10);
 
   const lostAccounts = [...filteredAccounts]
     .filter((a) => a.status === "lost")
@@ -640,6 +658,16 @@ export function DashboardClient({
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   <MoversCard title="Top 5 croissance (Évol. 24→25)" rows={topCroissance} tone="positive" />
                   <MoversCard title="Top 5 déclin (Évol. 24→25)" rows={topDeclin} tone="negative" />
+                </div>
+              ),
+            },
+            {
+              id: "top-flop-2026",
+              label: "Top 10 / Flop 10 clients — CA 2026 vs 2025",
+              node: (
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <TopFlopClientsCard title="Top 10 clients (CA 2026)" rows={top10Clients2026} tone="positive" />
+                  <TopFlopClientsCard title="Flop 10 clients (CA 2026 vs 2025)" rows={flop10Clients2026} tone="negative" />
                 </div>
               ),
             },
