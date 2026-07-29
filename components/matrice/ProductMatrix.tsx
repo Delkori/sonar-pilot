@@ -25,7 +25,7 @@ type SortKey = "name" | "segment" | "score" | "missing" | "ca_nc" | "boites" | "
 // Références retirées du catalogue — un "retard" sur ces marques ne reflète
 // pas une baisse de consommation réelle, juste l'arrêt du produit. Exclues
 // du calcul de retard et du classement des références à prioriser.
-const DISCONTINUED_BRANDS = new Set(["Global Action", "Ultimate", "Kiss"]);
+const DISCONTINUED_BRANDS = new Set(["Global Action", "Ultimate", "Kiss", "Deep Lines"]);
 
 export function ProductMatrix({ accounts, products }: { accounts: Account[]; products: ProductRow[] }) {
   const [segment, setSegment] = useState<Segment | "all">("all");
@@ -236,7 +236,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
             </div>
           )}
           <p className="mt-2 text-[10px] text-muted-foreground">
-            Hors références retirées du catalogue (Global Action, Ultimate, Kiss).
+            Hors références retirées du catalogue (Global Action, Ultimate, Kiss, Deep Lines).
           </p>
         </div>
 
@@ -285,7 +285,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
             </div>
           )}
           <p className="mt-2 text-[10px] text-muted-foreground">
-            Hors références retirées du catalogue (Global Action, Ultimate, Kiss).
+            Hors références retirées du catalogue (Global Action, Ultimate, Kiss, Deep Lines).
           </p>
         </div>
       </div>
