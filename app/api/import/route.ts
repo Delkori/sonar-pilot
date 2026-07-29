@@ -29,6 +29,7 @@ import {
 import { validateKpiRows, validatePasRows } from "@/lib/import/validator";
 import type { ImportLogEntry } from "@/lib/import/validator";
 import { bestMatch, HIGH_CONFIDENCE } from "@/lib/import/nameResolver";
+import { statusFromLastOrder } from "@/lib/accounts";
 import type { Hcp } from "@/types/database";
 
 export const runtime = "nodejs";
@@ -467,6 +468,10 @@ export async function POST(req: NextRequest) {
             first_order_date: agg.first,
             last_order_date: agg.last,
             jours_silence: silenceDays,
+            // Le statut Salesforce brut (colonne libre, souvent absente/mal
+            // renseignée) n'est pas fiable — le statut réel est dérivé de la
+            // dernière commande facturée, toujours à jour à chaque import.
+            status: statusFromLastOrder(agg.last),
           })
           .eq("id", accountId);
       }

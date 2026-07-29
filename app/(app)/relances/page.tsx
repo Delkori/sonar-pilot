@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { TopBar } from "@/components/layout/TopBar";
 import { WeeklyPlanner } from "@/components/relances/WeeklyPlanner";
+import { CalendarSyncPanel } from "@/components/relances/CalendarSyncPanel";
 import { createClient } from "@/lib/supabase/server";
 import type { Account, AccountAction, AccountForecast, PlanningEvent } from "@/types/database";
-import { CalendarClock } from "lucide-react";
+import { headers } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +28,12 @@ export default async function RelancesPage() {
   const { data: eventsRaw } = await supabase.from("planning_events").select("*");
   const events = (eventsRaw ?? []) as PlanningEvent[];
 
+  const { data: tokenRow } = await supabase.from("calendar_feed_tokens").select("token").limit(1).maybeSingle();
+  const hdrs = await headers();
+  const host = hdrs.get("host");
+  const proto = host?.includes("localhost") ? "http" : "https";
+  const feedUrl = tokenRow ? `${proto}://${host}/api/calendar.ics?token=${tokenRow.token}` : null;
+
   return (
     <div>
       <TopBar
@@ -35,10 +41,7 @@ export default async function RelancesPage() {
         subtitle="Visites clients & prospects, appels et temps administratif — glissez un compte dans le calendrier"
       />
       <div className="flex justify-end px-8 pt-3">
-        <Link href="/calendrier" className="flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
-          <CalendarClock size={13} />
-          Synchroniser ce planning avec l&apos;iPhone →
-        </Link>
+        {feedUrl && <CalendarSyncPanel feedUrl={feedUrl} />}
       </div>
       <WeeklyPlanner initialEvents={events} accounts={accounts} forecasts={forecasts} actions={actions} />
     </div>

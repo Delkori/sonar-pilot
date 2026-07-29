@@ -2,19 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Users, Map, Radar, LogOut, Grid3x3, Gamepad2, CalendarDays, CalendarClock, HandCoins, Settings, Fingerprint } from "lucide-react";
+import { LayoutDashboard, Users, Map, Radar, LogOut, Grid3x3, Gamepad2, CalendarClock, HandCoins, Settings, Fingerprint } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pilotage", label: "Pilotage", icon: Gamepad2 },
   { href: "/relances", label: "Planning hebdomadaire", icon: CalendarClock },
+  { href: "/mapping", label: "Mapping AURA", icon: Map },
   { href: "/comptes", label: "Comptes", icon: Users },
   { href: "/matrice", label: "Matrice Produit", icon: Grid3x3 },
   { href: "/personas", label: "Personas", icon: Fingerprint },
-  { href: "/mapping", label: "Mapping AURA", icon: Map },
   { href: "/sponsoring", label: "Sponsoring & concurrence", icon: HandCoins },
-  { href: "/calendrier", label: "Calendrier", icon: CalendarDays },
   { href: "/parametres", label: "Paramètres (objectifs, import)", icon: Settings },
 ];
 

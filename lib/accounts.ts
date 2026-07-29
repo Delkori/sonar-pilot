@@ -1,4 +1,17 @@
-import type { Account } from "@/types/database";
+import type { Account, AccountStatus } from "@/types/database";
+
+/**
+ * Statut dérivé de l'activité réelle (dernière commande facturée), pas d'un
+ * libellé Salesforce libre — plus fiable et toujours à jour au fil des
+ * imports. Un compte n'ayant jamais commandé reste "à suivre" (prospect).
+ */
+export function statusFromLastOrder(lastOrderDate: string | null): AccountStatus {
+  if (!lastOrderDate) return "a_suivre";
+  const silenceDays = Math.floor((Date.now() - new Date(lastOrderDate).getTime()) / 86400000);
+  if (silenceDays <= 180) return "actif";
+  if (silenceDays <= 730) return "a_risque";
+  return "lost";
+}
 
 export type RecurrenceBucket = "Mensuelle" | "Bimestrielle" | "Trimestrielle" | "Espacée" | "Unique";
 

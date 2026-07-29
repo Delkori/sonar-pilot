@@ -98,12 +98,21 @@ export function AuraMap({
   accounts,
   products = [],
   hcps = [],
+  sponsoringLabs = [],
 }: {
   geo: { type: "FeatureCollection"; features: DeptFeature[] };
   accounts: Account[];
   products?: ProductRow[];
   hcps?: { account_id: string | null; name: string; rpps: string | null }[];
+  sponsoringLabs?: { lab: string; accountIds: string[] }[];
 }) {
+  const sponsoredAccountIdsByLab = useMemo(
+    () => new Map(sponsoringLabs.map((s) => [s.lab, new Set(s.accountIds)] as const)),
+    [sponsoringLabs]
+  );
+  const [sponsorFilter, setSponsorFilter] = useState<string | "all">("all");
+  const sponsoredIds = sponsorFilter !== "all" ? sponsoredAccountIdsByLab.get(sponsorFilter) ?? new Set<string>() : null;
+  const [hoveredAccountId, setHoveredAccountId] = useState<string | null>(null);
   const hcpsByAccount = useMemo(() => {
     const m = new Map<string, { name: string; rpps: string | null }[]>();
     for (const h of hcps) {
@@ -163,9 +172,10 @@ export function AuraMap({
         if (status !== "all" && a.status !== status) return false;
         if (selectedDept && a.department_code !== selectedDept) return false;
         if (showOnlyOpportunities && !opportunityByAccount.has(a.id)) return false;
+        if (sponsoredIds && !sponsoredIds.has(a.id)) return false;
         return true;
       }),
-    [accounts, segment, status, selectedDept, showOnlyOpportunities, opportunityByAccount]
+    [accounts, segment, status, selectedDept, showOnlyOpportunities, opportunityByAccount, sponsoredIds]
   );
 
   const zoomedFeature = useMemo(
@@ -485,6 +495,21 @@ export function AuraMap({
               <Sparkles size={14} className="text-primary" />
               Opportunités uniquement
             </label>
+            {sponsoringLabs.length > 0 && (
+              <>
+                <label className="mb-1 block text-xs text-muted-foreground">Sponsorisé par (concurrence)</label>
+                <select
+                  value={sponsorFilter}
+                  onChange={(e) => setSponsorFilter(e.target.value)}
+                  className="mb-3 w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+                >
+                  <option value="all">Tous</option>
+                  {sponsoringLabs.map((s) => (
+                    <option key={s.lab} value={s.lab}>{s.lab} ({s.accountIds.length})</option>
+                  ))}
+                </select>
+              </>
+            )}
             {selectedDept && (
               <button
                 onClick={() => setSelectedDept(null)}
@@ -633,15 +658,26 @@ export function AuraMap({
               const [x, y] = coords;
               const ratio = ecartRatio(a);
               const opp = opportunityByAccount.get(a.id);
-              const r = a.segment === "A" ? 5 : a.segment === "B" ? 4 : 3;
+              const isHovered = hoveredAccountId === a.id;
+              const isSponsored = sponsoredIds?.has(a.id) ?? false;
+              const r = (a.segment === "A" ? 5 : a.segment === "B" ? 4 : 3) + (isHovered ? 2.5 : 0);
               return (
-                <g key={a.id} className="cursor-pointer" onClick={() => setSelectedAccount(a)}>
-                  {opp && (
+                <g
+                  key={a.id}
+                  className="cursor-pointer"
+                  onClick={() => setSelectedAccount(a)}
+                  onMouseEnter={() => setHoveredAccountId(a.id)}
+                  onMouseLeave={() => setHoveredAccountId((cur) => (cur === a.id ? null : cur))}
+                >
+                  {isHovered && (
+                    <circle cx={x} cy={y} r={r + 6} fill="#4338ca" opacity={0.18} />
+                  )}
+                  {(opp || isSponsored) && (
                     <circle
                       cx={x} cy={y} r={r + 4}
                       fill="none"
-                      stroke={OPPORTUNITY_META[opp.type].color}
-                      strokeWidth={1.5}
+                      stroke={isSponsored ? "#d97706" : OPPORTUNITY_META[opp!.type].color}
+                      strokeWidth={isHovered ? 2.5 : 1.5}
                       opacity={0.85}
                     />
                   )}
@@ -649,7 +685,7 @@ export function AuraMap({
                     cx={x} cy={y} r={r}
                     fill={ratio !== null && ratio < -0.5 ? "#dc2626" : "#4338ca"}
                     stroke="#ffffff"
-                    strokeWidth={1.2}
+                    strokeWidth={isHovered ? 2 : 1.2}
                   >
                     <title>{opp ? `${a.name} — ${opp.label}` : a.name}</title>
                   </circle>
@@ -802,7 +838,12 @@ export function AuraMap({
               ? `Comptes — ${geo.features.find((f) => f.properties.code === selectedDept)?.properties.nom ?? selectedDept}`
               : "Tous les comptes filtrés"}
           </p>
-          <span className="text-xs text-muted-foreground">{filtered.length} compte(s)</span>
+          <span className="text-xs text-muted-foreground">
+            {filtered.length} compte(s)
+            {sponsorFilter !== "all" && (
+              <> · potentiel {formatEUR(filtered.reduce((s, a) => s + (a.potentiel_boites ?? 0) * prixBoiteHT(a.price_list), 0))}</>
+            )}
+          </span>
         </div>
         <div className="max-h-80 overflow-y-auto">
           <table className="w-full text-sm">
