@@ -438,7 +438,7 @@ export function DashboardClient({
             value={formatEUR(displayedCa)}
             trend={
               month === null && ytdPace !== null
-                ? `${formatEUR(ytdPace.cur)} vs ${formatEUR(ytdPace.prev)} l'an dernier à fin ${MONTH_LABELS[ytdPace.cutoffMonth - 1]}` +
+                ? `${formatEUR(ytdPace.prev)} en ${year - 1} à la même période` +
                   (ytdPace.growth !== null ? ` (${ytdPace.growth > 0 ? "+" : ""}${formatPct(ytdPace.growth)})` : "")
                 : undefined
             }
