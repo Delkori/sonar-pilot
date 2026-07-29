@@ -72,7 +72,7 @@ export function PilotageBoard({
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
-  const [horizon, setHorizon] = useState<1 | 3 | 6 | 12>(3);
+  const [horizon, setHorizon] = useState<1 | 3 | 6 | 12 | 24>(3);
   const [cardSort, setCardSort] = useState<CardSort>("ca");
 
   const months = useMemo(() => nextMonths(horizon), [horizon]);
@@ -196,7 +196,7 @@ export function PilotageBoard({
     return { totalCa, totalBoites, comptes: accountIds.size, prospects, tiers, realise, objectif };
   }, [forecasts, months, accountById, realiseByMonth, sectorObjectives]);
 
-  const periodLabel = horizon === 1 ? "ce mois" : horizon === 3 ? "ce trimestre" : horizon === 6 ? "ce semestre" : "cette année";
+  const periodLabel = horizon === 1 ? "ce mois" : horizon === 3 ? "ce trimestre" : horizon === 6 ? "ce semestre" : horizon === 12 ? "cette année" : "les 2 prochaines années";
 
   const accountSegment = useMemo(
     () => new Map(accounts.map((a) => [a.id, a.segment] as const)),
@@ -620,7 +620,7 @@ export function PilotageBoard({
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, "Prévisionnel");
-    const label = horizon === 1 ? "mois" : horizon === 3 ? "trimestre" : horizon === 6 ? "semestre" : "annee";
+    const label = horizon === 1 ? "mois" : horizon === 3 ? "trimestre" : horizon === 6 ? "semestre" : horizon === 12 ? "annee" : "2ans";
     XLSX.writeFile(workbook, `previsionnel-pilotage-${label}-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
@@ -633,7 +633,7 @@ export function PilotageBoard({
             Planification — {periodLabel} <span className="ml-1 text-xs font-normal text-muted-foreground">({periodRange})</span>
           </h3>
           <span className="text-xs text-muted-foreground">
-            Horizon : {horizon === 1 ? "1 mois" : horizon === 3 ? "trimestre" : horizon === 6 ? "semestre" : "année"}
+            Horizon : {horizon === 1 ? "1 mois" : horizon === 3 ? "trimestre" : horizon === 6 ? "semestre" : horizon === 12 ? "année" : "2 ans"}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -875,7 +875,7 @@ export function PilotageBoard({
             <option value="nom">Nom</option>
           </select>
           <span className="text-xs text-muted-foreground">Horizon :</span>
-          {([1, 3, 6, 12] as const).map((h) => (
+          {([1, 3, 6, 12, 24] as const).map((h) => (
             <button
               key={h}
               onClick={() => setHorizon(h)}
@@ -885,7 +885,7 @@ export function PilotageBoard({
                   : "border-border text-muted-foreground hover:bg-surface-muted"
               }`}
             >
-              {h === 1 ? "1 mois" : h === 3 ? "Trimestre (3 mois)" : h === 6 ? "Semestre (6 mois)" : "Année (12 mois)"}
+              {h === 1 ? "1 mois" : h === 3 ? "Trimestre (3 mois)" : h === 6 ? "Semestre (6 mois)" : h === 12 ? "Année (12 mois)" : "2 ans (24 mois)"}
             </button>
           ))}
         </div>

@@ -64,6 +64,15 @@ export default async function SponsoringPage() {
         subtitle="Base Transparence Santé — médecins sponsorisés et investissement des laboratoires sur votre secteur"
       />
       <main className="space-y-6 px-8 py-6">
+        {amounts.length === 0 && prospects.length === 0 && (
+          <Card>
+            <CardContent className="py-4 text-sm text-muted-foreground">
+              Connexion Nexora configurée, mais aucune donnée renvoyée pour {SECTEUR_REGION} — soit la base
+              Transparence Santé n&apos;a rien à déclarer sur ce secteur, soit les fonctions <code>sonar_*</code>{" "}
+              ont changé côté Nexora. Voir les logs serveur Vercel (recherche &quot;[nexora]&quot;) pour le détail.
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardHeader>
             <CardTitle>Investissement des laboratoires — {SECTEUR_REGION}</CardTitle>

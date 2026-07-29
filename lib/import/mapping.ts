@@ -21,6 +21,25 @@ export function normalizeStatus(value: unknown): AccountStatus {
   return "a_suivre";
 }
 
+/**
+ * Lecture de colonne tolérante aux variations d'espaces/casse dans les en-têtes
+ * Excel (ex: "Sales Qty Ordered  LY" avec un double espace vs un simple dans
+ * le fichier réel) — un en-tête légèrement différent de celui codé en dur
+ * faisait échouer silencieusement toute la colonne (valeur toujours null),
+ * comme observé sur les colonnes LY/growth de "Customer Growth By Brand".
+ */
+function normalizeHeader(h: string): string {
+  return h.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function getColumn(row: Record<string, unknown>, candidate: string): unknown {
+  const target = normalizeHeader(candidate);
+  for (const key of Object.keys(row)) {
+    if (normalizeHeader(key) === target) return row[key];
+  }
+  return undefined;
+}
+
 export function toNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "" || value === "-") return null;
   const n = typeof value === "number" ? value : parseFloat(String(value).replace(",", "."));
@@ -136,15 +155,16 @@ export interface ProductPatch {
 }
 
 export function mapGrowthByBrandRow(row: RawGrowthByBrandRow): { name: string; product: ProductPatch } {
+  const r = row as unknown as Record<string, unknown>;
   return {
     name: normalizeName(String(row["Customer Name"])),
     product: {
       brand: String(row.Brand_Ml).trim(),
-      sales_value_ly: toNumber(row["Sales Value LY"]),
-      sales_value_cy: toNumber(row["Sales Value CY"]),
-      qty_ordered_ly: toNumber(row["Sales Qty Ordered  LY"]),
-      qty_ordered_cy: toNumber(row["Sales Qty Ordered CY "]),
-      growth_rate_pct: toNumber(row["Sales Growth Rate %"]),
+      sales_value_ly: toNumber(getColumn(r, "Sales Value LY")),
+      sales_value_cy: toNumber(getColumn(r, "Sales Value CY")),
+      qty_ordered_ly: toNumber(getColumn(r, "Sales Qty Ordered LY")),
+      qty_ordered_cy: toNumber(getColumn(r, "Sales Qty Ordered CY")),
+      growth_rate_pct: toNumber(getColumn(r, "Sales Growth Rate %")),
       period: "YTD 2026 vs 2025",
     },
   };

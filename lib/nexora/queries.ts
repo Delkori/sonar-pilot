@@ -48,7 +48,10 @@ export async function getCompetitorAmounts(region: string | null): Promise<Compe
   const nexora = createNexoraClient();
   if (!nexora) return [];
   const { data, error } = await nexora.rpc("sonar_competitor_amounts", { p_region: region });
-  if (error) return [];
+  if (error) {
+    console.error("[nexora] sonar_competitor_amounts:", error.message);
+    return [];
+  }
   return (data ?? []) as CompetitorAmount[];
 }
 
@@ -66,7 +69,10 @@ export async function getProspects(opts: {
     p_only_esth: opts.onlyEsth ?? true,
     p_limit: opts.limit ?? 300,
   });
-  if (error) return [];
+  if (error) {
+    console.error("[nexora] sonar_prospects:", error.message);
+    return [];
+  }
   return (data ?? []) as NexoraProspect[];
 }
 
@@ -74,7 +80,10 @@ export async function getSponsoringByRpps(rpps: string[]): Promise<SponsoringTot
   const nexora = createNexoraClient();
   if (!nexora || rpps.length === 0) return [];
   const { data, error } = await nexora.rpc("sonar_sponsoring_by_rpps", { p_rpps: rpps });
-  if (error) return [];
+  if (error) {
+    console.error("[nexora] sonar_sponsoring_by_rpps:", error.message);
+    return [];
+  }
   return (data ?? []) as SponsoringTotals[];
 }
 
@@ -91,7 +100,10 @@ export async function getSpecialitesByRpps(rpps: string[]): Promise<SpecialtyByR
   const nexora = createNexoraClient();
   if (!nexora || rpps.length === 0) return [];
   const { data, error } = await nexora.rpc("sonar_specialite_by_rpps", { p_rpps: rpps });
-  if (error) return [];
+  if (error) {
+    console.error("[nexora] sonar_specialite_by_rpps:", error.message);
+    return [];
+  }
   return (data ?? []) as SpecialtyByRpps[];
 }
 
@@ -99,6 +111,9 @@ export async function getLabsByRpps(rpps: string[]): Promise<LabByRpps[]> {
   const nexora = createNexoraClient();
   if (!nexora || rpps.length === 0) return [];
   const { data, error } = await nexora.rpc("sonar_labs_by_rpps", { p_rpps: rpps });
-  if (error) return [];
+  if (error) {
+    console.error("[nexora] sonar_labs_by_rpps:", error.message);
+    return [];
+  }
   return (data ?? []) as LabByRpps[];
 }
