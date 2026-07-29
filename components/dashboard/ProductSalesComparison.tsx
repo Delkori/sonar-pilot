@@ -128,9 +128,9 @@ export function ProductSalesComparison({
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle>Comparatif Ventes par Marque vs Année Précédente</CardTitle>
+          <CardTitle>Comparatif Ventes par Marque — Rythme YTD vs N-1</CardTitle>
           <CardDescription>
-            Évolution des ventes par marque (Valeur € et Volume) — N vs N-1
+            Même période (du 1er janvier au dernier mois facturé) comparée à l&apos;an dernier — pas l&apos;année N-1 entière
           </CardDescription>
         </div>
         <div className="flex items-center gap-3">

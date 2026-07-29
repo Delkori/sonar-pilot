@@ -490,16 +490,17 @@ export async function POST(req: NextRequest) {
           message: "Fichier ACCOUNT DETAIL requis pour attribuer les lignes produit à un compte — ignoré",
         });
       } else {
-        // Réparties par année réelle de facturation (line.date), pas lumped
-        // ensemble : ça permet de reconstruire le comparatif N vs N-1 par
-        // marque directement depuis les factures déjà importées, sans
+        // Réparties par année ET mois réels de facturation (line.date), pas
+        // lumped ensemble : ça permet de reconstruire le comparatif N vs N-1
+        // par marque directement depuis les factures déjà importées, sans
         // dépendre d'un fichier "Croissance par marque" séparé qui peut ne
         // jamais être fourni.
         const curYear = new Date().getFullYear();
         const prevYear = curYear - 1;
-        const productYearTotals = new Map<string, { qty: number; value: number }>(); // accountId|brand|year
+        const productMonthTotals = new Map<string, { qty: number; value: number }>(); // accountId|brand|year|month
         const boitesByAccount = new Map<string, number>();
         let linesMatched = 0;
+        let maxCurYearMonth = 0; // dernier mois facturé cette année, tous comptes confondus
 
         for (const line of lines) {
           const accountId = invoiceToAccountId.get(line.invoiceNumber);
@@ -507,27 +508,45 @@ export async function POST(req: NextRequest) {
           linesMatched++;
           const brand = canonicalizeBrand(line.description);
           const year = Number(line.date.slice(0, 4));
-          const key = `${accountId}|${brand}|${year}`;
-          const cur = productYearTotals.get(key) ?? { qty: 0, value: 0 };
+          const monthNum = Number(line.date.slice(5, 7));
+          const key = `${accountId}|${brand}|${year}|${monthNum}`;
+          const cur = productMonthTotals.get(key) ?? { qty: 0, value: 0 };
           cur.qty += line.qty;
           cur.value += line.valueEur;
-          productYearTotals.set(key, cur);
+          productMonthTotals.set(key, cur);
 
           if (year === curYear) {
             boitesByAccount.set(accountId, (boitesByAccount.get(accountId) ?? 0) + line.qty);
+            if (monthNum > maxCurYearMonth) maxCurYearMonth = monthNum;
           }
         }
         rowsSuccess += linesMatched;
 
+        // Comparaison rythme YTD réel : même fenêtre de mois (1 → dernier
+        // mois facturé cette année) des deux côtés, pas l'année dernière
+        // entière contre une année en cours partielle.
+        const cutoffMonth = maxCurYearMonth || 12;
         const accountBrandKeys = new Set<string>();
-        for (const key of productYearTotals.keys()) {
+        for (const key of productMonthTotals.keys()) {
           const [accountId, brand] = key.split("|");
           accountBrandKeys.add(`${accountId}|${brand}`);
         }
+        const sumThroughCutoff = (accountId: string, brand: string, year: number) => {
+          let qty = 0;
+          let value = 0;
+          for (let m = 1; m <= cutoffMonth; m++) {
+            const v = productMonthTotals.get(`${accountId}|${brand}|${year}|${m}`);
+            if (v) {
+              qty += v.qty;
+              value += v.value;
+            }
+          }
+          return { qty, value };
+        };
         const productsPayload = Array.from(accountBrandKeys).map((key) => {
           const [accountId, brand] = key.split("|");
-          const cy = productYearTotals.get(`${accountId}|${brand}|${curYear}`) ?? { qty: 0, value: 0 };
-          const ly = productYearTotals.get(`${accountId}|${brand}|${prevYear}`) ?? { qty: 0, value: 0 };
+          const cy = sumThroughCutoff(accountId, brand, curYear);
+          const ly = sumThroughCutoff(accountId, brand, prevYear);
           return {
             account_id: accountId,
             brand,
