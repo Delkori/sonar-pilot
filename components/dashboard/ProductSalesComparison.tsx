@@ -312,6 +312,39 @@ export function ProductSalesComparison({
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-border font-semibold text-foreground">
+                <td className="py-2.5">Total</td>
+                <td className="py-2.5 text-right">{formatEUR(totalLyVal)}</td>
+                <td className="py-2.5 text-right">{formatEUR(totalCyVal)}</td>
+                <td className={`py-2.5 text-right ${totalCyVal - totalLyVal >= 0 ? "text-success" : "text-danger"}`}>
+                  {totalCyVal - totalLyVal > 0 ? "+" : ""}
+                  {formatEUR(totalCyVal - totalLyVal)}
+                </td>
+                <td className="py-2.5 text-right">
+                  {totalValGrowth !== null ? (
+                    <span className={totalValGrowth >= 0 ? "text-success" : "text-danger"}>
+                      {totalValGrowth > 0 ? "+" : ""}
+                      {formatPct(totalValGrowth)}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="py-2.5 text-right">{formatNumber(totalLyQty)}</td>
+                <td className="py-2.5 text-right">{formatNumber(totalCyQty)}</td>
+                <td className="py-2.5 text-right text-xs">
+                  {totalLyQty > 0 ? (
+                    <span className={totalCyQty - totalLyQty >= 0 ? "text-success" : "text-danger"}>
+                      {totalCyQty - totalLyQty > 0 ? "+" : ""}
+                      {formatPct((totalCyQty - totalLyQty) / totalLyQty)}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </CardContent>
