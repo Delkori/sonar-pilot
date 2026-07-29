@@ -311,7 +311,12 @@ export function DashboardClient({
   }
 
   const displayedCa = month !== null ? caMonth : caYear;
-  const displayedCaLabel = month !== null ? `CA réalisé ${MONTH_LABELS[month - 1]} ${year}` : `CA réalisé ${year}`;
+  const displayedCaLabel =
+    month !== null
+      ? `CA réalisé ${MONTH_LABELS[month - 1]} ${year}`
+      : ytdPace
+      ? `CA réalisé YTD ${year} (à fin ${MONTH_LABELS[ytdPace.cutoffMonth - 1]})`
+      : `CA réalisé ${year}`;
 
   return (
     <div>
@@ -415,8 +420,9 @@ export function DashboardClient({
             label={displayedCaLabel}
             value={formatEUR(displayedCa)}
             trend={
-              month === null && ytdPace?.growth !== null && ytdPace !== null
-                ? `${ytdPace.growth! > 0 ? "+" : ""}${formatPct(ytdPace.growth)} vs ${year - 1} à fin ${MONTH_LABELS[ytdPace.cutoffMonth - 1]} (rythme YTD)`
+              month === null && ytdPace !== null
+                ? `${formatEUR(ytdPace.cur)} vs ${formatEUR(ytdPace.prev)} l'an dernier à fin ${MONTH_LABELS[ytdPace.cutoffMonth - 1]}` +
+                  (ytdPace.growth !== null ? ` (${ytdPace.growth > 0 ? "+" : ""}${formatPct(ytdPace.growth)})` : "")
                 : undefined
             }
             tone={
