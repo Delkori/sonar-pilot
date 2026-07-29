@@ -131,21 +131,35 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
       .slice(0, 10);
   }, [accounts, perAccountStats]);
 
+  // Un compte peut avoir à la fois du retard sur certaines marques et de la
+  // croissance sur d'autres — le classer sur le retard OU la croissance
+  // bruts (sommes indépendantes) le ferait apparaître dans les deux
+  // classements en même temps si les deux mouvements coexistent. On classe
+  // donc Top/Flop sur le SOLDE NET (croissance − retard), qui reflète la
+  // tendance réelle du compte et ne peut jamais être positif ET négatif.
   const flop10Retard = useMemo(() => {
     return accounts
-      .map((a) => ({ account: a, stats: perAccountStats.get(a.id) }))
-      .filter((r) => (r.stats?.retard ?? 0) > 0)
-      .sort((a, b) => (b.stats?.retard ?? 0) - (a.stats?.retard ?? 0))
+      .map((a) => {
+        const stats = perAccountStats.get(a.id);
+        const net = (stats?.croissance ?? 0) - (stats?.retard ?? 0);
+        return { account: a, stats, net };
+      })
+      .filter((r) => r.net < 0)
+      .sort((a, b) => a.net - b.net)
       .slice(0, 10);
   }, [accounts, perAccountStats]);
 
-  // ── Top 10 clients en croissance vs N-1 (boîtes cumulées au-dessus du
-  // rythme de l'an dernier, hors références retirées du catalogue).
+  // ── Top 10 clients en croissance vs N-1 (solde net positif : croissance
+  // supérieure au retard cumulé, hors références retirées du catalogue).
   const top10Croissance = useMemo(() => {
     return accounts
-      .map((a) => ({ account: a, stats: perAccountStats.get(a.id) }))
-      .filter((r) => (r.stats?.croissance ?? 0) > 0)
-      .sort((a, b) => (b.stats?.croissance ?? 0) - (a.stats?.croissance ?? 0))
+      .map((a) => {
+        const stats = perAccountStats.get(a.id);
+        const net = (stats?.croissance ?? 0) - (stats?.retard ?? 0);
+        return { account: a, stats, net };
+      })
+      .filter((r) => r.net > 0)
+      .sort((a, b) => b.net - a.net)
       .slice(0, 10);
   }, [accounts, perAccountStats]);
 
@@ -208,7 +222,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
             <p className="text-sm text-muted-foreground">Aucun compte en croissance sur son rythme de l&apos;an dernier.</p>
           ) : (
             <div className="space-y-1.5">
-              {top10Croissance.map(({ account, stats }, idx) => (
+              {top10Croissance.map(({ account, net }, idx) => (
                 <div key={account.id} className="flex items-center justify-between text-sm">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="w-4 shrink-0 text-xs text-muted-foreground">{idx + 1}.</span>
@@ -216,7 +230,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
                       {account.name}
                     </Link>
                   </div>
-                  <span className="shrink-0 font-medium text-success">+{formatNumber(stats?.croissance ?? 0)} boîtes</span>
+                  <span className="shrink-0 font-medium text-success">+{formatNumber(net)} boîtes (net)</span>
                 </div>
               ))}
             </div>
@@ -257,7 +271,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
             <p className="text-sm text-muted-foreground">Aucun compte en retard sur son rythme de l&apos;an dernier.</p>
           ) : (
             <div className="space-y-1.5">
-              {flop10Retard.map(({ account, stats }, idx) => (
+              {flop10Retard.map(({ account, net }, idx) => (
                 <div key={account.id} className="flex items-center justify-between text-sm">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="w-4 shrink-0 text-xs text-muted-foreground">{idx + 1}.</span>
@@ -265,7 +279,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
                       {account.name}
                     </Link>
                   </div>
-                  <span className="shrink-0 font-medium text-danger">−{formatNumber(stats?.retard ?? 0)} boîtes</span>
+                  <span className="shrink-0 font-medium text-danger">{formatNumber(net)} boîtes (net)</span>
                 </div>
               ))}
             </div>
