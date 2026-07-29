@@ -1,5 +1,4 @@
 import { TopBar } from "@/components/layout/TopBar";
-import { Card } from "@/components/ui/Card";
 import { ProductMatrix } from "@/components/matrice/ProductMatrix";
 import { createClient } from "@/lib/supabase/server";
 import type { Account } from "@/types/database";
@@ -13,7 +12,7 @@ export default async function MatricePage() {
 
   const { data: productsRaw } = await supabase
     .from("account_products")
-    .select("account_id, brand, qty_ordered_cy, sales_value_cy");
+    .select("account_id, brand, qty_ordered_cy, sales_value_cy, qty_ordered_ly, sales_value_ly");
   const products = productsRaw ?? [];
 
   return (
@@ -23,9 +22,7 @@ export default async function MatricePage() {
         subtitle="Qui a acheté quoi — repérez les opportunités de cross-sell en un coup d'œil"
       />
       <main className="px-8 py-6">
-        <Card className="overflow-hidden">
-          <ProductMatrix accounts={accounts} products={products} />
-        </Card>
+        <ProductMatrix accounts={accounts} products={products} />
       </main>
     </div>
   );
