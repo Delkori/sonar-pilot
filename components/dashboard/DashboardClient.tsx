@@ -6,9 +6,8 @@ import { KpiCard } from "@/components/dashboard/KpiCard";
 import { PriorityAccountsTable } from "@/components/dashboard/PriorityAccountsTable";
 import { QuickActionCard } from "@/components/dashboard/QuickActionCard";
 import { DepartmentBreakdown, DEPT_NAMES } from "@/components/dashboard/DepartmentBreakdown";
-import { UpcomingActionsCard } from "@/components/dashboard/UpcomingActionsCard";
-import { HcpOverviewCard } from "@/components/dashboard/HcpOverviewCard";
 import { InteractiveMonthlyChart } from "@/components/dashboard/InteractiveMonthlyChart";
+import { CustomizableLayout, type LayoutBlock } from "@/components/dashboard/CustomizableLayout";
 import { ProductSalesComparison, type ProductRow } from "@/components/dashboard/ProductSalesComparison";
 import { AnnualObjectiveCard } from "@/components/dashboard/AnnualObjectiveCard";
 import { OrderRecurrenceCard } from "@/components/dashboard/OrderRecurrenceCard";
@@ -458,224 +457,261 @@ export function DashboardClient({
           )}
         </div>
 
-        {/* Widget 2 : Graphique dynamique mensuel Recharts */}
-        {hasMonthlyData && (
-          <InteractiveMonthlyChart
-            year={year}
-            caByMonth={caByMonthOfYear}
-            objectifByMonth={objectifByMonthOfYear}
-            forecastByMonth={forecastByMonthOfYear.ca}
-            selectedMonth={month}
-            onSelectMonth={setMonth}
-          />
-        )}
-
-        {/* Objectif annuel + atterrissage */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <AnnualObjectiveCard caByMonth={caByMonthOfYear} objectifByMonth={objectifByMonthOfYear} year={year} />
-          <OrderRecurrenceCard monthlySales={monthlySales} accountIds={filteredAccountIds} />
-        </div>
-
-        {/* Sponsoring : Teoxane vs concurrents (Transparence Santé) */}
-        <CompetitorShareCard amounts={competitorAmounts} />
-
-        {/* Widget 3 : Synthèse Départementale */}
-        <DepartmentBreakdown
-          accounts={accounts}
-          yearField={YEAR_FIELDS[year]}
-          selectedDept={selectedDept}
-          onSelectDept={setSelectedDept}
-        />
-
-        {/* Ligne 4 : Actions & Relances + Réseau HCP */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <UpcomingActionsCard actions={actions} accounts={filteredAccounts} />
-          <HcpOverviewCard hcps={hcps} sponsorships={sponsorships} />
-        </div>
-
-        {/* Ligne 5 : Répartition par action recommandée */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Répartition par action recommandée</CardTitle>
-            <CardDescription>Calculée en direct depuis le score de ciblage — {filteredAccounts.length} comptes</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              {actionDistribution.map((b) => (
-                <div key={b.code} className="rounded-lg border border-border p-3" style={{ borderTopColor: b.meta.color, borderTopWidth: 3 }}>
-                  <p className="text-lg font-semibold text-foreground">{b.count}</p>
-                  <p className="text-xs text-muted-foreground">{b.meta.label}</p>
-                  {b.caNonCapte > 0 && <p className="mt-1 text-[10px] text-muted-foreground">{formatEUR(b.caNonCapte)}</p>}
+        {/* Blocs réordonnables : l'utilisateur choisit lui-même leur ordre */}
+        <CustomizableLayout
+          storageKey="dashboard-block-order-v1"
+          blocks={([
+            hasMonthlyData && {
+              id: "monthly-chart",
+              label: "Graphique mensuel",
+              node: (
+                <InteractiveMonthlyChart
+                  year={year}
+                  caByMonth={caByMonthOfYear}
+                  objectifByMonth={objectifByMonthOfYear}
+                  forecastByMonth={forecastByMonthOfYear.ca}
+                  selectedMonth={month}
+                  onSelectMonth={setMonth}
+                />
+              ),
+            },
+            {
+              id: "objectif-recurrence",
+              label: "Objectif annuel & récurrence des commandes",
+              node: (
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <AnnualObjectiveCard caByMonth={caByMonthOfYear} objectifByMonth={objectifByMonthOfYear} year={year} />
+                  <OrderRecurrenceCard monthlySales={monthlySales} accountIds={filteredAccountIds} />
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Ligne 6 : KPIs secondaires */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard label="CA moyen / compte actif" value={formatEUR(caMoyenParCompteActif)} icon={TrendingUp} />
-          <KpiCard label="Concentration Segment A" value={formatPct(concentrationSegmentA)} icon={Crown} />
-          <KpiCard label="Clients actifs" value={formatNumber(clientsActifs)} icon={Users} />
-          <KpiCard label="Comptes à risque" value={formatNumber(clientsAlerte.length)} tone="negative" icon={AlertTriangle} />
-        </div>
-
-        {/* Ligne 7 : Contrats Premium / Pro / Pro+ */}
-        {hasTierData && (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Suivi Premium / Pro / Pro+</CardTitle>
-                <CardDescription>Comptes sous contrat de partenariat — CA {year} vs potentiel</CardDescription>
-              </div>
-              <Crown size={18} className="text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                {tierStats.map((t) => {
-                  const atteinte = t.potentiel > 0 ? Math.min(t.ca / t.potentiel, 1) : 0;
-                  return (
-                    <div key={t.tier} className="rounded-lg border border-border p-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold text-foreground">{t.tier}</span>
-                        <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
-                          {t.count} compte(s)
-                        </span>
-                      </div>
-                      <p className="mt-2 text-lg font-semibold text-foreground">{formatEUR(t.ca)}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Objectif {formatNumber(t.objectif)} boîtes · Potentiel {formatEUR(t.potentiel)}
-                      </p>
-                      <div className="mt-2 h-1.5 rounded-full bg-surface-muted">
-                        <div
-                          className={`h-1.5 rounded-full ${atteinte >= 0.75 ? "bg-success" : "bg-primary"}`}
-                          style={{ width: `${atteinte * 100}%` }}
-                        />
-                      </div>
-                      <p className="mt-1 text-[10px] text-muted-foreground">{formatPct(atteinte)} du potentiel capté</p>
+              ),
+            },
+            {
+              id: "competitor-share",
+              label: "Sponsoring — Teoxane vs concurrents",
+              node: <CompetitorShareCard amounts={competitorAmounts} />,
+            },
+            {
+              id: "department-breakdown",
+              label: "Synthèse départementale",
+              node: (
+                <DepartmentBreakdown
+                  accounts={accounts}
+                  yearField={YEAR_FIELDS[year]}
+                  selectedDept={selectedDept}
+                  onSelectDept={setSelectedDept}
+                />
+              ),
+            },
+            {
+              id: "action-distribution",
+              label: "Répartition par action recommandée",
+              node: (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Répartition par action recommandée</CardTitle>
+                    <CardDescription>Calculée en direct depuis le score de ciblage — {filteredAccounts.length} comptes</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                      {actionDistribution.map((b) => (
+                        <div key={b.code} className="rounded-lg border border-border p-3" style={{ borderTopColor: b.meta.color, borderTopWidth: 3 }}>
+                          <p className="text-lg font-semibold text-foreground">{b.count}</p>
+                          <p className="text-xs text-muted-foreground">{b.meta.label}</p>
+                          {b.caNonCapte > 0 && <p className="mt-1 text-[10px] text-muted-foreground">{formatEUR(b.caNonCapte)}</p>}
+                        </div>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Ligne 8 : Actions Rapides & Vue Management & Comptes prioritaires */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="space-y-4 lg:col-span-1">
-            <QuickActionCard accounts={filteredAccounts} />
-            <Card>
-              <CardHeader>
-                <CardTitle>Vue management</CardTitle>
-                <CardDescription>Synthèse du portefeuille</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Comptes suivis</span>
-                  <span className="font-medium">{formatNumber(filteredAccounts.length)}</span>
+                  </CardContent>
+                </Card>
+              ),
+            },
+            {
+              id: "secondary-kpis",
+              label: "KPIs secondaires",
+              node: (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <KpiCard label="CA moyen / compte actif" value={formatEUR(caMoyenParCompteActif)} icon={TrendingUp} />
+                  <KpiCard label="Concentration Segment A" value={formatPct(concentrationSegmentA)} icon={Crown} />
+                  <KpiCard label="Clients actifs" value={formatNumber(clientsActifs)} icon={Users} />
+                  <KpiCard label="Comptes à risque" value={formatNumber(clientsAlerte.length)} tone="negative" icon={AlertTriangle} />
                 </div>
-                {(["A", "B", "C", "D", "E"] as const).map((seg) => (
-                  <div key={seg} className="flex justify-between">
-                    <span className="text-muted-foreground">Segment {seg}</span>
-                    <span className="font-medium">
-                      {filteredAccounts.filter((a) => a.segment === seg).length} · {formatEUR(caParSegment[seg])}
-                    </span>
+              ),
+            },
+            hasTierData && {
+              id: "tier-tracking",
+              label: "Suivi Premium / Pro / Pro+",
+              node: (
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                      <CardTitle>Suivi Premium / Pro / Pro+</CardTitle>
+                      <CardDescription>Comptes sous contrat de partenariat — CA {year} vs potentiel</CardDescription>
+                    </div>
+                    <Crown size={18} className="text-primary" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      {tierStats.map((t) => {
+                        const atteinte = t.potentiel > 0 ? Math.min(t.ca / t.potentiel, 1) : 0;
+                        return (
+                          <div key={t.tier} className="rounded-lg border border-border p-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-semibold text-foreground">{t.tier}</span>
+                              <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                                {t.count} compte(s)
+                              </span>
+                            </div>
+                            <p className="mt-2 text-lg font-semibold text-foreground">{formatEUR(t.ca)}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Objectif {formatNumber(t.objectif)} boîtes · Potentiel {formatEUR(t.potentiel)}
+                            </p>
+                            <div className="mt-2 h-1.5 rounded-full bg-surface-muted">
+                              <div
+                                className={`h-1.5 rounded-full ${atteinte >= 0.75 ? "bg-success" : "bg-primary"}`}
+                                style={{ width: `${atteinte * 100}%` }}
+                              />
+                            </div>
+                            <p className="mt-1 text-[10px] text-muted-foreground">{formatPct(atteinte)} du potentiel capté</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              ),
+            },
+            {
+              id: "quick-actions-priority",
+              label: "Actions rapides, vue management & comptes prioritaires",
+              node: (
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div className="space-y-4 lg:col-span-1">
+                    <QuickActionCard accounts={filteredAccounts} />
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Vue management</CardTitle>
+                        <CardDescription>Synthèse du portefeuille</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-3 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Comptes suivis</span>
+                          <span className="font-medium">{formatNumber(filteredAccounts.length)}</span>
+                        </div>
+                        {(["A", "B", "C", "D", "E"] as const).map((seg) => (
+                          <div key={seg} className="flex justify-between">
+                            <span className="text-muted-foreground">Segment {seg}</span>
+                            <span className="font-medium">
+                              {filteredAccounts.filter((a) => a.segment === seg).length} · {formatEUR(caParSegment[seg])}
+                            </span>
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
                   </div>
-                ))}
-              </CardContent>
-            </Card>
-          </div>
 
-          <Card className="lg:col-span-2">
-            <CardHeader className="flex flex-row items-start justify-between">
-              <div>
-                <CardTitle>Comptes prioritaires</CardTitle>
-                <CardDescription>Score de ciblage le plus élevé — recalculé en direct</CardDescription>
-              </div>
-              <button
-                onClick={generatePriorityForecasts}
-                disabled={generatingForecasts}
-                title="Propose un prévisionnel 3 mois pour ces comptes prioritaires"
-                className="flex shrink-0 items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
-              >
-                {generatingForecasts ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                Générer le prévisionnel
-              </button>
-            </CardHeader>
-            {forecastGenerationResult && (
-              <p className="px-5 pb-2 text-xs text-muted-foreground">{forecastGenerationResult}</p>
-            )}
-            <PriorityAccountsTable accounts={priorityAccounts} />
-          </Card>
-        </div>
-
-        {/* Ligne 9 : Top Croissance & Déclin */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <MoversCard title="Top 5 croissance (Évol. 24→25)" rows={topCroissance} tone="positive" />
-          <MoversCard title="Top 5 déclin (Évol. 24→25)" rows={topDeclin} tone="negative" />
-        </div>
-
-        {/* Ligne 10 : Comptes perdus & Relances en retard */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Comptes perdus</CardTitle>
-                <CardDescription>Statut Lost, triés par CA 2025 (le plus à regagner en premier)</CardDescription>
-              </div>
-              <UserX size={18} className="text-danger" />
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {lostAccounts.length === 0 && <p className="text-sm text-muted-foreground">Aucun compte perdu 🎉</p>}
-              {lostAccounts.map((a) => (
-                <div key={a.id} className="flex items-center justify-between text-sm">
-                  <div>
-                    <Link href={`/comptes/${a.id}`} className="text-foreground hover:text-primary">
-                      {a.name}
-                    </Link>
-                    {a.last_order_date && (
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        dernière commande {new Date(a.last_order_date).toLocaleDateString("fr-FR")}
-                      </span>
+                  <Card className="lg:col-span-2">
+                    <CardHeader className="flex flex-row items-start justify-between">
+                      <div>
+                        <CardTitle>Comptes prioritaires</CardTitle>
+                        <CardDescription>Score de ciblage le plus élevé — recalculé en direct</CardDescription>
+                      </div>
+                      <button
+                        onClick={generatePriorityForecasts}
+                        disabled={generatingForecasts}
+                        title="Propose un prévisionnel 3 mois pour ces comptes prioritaires"
+                        className="flex shrink-0 items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
+                      >
+                        {generatingForecasts ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                        Générer le prévisionnel
+                      </button>
+                    </CardHeader>
+                    {forecastGenerationResult && (
+                      <p className="px-5 pb-2 text-xs text-muted-foreground">{forecastGenerationResult}</p>
                     )}
-                  </div>
-                  <span className="text-muted-foreground">{formatEUR(a.ca_2025)}</span>
+                    <PriorityAccountsTable accounts={priorityAccounts} />
+                  </Card>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Relances en retard</CardTitle>
-                <CardDescription>Comptes actifs sans appel depuis plus de 60 jours</CardDescription>
-              </div>
-              <PhoneMissed size={18} className="text-warning" />
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {overdueCallAccounts.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  {filteredAccounts.some((a) => a.days_since_last_call !== null)
-                    ? "Rien en retard, bien joué."
-                    : "Importez le fichier Appels pour activer ce suivi."}
-                </p>
-              )}
-              {overdueCallAccounts.map((a) => (
-                <div key={a.id} className="flex items-center justify-between text-sm">
-                  <Link href={`/comptes/${a.id}`} className="text-foreground hover:text-primary">
-                    {a.name}
-                  </Link>
-                  <span className="text-warning">{a.days_since_last_call} j</span>
+              ),
+            },
+            {
+              id: "movers",
+              label: "Top croissance & déclin",
+              node: (
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <MoversCard title="Top 5 croissance (Évol. 24→25)" rows={topCroissance} tone="positive" />
+                  <MoversCard title="Top 5 déclin (Évol. 24→25)" rows={topDeclin} tone="negative" />
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-        </div>
+              ),
+            },
+            {
+              id: "lost-overdue",
+              label: "Comptes perdus & relances en retard",
+              node: (
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <div>
+                        <CardTitle>Comptes perdus</CardTitle>
+                        <CardDescription>Statut Lost, triés par CA 2025 (le plus à regagner en premier)</CardDescription>
+                      </div>
+                      <UserX size={18} className="text-danger" />
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {lostAccounts.length === 0 && <p className="text-sm text-muted-foreground">Aucun compte perdu 🎉</p>}
+                      {lostAccounts.map((a) => (
+                        <div key={a.id} className="flex items-center justify-between text-sm">
+                          <div>
+                            <Link href={`/comptes/${a.id}`} className="text-foreground hover:text-primary">
+                              {a.name}
+                            </Link>
+                            {a.last_order_date && (
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                dernière commande {new Date(a.last_order_date).toLocaleDateString("fr-FR")}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-muted-foreground">{formatEUR(a.ca_2025)}</span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
 
-        {/* Ligne 11 : Comparatif Ventes Produits vs Année Précédente */}
-        <ProductSalesComparison products={products} filteredAccountIds={filteredAccountIds} />
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <div>
+                        <CardTitle>Relances en retard</CardTitle>
+                        <CardDescription>Comptes actifs sans appel depuis plus de 60 jours</CardDescription>
+                      </div>
+                      <PhoneMissed size={18} className="text-warning" />
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {overdueCallAccounts.length === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          {filteredAccounts.some((a) => a.days_since_last_call !== null)
+                            ? "Rien en retard, bien joué."
+                            : "Importez le fichier Appels pour activer ce suivi."}
+                        </p>
+                      )}
+                      {overdueCallAccounts.map((a) => (
+                        <div key={a.id} className="flex items-center justify-between text-sm">
+                          <Link href={`/comptes/${a.id}`} className="text-foreground hover:text-primary">
+                            {a.name}
+                          </Link>
+                          <span className="text-warning">{a.days_since_last_call} j</span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                </div>
+              ),
+            },
+            {
+              id: "product-comparison",
+              label: "Comparatif ventes produits vs année précédente",
+              node: <ProductSalesComparison products={products} filteredAccountIds={filteredAccountIds} />,
+            },
+          ] as (LayoutBlock | false)[]).filter((b): b is LayoutBlock => !!b)}
+        />
       </main>
     </div>
   );
