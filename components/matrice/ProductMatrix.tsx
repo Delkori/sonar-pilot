@@ -33,6 +33,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
   const [minBoites, setMinBoites] = useState("");
   const [minCa, setMinCa] = useState("");
   const [onlyRetard, setOnlyRetard] = useState(false);
+  const [cellMetric, setCellMetric] = useState<"boites" | "ca">("boites");
 
   const brands = useMemo(() => {
     const totals = new Map<string, number>();
@@ -44,11 +45,19 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
       .map(([brand]) => brand);
   }, [products]);
 
+  // Par compte × marque : quantité et CA, année en cours et N-1 (même
+  // fenêtre YTD des deux côtés) — sert au tableau détaillé (bascule
+  // boîtes/CA) et au calcul du retard par référence.
   const productsByAccount = useMemo(() => {
-    const map = new Map<string, Map<string, number>>();
+    const map = new Map<string, Map<string, { qtyCy: number; qtyLy: number; caCy: number; caLy: number }>>();
     for (const p of products) {
       if (!map.has(p.account_id)) map.set(p.account_id, new Map());
-      map.get(p.account_id)!.set(p.brand, p.qty_ordered_cy ?? 0);
+      map.get(p.account_id)!.set(p.brand, {
+        qtyCy: p.qty_ordered_cy ?? 0,
+        qtyLy: p.qty_ordered_ly ?? 0,
+        caCy: p.sales_value_cy ?? 0,
+        caLy: p.sales_value_ly ?? 0,
+      });
     }
     return map;
   }, [products]);
@@ -111,7 +120,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
       .filter((a) => (search ? a.name.toLowerCase().includes(search.toLowerCase()) : true))
       .map((a) => {
         const bought = productsByAccount.get(a.id) ?? new Map();
-        const missing = brands.filter((b) => !bought.has(b) || bought.get(b) === 0).length;
+        const missing = brands.filter((b) => !bought.has(b) || (bought.get(b)?.qtyCy ?? 0) === 0).length;
         const caNonCapte = Math.max((a.potentiel_boites ?? 0) * avgPricePerBox - (a.ca_2026_ytd ?? 0), 0);
         const score = computeTargetingScore(a).total;
         const stats = perAccountStats.get(a.id) ?? { boites: 0, retard: 0 };
@@ -236,6 +245,24 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
             <input type="checkbox" checked={onlyRetard} onChange={(e) => setOnlyRetard(e.target.checked)} className="accent-primary" />
             En retard uniquement
           </label>
+          <div className="flex rounded-lg border border-border bg-surface p-0.5">
+            <button
+              onClick={() => setCellMetric("boites")}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                cellMetric === "boites" ? "bg-primary-100 text-primary-700" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Boîtes
+            </button>
+            <button
+              onClick={() => setCellMetric("ca")}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                cellMetric === "ca" ? "bg-primary-100 text-primary-700" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              CA
+            </button>
+          </div>
           <span className="ml-auto text-xs text-muted-foreground">{rows.length} compte(s) · {brands.length} marques</span>
         </div>
 
@@ -246,7 +273,12 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
                 <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="sticky left-0 z-10 bg-surface px-4" />
                 <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
                 {brands.map((b) => (
-                  <th key={b} className="px-2 py-2 text-center font-medium whitespace-nowrap">{b}</th>
+                  <th key={b} className="px-2 py-2 text-center font-medium whitespace-nowrap">
+                    {b}
+                    <span className="ml-1 font-normal text-muted-foreground/70">
+                      ({cellMetric === "boites" ? "boîtes" : "CA"})
+                    </span>
+                  </th>
                 ))}
                 <SortableTh label="Boîtes (YTD)" sortKey="boites" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
                 <SortableTh label="Retard" sortKey="retard" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
@@ -267,11 +299,24 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
                   </td>
                   <td className="px-2 py-2"><SegmentBadge segment={account.segment} /></td>
                   {brands.map((b) => {
-                    const qty = bought.get(b) ?? 0;
+                    const cell = bought.get(b);
+                    const cy = cellMetric === "boites" ? cell?.qtyCy ?? 0 : cell?.caCy ?? 0;
+                    const ly = cellMetric === "boites" ? cell?.qtyLy ?? 0 : cell?.caLy ?? 0;
+                    const isDiscontinued = DISCONTINUED_BRANDS.has(b);
+                    const retardCell = !isDiscontinued && ly > cy ? ly - cy : 0;
                     return (
-                      <td key={b} className={`px-2 py-2 text-center ${qty > 0 ? "bg-primary-50" : ""}`}>
-                        {qty > 0 ? (
-                          <span className="font-medium text-primary-700">{qty}</span>
+                      <td key={b} className={`px-2 py-2 text-center ${cy > 0 ? "bg-primary-50" : ""}`}>
+                        {cy > 0 ? (
+                          <div className="leading-tight">
+                            <span className="font-medium text-primary-700">
+                              {cellMetric === "boites" ? formatNumber(cy) : formatEUR(cy)}
+                            </span>
+                            {retardCell > 0 && (
+                              <div className="text-[10px] font-medium text-danger">
+                                −{cellMetric === "boites" ? formatNumber(retardCell) : formatEUR(retardCell)} vs 2025
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-danger">✕</span>
                         )}
@@ -291,9 +336,10 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
         </div>
 
         <div className="flex flex-wrap items-center gap-4 border-t border-border bg-surface-muted px-5 py-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-primary-50" /> Acheté (quantité)</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-sm bg-primary-50" /> Acheté (bascule boîtes/CA ci-dessus)</span>
           <span className="flex items-center gap-1.5"><span className="text-danger">✕</span> Non acheté — opportunité cross-sell</span>
-          <span>Retard = boîtes en dessous du rythme N-1, cumulé sur toutes les marques</span>
+          <span className="text-danger">−N vs 2025</span> sous une cellule = en retard sur cette référence précise
+          <span>· Retard (colonne) = cumulé sur toutes les marques</span>
           <span className="ml-auto">CA non capté = potentiel (boîtes) × prix moyen/boîte du portefeuille ({formatEUR(avgPricePerBox)}) − CA 2026 YTD</span>
         </div>
       </div>
