@@ -205,12 +205,28 @@ export function WeeklyPlanner({
     setGenerating(true);
     const supabase = createClient();
 
+    // La vue locale (state React) peut être périmée si un autre écran (ex:
+    // "Générer le prévisionnel du portefeuille" sur Pilotage, qui remplit
+    // aussi l'agenda) a inséré des créneaux entre-temps sans que cette page
+    // soit rechargée — générer à partir de cet état obsolète dupliquait des
+    // rendez-vous déjà posés en base (ex: un même compte visité 2 fois le
+    // même jour). On relit donc l'état réel du mois calendaire complet
+    // depuis la base juste avant de nettoyer/régénérer.
+    const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+    const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+    const { data: freshRaw } = await supabase
+      .from("planning_events")
+      .select("*")
+      .gte("start_at", monthStart.toISOString())
+      .lt("start_at", monthEnd.toISOString());
+    const freshMonthEvents = (freshRaw ?? []) as PlanningEvent[];
+
     // Idempotent : un second clic ne doit pas doubler les créneaux admin/
     // appels déjà générés. On supprime d'abord les lignes 'auto' de la
     // semaine affichée avant de réinsérer le nouveau planning.
     const weekEndExclusive = new Date(date);
     weekEndExclusive.setDate(weekEndExclusive.getDate() + 5);
-    const staleIds = events
+    const staleIds = freshMonthEvents
       .filter(
         (e) =>
           e.source === "auto" &&
@@ -222,14 +238,14 @@ export function WeeklyPlanner({
     if (staleIds.length > 0) {
       await supabase.from("planning_events").delete().in("id", staleIds);
     }
-    const remainingEvents = events.filter((e) => !staleIds.includes(e.id));
+    const remainingMonthEvents = freshMonthEvents.filter((e) => !staleIds.includes(e.id));
 
     const draft = generateWeeklyPlan(
       date,
       accounts,
       forecasts,
       actions,
-      remainingEvents.map((e) => ({ account_id: e.account_id, start_at: e.start_at }))
+      remainingMonthEvents.map((e) => ({ account_id: e.account_id, start_at: e.start_at }))
     );
     const { data, error } = await supabase
       .from("planning_events")
@@ -247,7 +263,12 @@ export function WeeklyPlanner({
       .select();
     setGenerating(false);
     if (!error && data) {
-      setEvents((prev) => [...prev.filter((e) => !staleIds.includes(e.id)), ...(data as PlanningEvent[])]);
+      // Remplace l'état local du mois entier par la vérité serveur, pour
+      // rester cohérent même si d'autres créneaux ont été insérés ailleurs.
+      setEvents((prev) => {
+        const outsideMonth = prev.filter((e) => new Date(e.start_at) < monthStart || new Date(e.start_at) >= monthEnd);
+        return [...outsideMonth, ...remainingMonthEvents, ...(data as PlanningEvent[])];
+      });
     }
   }
 

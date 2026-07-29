@@ -126,13 +126,37 @@ export function generateWeeklyPlan(
 
   const accountById = new Map(accounts.map((a) => [a.id, a] as const));
 
-  const clientCandidates = Array.from(bestForecastByAccount.entries())
+  const withForecast = Array.from(bestForecastByAccount.entries())
     .map(([accountId, forecast]) => ({ account: accountById.get(accountId), forecast }))
     .filter(
       (c): c is { account: Account; forecast: AccountForecast } =>
         !!c.account && !existingAccountIds.has(c.account.id)
-    )
-    .sort((a, b) => (b.forecast.ca_prevu ?? 0) - (a.forecast.ca_prevu ?? 0));
+    );
+
+  // Comptes "à risque" (statut a_risque) : à défendre en priorité pour
+  // préserver la relation, même sans commande imminente au prévisionnel.
+  // S'ils n'ont pas de prévision ce mois-ci, on les ajoute quand même avec
+  // une prévision nulle et une note de maintien de relation, plutôt que de
+  // ne compter que sur le CA prévu pour décider qui mérite une visite.
+  const forecastedIds = new Set(withForecast.map((c) => c.account.id));
+  const atRiskExtra = accounts
+    .filter((a) => a.status === "a_risque" && !existingAccountIds.has(a.id) && !forecastedIds.has(a.id))
+    .map((a) => ({
+      account: a,
+      forecast: {
+        ca_prevu: 0,
+        boites_prevues: 0,
+        commentaire: "Compte à risque — visite de maintien de relation",
+        note: null,
+      } as unknown as AccountForecast,
+    }));
+
+  const clientCandidates = [...withForecast, ...atRiskExtra].sort((a, b) => {
+    const aRisk = a.account.status === "a_risque";
+    const bRisk = b.account.status === "a_risque";
+    if (aRisk !== bRisk) return aRisk ? -1 : 1; // les comptes à défendre passent en premier
+    return (b.forecast.ca_prevu ?? 0) - (a.forecast.ca_prevu ?? 0);
+  });
 
   const prospectCandidates = accounts
     .filter((a) => isProspect(a) && !existingAccountIds.has(a.id))
@@ -149,7 +173,10 @@ export function generateWeeklyPlan(
   for (const c of clientCandidates) {
     const d = c.account.department_code;
     if (!d) continue;
-    deptTotals.set(d, (deptTotals.get(d) ?? 0) + (c.forecast.ca_prevu ?? 0));
+    // Un compte à défendre pèse un minimum forfaitaire même sans prévision
+    // chiffrée, pour ne pas faire disparaître son département du classement.
+    const weight = c.account.status === "a_risque" ? Math.max(500, c.forecast.ca_prevu ?? 0) : (c.forecast.ca_prevu ?? 0);
+    deptTotals.set(d, (deptTotals.get(d) ?? 0) + weight);
   }
   const weekDepts = Array.from(deptTotals.entries())
     // Un département trop loin pour un aller-retour dans la journée n'est
