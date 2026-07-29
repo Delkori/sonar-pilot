@@ -188,6 +188,19 @@ export function WeeklyPlanner({
     if (!error && data) setEvents((prev) => [...prev, data as PlanningEvent]);
   }
 
+  async function clearWeek() {
+    const weekEndExclusive = new Date(date);
+    weekEndExclusive.setDate(weekEndExclusive.getDate() + 5);
+    const idsInWeek = events
+      .filter((e) => new Date(e.start_at) >= date && new Date(e.start_at) < weekEndExclusive)
+      .map((e) => e.id);
+    if (idsInWeek.length === 0) return;
+    if (!window.confirm(`Supprimer les ${idsInWeek.length} rendez-vous de cette semaine (y compris ceux validés) ?`)) return;
+    setEvents((prev) => prev.filter((e) => !idsInWeek.includes(e.id)));
+    const supabase = createClient();
+    await supabase.from("planning_events").delete().in("id", idsInWeek);
+  }
+
   async function generate() {
     setGenerating(true);
     const supabase = createClient();
@@ -315,14 +328,23 @@ export function WeeklyPlanner({
               {date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} → {weekEnd.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
             </span>
           </div>
-          <button
-            onClick={generate}
-            disabled={generating}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-600 disabled:opacity-50"
-          >
-            {generating ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
-            Générer la semaine
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={clearWeek}
+              className="flex items-center gap-1.5 rounded-lg border border-danger/30 px-3 py-1.5 text-sm font-medium text-danger hover:bg-danger/5"
+            >
+              <Trash2 size={14} />
+              Vider la semaine
+            </button>
+            <button
+              onClick={generate}
+              disabled={generating}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-600 disabled:opacity-50"
+            >
+              {generating ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+              Générer la semaine
+            </button>
+          </div>
         </div>
 
         <div className="planner-calendar flex-1">
