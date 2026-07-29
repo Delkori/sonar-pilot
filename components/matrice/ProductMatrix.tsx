@@ -6,7 +6,7 @@ import { SegmentBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
-import { formatEUR, formatNumber } from "@/lib/utils";
+import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { computeTargetingScore } from "@/lib/scoring";
 import { TrendingUp, TrendingDown } from "lucide-react";
 import type { Account, Segment } from "@/types/database";
@@ -34,6 +34,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
   const [minCa, setMinCa] = useState("");
   const [onlyRetard, setOnlyRetard] = useState(false);
   const [cellMetric, setCellMetric] = useState<"boites" | "ca">("boites");
+  const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
 
   const brands = useMemo(() => {
     const totals = new Map<string, number>();
@@ -44,6 +45,31 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
       .sort((a, b) => b[1] - a[1])
       .map(([brand]) => brand);
   }, [products]);
+
+  // ── Références vendues vs N-1 : total cy/ly par marque (boîtes et CA),
+  // pour le résumé cliquable au-dessus du tableau. Cliquer une ou plusieurs
+  // références filtre le tableau aux comptes qui les commandent.
+  const brandSummary = useMemo(() => {
+    const totals = new Map<string, { qtyCy: number; qtyLy: number; caCy: number; caLy: number }>();
+    for (const p of products) {
+      const cur = totals.get(p.brand) ?? { qtyCy: 0, qtyLy: 0, caCy: 0, caLy: 0 };
+      cur.qtyCy += p.qty_ordered_cy ?? 0;
+      cur.qtyLy += p.qty_ordered_ly ?? 0;
+      cur.caCy += p.sales_value_cy ?? 0;
+      cur.caLy += p.sales_value_ly ?? 0;
+      totals.set(p.brand, cur);
+    }
+    return brands.map((brand) => ({ brand, ...(totals.get(brand) ?? { qtyCy: 0, qtyLy: 0, caCy: 0, caLy: 0 }) }));
+  }, [brands, products]);
+
+  function toggleBrand(brand: string) {
+    setSelectedBrands((prev) => {
+      const next = new Set(prev);
+      if (next.has(brand)) next.delete(brand);
+      else next.add(brand);
+      return next;
+    });
+  }
 
   // Par compte × marque : quantité et CA, année en cours et N-1 (même
   // fenêtre YTD des deux côtés) — sert au tableau détaillé (bascule
@@ -139,8 +165,13 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
       })
       .filter((r) => (min !== null ? r.boites >= min : true))
       .filter((r) => (minCaNum !== null ? (r.account.ca_2026_ytd ?? 0) >= minCaNum : true))
-      .filter((r) => (onlyRetard ? r.retard > 0 : true));
-  }, [accounts, productsByAccount, brands, segment, search, avgPricePerBox, perAccountStats, minBoites, minCa, onlyRetard]);
+      .filter((r) => (onlyRetard ? r.retard > 0 : true))
+      .filter((r) =>
+        selectedBrands.size === 0
+          ? true
+          : Array.from(selectedBrands).some((b) => (r.bought.get(b)?.qtyCy ?? 0) > 0)
+      );
+  }, [accounts, productsByAccount, brands, segment, search, avgPricePerBox, perAccountStats, minBoites, minCa, onlyRetard, selectedBrands]);
 
   const { sorted: rows, sortKey, dir, toggle } = useSortableTable<(typeof filteredRows)[number], SortKey>(
     filteredRows,
@@ -242,6 +273,60 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
           <p className="mt-2 text-[10px] text-muted-foreground">
             Hors références retirées du catalogue (Global Action, Ultimate, Kiss).
           </p>
+        </div>
+      </div>
+
+      {/* ── Références vendues vs N-1 : cliquer une ou plusieurs marques
+          filtre le tableau ci-dessous aux comptes qui les commandent ── */}
+      <div className="rounded-xl border border-border bg-surface p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Références vendues vs N-1 — cliquez pour filtrer le tableau
+          </p>
+          {selectedBrands.size > 0 && (
+            <button
+              onClick={() => setSelectedBrands(new Set())}
+              className="text-xs text-primary underline hover:text-primary-700"
+            >
+              Réinitialiser ({selectedBrands.size})
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {brandSummary.map(({ brand, qtyCy, qtyLy, caCy, caLy }) => {
+            const cy = cellMetric === "boites" ? qtyCy : caCy;
+            const ly = cellMetric === "boites" ? qtyLy : caLy;
+            const evolution = ly > 0 ? (cy - ly) / ly : null;
+            const isSelected = selectedBrands.has(brand);
+            const isDiscontinued = DISCONTINUED_BRANDS.has(brand);
+            return (
+              <button
+                key={brand}
+                onClick={() => toggleBrand(brand)}
+                className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
+                  isSelected
+                    ? "border-primary bg-primary-50"
+                    : "border-border bg-surface hover:bg-surface-muted"
+                }`}
+              >
+                <p className="font-semibold text-foreground">{brand}</p>
+                <p className="text-muted-foreground">
+                  {cellMetric === "boites" ? formatNumber(cy) : formatEUR(cy)}
+                  {" "}
+                  <span className="text-muted-foreground/70">
+                    (N-1 : {cellMetric === "boites" ? formatNumber(ly) : formatEUR(ly)})
+                  </span>
+                </p>
+                {!isDiscontinued && evolution !== null && (
+                  <p className={evolution >= 0 ? "text-success" : "text-danger"}>
+                    {evolution > 0 ? "+" : ""}
+                    {formatPct(evolution)} vs N-1
+                  </p>
+                )}
+                {isDiscontinued && <p className="text-muted-foreground/70">Retirée du catalogue</p>}
+              </button>
+            );
+          })}
         </div>
       </div>
 
