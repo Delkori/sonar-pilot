@@ -340,7 +340,10 @@ export function canonicalizeBrand(description: string): string {
   if (d.includes("RHA 3") || d.includes("RHA3")) return "RHA 3";
   if (d.includes("RHA 4") || d.includes("RHA4")) return "RHA 4";
   if (d.includes("REDENSITY 2") || d.includes("REDENSITY II") || d.includes("RED2")) return "Redensity 2";
-  if (d.includes("REDENSITY 1") || d.includes("REDENSITY I") || d.includes("RED1")) return "Redensity 1";
+  // "Teosyal Redensity 3ml WS" (sans "1"/"I" explicite) est du Redensity 1 —
+  // confirmé par l'utilisateur. Le "3ml" est le conditionnement, pas une
+  // variante 2/II (déjà exclue par la règle au-dessus).
+  if (d.includes("REDENSITY 1") || d.includes("REDENSITY I") || d.includes("RED1") || d.includes("REDENSITY")) return "Redensity 1";
   if (d.includes("ULTRA DEEP")) return "Ultra Deep";
   if (d.includes("DEEP LINES")) return "Deep Lines";
   if (d.includes("GLOBAL ACTION")) return "Global Action";
