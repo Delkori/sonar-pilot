@@ -8,7 +8,7 @@ import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import { computeTargetingScore } from "@/lib/scoring";
-import { AlertTriangle, Package, TrendingDown, HelpCircle } from "lucide-react";
+import { TrendingUp, TrendingDown } from "lucide-react";
 import type { Account, Segment } from "@/types/database";
 
 interface ProductRow {
@@ -21,6 +21,11 @@ interface ProductRow {
 }
 
 type SortKey = "name" | "segment" | "score" | "missing" | "ca_nc" | "boites" | "retard";
+
+// Références retirées du catalogue — un "retard" sur ces marques ne reflète
+// pas une baisse de consommation réelle, juste l'arrêt du produit. Exclues
+// du calcul de retard et du classement des références à prioriser.
+const DISCONTINUED_BRANDS = new Set(["Global Action", "Ultimate", "Kiss"]);
 
 export function ProductMatrix({ accounts, products }: { accounts: Account[]; products: ProductRow[] }) {
   const [segment, setSegment] = useState<Segment | "all">("all");
@@ -72,50 +77,31 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
     for (const p of products) {
       const cur = map.get(p.account_id) ?? { boites: 0, retard: 0 };
       cur.boites += p.qty_ordered_cy ?? 0;
-      cur.retard += Math.max((p.qty_ordered_ly ?? 0) - (p.qty_ordered_cy ?? 0), 0);
+      if (!DISCONTINUED_BRANDS.has(p.brand)) {
+        cur.retard += Math.max((p.qty_ordered_ly ?? 0) - (p.qty_ordered_cy ?? 0), 0);
+      }
       map.set(p.account_id, cur);
     }
     return map;
   }, [products]);
 
-  // ── Dashboard récap : par référence, CA non capté cumulé chez les comptes
-  // qui ne l'achètent pas — pour savoir sur quelle marque insister.
-  const brandOpportunity = useMemo(() => {
-    const boughtByBrand = new Map<string, Set<string>>();
-    for (const p of products) {
-      if ((p.qty_ordered_cy ?? 0) > 0) {
-        const set = boughtByBrand.get(p.brand) ?? new Set<string>();
-        set.add(p.account_id);
-        boughtByBrand.set(p.brand, set);
-      }
-    }
-    return brands
-      .map((brand) => {
-        const boughtSet = boughtByBrand.get(brand) ?? new Set<string>();
-        const missingAccounts = accounts.filter((a) => !boughtSet.has(a.id));
-        const potentielManque = missingAccounts.reduce(
-          (s, a) => s + Math.max((a.potentiel_boites ?? 0) * avgPricePerBox - (a.ca_2026_ytd ?? 0), 0),
-          0
-        );
-        return { brand, missingCount: missingAccounts.length, potentielManque };
-      })
-      .sort((a, b) => b.potentielManque - a.potentielManque);
-  }, [brands, products, accounts, avgPricePerBox]);
+  // ── Top 10 clients (boîtes cette année) / Flop 10 (retard cumulé le plus
+  // élevé vs le rythme N-1, hors références retirées du catalogue).
+  const top10Boites = useMemo(() => {
+    return accounts
+      .map((a) => ({ account: a, stats: perAccountStats.get(a.id) }))
+      .filter((r) => (r.stats?.boites ?? 0) > 0)
+      .sort((a, b) => (b.stats?.boites ?? 0) - (a.stats?.boites ?? 0))
+      .slice(0, 10);
+  }, [accounts, perAccountStats]);
 
-  // ── Médecins en baisse de consommation : retard cumulé le plus élevé
-  const decliningAccounts = useMemo(() => {
+  const flop10Retard = useMemo(() => {
     return accounts
       .map((a) => ({ account: a, stats: perAccountStats.get(a.id) }))
       .filter((r) => (r.stats?.retard ?? 0) > 0)
       .sort((a, b) => (b.stats?.retard ?? 0) - (a.stats?.retard ?? 0))
-      .slice(0, 8);
+      .slice(0, 10);
   }, [accounts, perAccountStats]);
-
-  // ── Comptes sans aucune donnée produit — chiffre manquant à récupérer
-  const accountsWithoutData = useMemo(
-    () => accounts.filter((a) => !perAccountStats.has(a.id)),
-    [accounts, perAccountStats]
-  );
 
   const filteredRows = useMemo(() => {
     const min = minBoites ? Number(minBoites) : null;
@@ -160,62 +146,56 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
 
   return (
     <div className="space-y-4">
-      {/* ── Dashboard récap : où regarder en priorité ── */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* ── Top 10 / Flop 10 clients — boîtes cette année (YTD) ── */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-border bg-surface p-3">
-          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <Package size={13} className="text-primary" /> Référence à prioriser
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <TrendingUp size={13} className="text-success" /> Top 10 clients (boîtes YTD)
           </p>
-          <p className="mt-1 text-base font-bold text-foreground">{brandOpportunity[0]?.brand ?? "—"}</p>
-          <p className="text-xs text-muted-foreground">
-            {brandOpportunity[0] ? `${formatEUR(brandOpportunity[0].potentielManque)} manqué sur ${brandOpportunity[0].missingCount} compte(s)` : "—"}
-          </p>
+          {top10Boites.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aucune donnée.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {top10Boites.map(({ account, stats }, idx) => (
+                <div key={account.id} className="flex items-center justify-between text-sm">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="w-4 shrink-0 text-xs text-muted-foreground">{idx + 1}.</span>
+                    <Link href={`/comptes/${account.id}`} className="truncate text-foreground hover:text-primary">
+                      {account.name}
+                    </Link>
+                  </div>
+                  <span className="shrink-0 font-medium text-foreground">{formatNumber(stats?.boites ?? 0)} boîtes</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="rounded-xl border border-border bg-surface p-3">
-          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <TrendingDown size={13} className="text-danger" /> Médecin en plus forte baisse
-          </p>
-          <p className="mt-1 text-base font-bold text-foreground">{decliningAccounts[0]?.account.name ?? "—"}</p>
-          <p className="text-xs text-muted-foreground">
-            {decliningAccounts[0] ? `${formatNumber(decliningAccounts[0].stats?.retard ?? 0)} boîtes de retard sur son rythme N-1` : "Aucune baisse détectée"}
-          </p>
-        </div>
-        <div className="rounded-xl border border-border bg-surface p-3">
-          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <AlertTriangle size={13} className="text-warning" /> Retard cumulé total
-          </p>
-          <p className="mt-1 text-base font-bold text-foreground">
-            {formatNumber(decliningAccounts.reduce((s, r) => s + (r.stats?.retard ?? 0), 0))} boîtes
-          </p>
-          <p className="text-xs text-muted-foreground">Sur {decliningAccounts.length} compte(s) en dessous du rythme N-1</p>
-        </div>
-        <div className="rounded-xl border border-border bg-surface p-3">
-          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <HelpCircle size={13} className="text-muted-foreground" /> Chiffre à récupérer
-          </p>
-          <p className="mt-1 text-base font-bold text-foreground">{formatNumber(accountsWithoutData.length)} compte(s)</p>
-          <p className="text-xs text-muted-foreground">Sans aucune donnée produit — à demander/réimporter</p>
-        </div>
-      </div>
 
-      <div className="rounded-xl border border-border bg-surface p-3">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Médecins en baisse de consommation</p>
-        {decliningAccounts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Aucun compte en retard sur son rythme de l&apos;an dernier.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {decliningAccounts.map(({ account, stats }) => (
-              <Link
-                key={account.id}
-                href={`/comptes/${account.id}`}
-                className="flex items-center gap-1.5 rounded-full border border-danger/20 bg-danger/5 px-2.5 py-1 text-xs text-danger hover:bg-danger/10"
-              >
-                {account.name}
-                <span className="font-semibold">−{formatNumber(stats?.retard ?? 0)}</span>
-              </Link>
-            ))}
-          </div>
-        )}
+        <div className="rounded-xl border border-border bg-surface p-3">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <TrendingDown size={13} className="text-danger" /> Flop 10 clients (retard vs N-1)
+          </p>
+          {flop10Retard.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Aucun compte en retard sur son rythme de l&apos;an dernier.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {flop10Retard.map(({ account, stats }, idx) => (
+                <div key={account.id} className="flex items-center justify-between text-sm">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="w-4 shrink-0 text-xs text-muted-foreground">{idx + 1}.</span>
+                    <Link href={`/comptes/${account.id}`} className="truncate text-foreground hover:text-primary">
+                      {account.name}
+                    </Link>
+                  </div>
+                  <span className="shrink-0 font-medium text-danger">−{formatNumber(stats?.retard ?? 0)} boîtes</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            Hors références retirées du catalogue (Global Action, Ultimate, Kiss).
+          </p>
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border bg-surface">
