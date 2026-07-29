@@ -490,7 +490,14 @@ export async function POST(req: NextRequest) {
           message: "Fichier ACCOUNT DETAIL requis pour attribuer les lignes produit à un compte — ignoré",
         });
       } else {
-        const productTotals = new Map<string, { qty: number; value: number }>(); // accountId|brand
+        // Réparties par année réelle de facturation (line.date), pas lumped
+        // ensemble : ça permet de reconstruire le comparatif N vs N-1 par
+        // marque directement depuis les factures déjà importées, sans
+        // dépendre d'un fichier "Croissance par marque" séparé qui peut ne
+        // jamais être fourni.
+        const curYear = new Date().getFullYear();
+        const prevYear = curYear - 1;
+        const productYearTotals = new Map<string, { qty: number; value: number }>(); // accountId|brand|year
         const boitesByAccount = new Map<string, number>();
         let linesMatched = 0;
 
@@ -499,25 +506,36 @@ export async function POST(req: NextRequest) {
           if (!accountId) continue;
           linesMatched++;
           const brand = canonicalizeBrand(line.description);
-          const key = `${accountId}|${brand}`;
-          const cur = productTotals.get(key) ?? { qty: 0, value: 0 };
+          const year = Number(line.date.slice(0, 4));
+          const key = `${accountId}|${brand}|${year}`;
+          const cur = productYearTotals.get(key) ?? { qty: 0, value: 0 };
           cur.qty += line.qty;
           cur.value += line.valueEur;
-          productTotals.set(key, cur);
+          productYearTotals.set(key, cur);
 
-          if (line.date.startsWith(String(new Date().getFullYear()))) {
+          if (year === curYear) {
             boitesByAccount.set(accountId, (boitesByAccount.get(accountId) ?? 0) + line.qty);
           }
         }
         rowsSuccess += linesMatched;
 
-        const productsPayload = Array.from(productTotals.entries()).map(([key, v]) => {
+        const accountBrandKeys = new Set<string>();
+        for (const key of productYearTotals.keys()) {
           const [accountId, brand] = key.split("|");
+          accountBrandKeys.add(`${accountId}|${brand}`);
+        }
+        const productsPayload = Array.from(accountBrandKeys).map((key) => {
+          const [accountId, brand] = key.split("|");
+          const cy = productYearTotals.get(`${accountId}|${brand}|${curYear}`) ?? { qty: 0, value: 0 };
+          const ly = productYearTotals.get(`${accountId}|${brand}|${prevYear}`) ?? { qty: 0, value: 0 };
           return {
             account_id: accountId,
             brand,
-            sales_value_cy: v.value,
-            qty_ordered_cy: v.qty,
+            sales_value_cy: cy.value || null,
+            sales_value_ly: ly.value || null,
+            qty_ordered_cy: cy.qty || null,
+            qty_ordered_ly: ly.qty || null,
+            growth_rate_pct: ly.value > 0 ? (cy.value - ly.value) / ly.value : null,
             period: "Factures réelles",
           };
         });
