@@ -46,11 +46,11 @@ interface ProductRow {
   qty_ordered_ly: number | null;
 }
 
-// Carte plus compacte — agrandie quand on zoome sur un département
-const WIDTH = 500;
-const HEIGHT = 520;
-const ZOOM_WIDTH = 760;
-const ZOOM_HEIGHT = 780;
+// Carte agrandie pour une meilleure lisibilité des points — zoom encore plus grand
+const WIDTH = 760;
+const HEIGHT = 790;
+const ZOOM_WIDTH = 1040;
+const ZOOM_HEIGHT = 1060;
 
 function ecartRatio(a: Account) {
   if (!a.objectif_boites) return null;
@@ -576,7 +576,7 @@ export function AuraMap({
           </div>
           <svg
             viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-            style={{ maxHeight: zoomedFeature ? 720 : 500, maxWidth: zoomedFeature ? 800 : 560, width: "100%" }}
+            style={{ maxHeight: zoomedFeature ? 980 : 760, maxWidth: zoomedFeature ? 1040 : 800, width: "100%" }}
           >
             {geo.features.map((f) => {
               const stats = deptStats.get(f.properties.code);
@@ -660,7 +660,7 @@ export function AuraMap({
               const opp = opportunityByAccount.get(a.id);
               const isHovered = hoveredAccountId === a.id;
               const isSponsored = sponsoredIds?.has(a.id) ?? false;
-              const r = (a.segment === "A" ? 5 : a.segment === "B" ? 4 : 3) + (isHovered ? 2.5 : 0);
+              const r = (a.segment === "A" ? 8 : a.segment === "B" ? 6.5 : 5) + (isHovered ? 3 : 0);
               return (
                 <g
                   key={a.id}
@@ -845,7 +845,7 @@ export function AuraMap({
             )}
           </span>
         </div>
-        <div className="max-h-80 overflow-y-auto">
+        <div className="max-h-[36rem] overflow-y-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
