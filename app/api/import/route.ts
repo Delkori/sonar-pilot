@@ -568,6 +568,32 @@ export async function POST(req: NextRequest) {
         for (const [accountId, boites] of boitesByAccount) {
           await supabase.from("accounts").update({ realise_boites: boites }).eq("id", accountId);
         }
+
+        // Historique ligne à ligne (compte × marque × date), nécessaire au
+        // module SonarScore (vélocités de réapprovisionnement, RFM-S) — les
+        // agrégats cy/ly ci-dessus ne suffisent pas pour ça, il faut la date
+        // de chaque achat.
+        const purchasesPayload = lines
+          .map((line) => {
+            const accountId = invoiceToAccountId.get(line.invoiceNumber);
+            if (!accountId) return null;
+            return {
+              account_id: accountId,
+              brand: canonicalizeBrand(line.description),
+              purchase_date: line.date,
+              qty: line.qty,
+              value_eur: line.valueEur,
+              invoice_number: line.invoiceNumber,
+            };
+          })
+          .filter((p): p is NonNullable<typeof p> => p !== null);
+        for (let i = 0; i < purchasesPayload.length; i += 500) {
+          const chunk = purchasesPayload.slice(i, i + 500);
+          const { error } = await supabase
+            .from("account_product_purchases")
+            .upsert(chunk, { onConflict: "account_id,brand,purchase_date,invoice_number" });
+          if (error) allErrors.push({ row: 0, message: `Historique achats : ${error.message}` });
+        }
       }
     }
 

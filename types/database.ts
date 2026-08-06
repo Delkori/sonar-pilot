@@ -217,6 +217,17 @@ export type PlanningEvent = {
   updated_at: string;
 };
 
+export type AccountProductPurchase = {
+  id: string;
+  account_id: string;
+  brand: string;
+  purchase_date: string;
+  qty: number;
+  value_eur: number;
+  invoice_number: string | null;
+  created_at: string;
+};
+
 // Minimal Database type for the Supabase client generics. Run
 // `supabase gen types typescript` against the real project to replace this
 // with a fully generated definition once the schema is applied.
@@ -239,6 +250,7 @@ export type Database = {
       hcp_sponsorships: Table<HcpSponsorship>;
       sector_objectives: Table<SectorObjective>;
       planning_events: Table<PlanningEvent>;
+      account_product_purchases: Table<AccountProductPurchase>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
