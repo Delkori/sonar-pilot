@@ -573,20 +573,39 @@ export async function POST(req: NextRequest) {
         // module SonarScore (vélocités de réapprovisionnement, RFM-S) — les
         // agrégats cy/ly ci-dessus ne suffisent pas pour ça, il faut la date
         // de chaque achat.
-        const purchasesPayload = lines
-          .map((line) => {
-            const accountId = invoiceToAccountId.get(line.invoiceNumber);
-            if (!accountId) return null;
-            return {
+        // Lignes administratives (carte d'implant, échantillon...) à 0 € —
+        // pas un vrai achat, à exclure du signal de vélocité/RFM-S.
+        // Plusieurs lignes de la même facture peuvent porter la même marque
+        // (ex. deux boîtes du même produit sur deux lignes distinctes) —
+        // fusionnées ici sur la clé (compte, marque, date, facture) pour
+        // éviter un doublon de clé DANS UN MÊME batch, qui ferait échouer
+        // tout l'upsert Postgres ("ON CONFLICT DO UPDATE command cannot
+        // affect row a second time") sans qu'aucune ligne du batch ne passe.
+        const purchasesByKey = new Map<
+          string,
+          { account_id: string; brand: string; purchase_date: string; qty: number; value_eur: number; invoice_number: string }
+        >();
+        for (const line of lines) {
+          const accountId = invoiceToAccountId.get(line.invoiceNumber);
+          if (!accountId || line.valueEur === 0) continue;
+          const brand = canonicalizeBrand(line.description);
+          const key = `${accountId}|${brand}|${line.date}|${line.invoiceNumber}`;
+          const cur = purchasesByKey.get(key);
+          if (cur) {
+            cur.qty += line.qty;
+            cur.value_eur += line.valueEur;
+          } else {
+            purchasesByKey.set(key, {
               account_id: accountId,
-              brand: canonicalizeBrand(line.description),
+              brand,
               purchase_date: line.date,
               qty: line.qty,
               value_eur: line.valueEur,
               invoice_number: line.invoiceNumber,
-            };
-          })
-          .filter((p): p is NonNullable<typeof p> => p !== null);
+            });
+          }
+        }
+        const purchasesPayload = Array.from(purchasesByKey.values());
         for (let i = 0; i < purchasesPayload.length; i += 500) {
           const chunk = purchasesPayload.slice(i, i + 500);
           const { error } = await supabase
@@ -598,7 +617,10 @@ export async function POST(req: NextRequest) {
     }
 
     const finalStatus = allErrors.length === 0 ? "success" : rowsSuccess > 0 ? "partial" : "failed";
-    await supabase.from("imports").update({ rows_success: rowsSuccess, status: finalStatus }).eq("id", importRow.id);
+    await supabase
+      .from("imports")
+      .update({ rows_total: rowsTotal, rows_success: rowsSuccess, rows_error: allErrors.length, log: allErrors, status: finalStatus })
+      .eq("id", importRow.id);
 
     return NextResponse.json({
       importId: importRow.id,
