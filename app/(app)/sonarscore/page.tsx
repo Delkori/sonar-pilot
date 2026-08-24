@@ -7,14 +7,8 @@ export const dynamic = "force-dynamic";
 
 export default async function SonarScorePage() {
   const supabase = await createClient();
-  const { data: accountsRaw } = await supabase
-    .from("accounts")
-    .select("id, name, segment, city, price_list, objectif_boites, realise_boites")
-    .order("name");
-  const accounts = (accountsRaw ?? []) as Pick<
-    Account,
-    "id" | "name" | "segment" | "city" | "price_list" | "objectif_boites" | "realise_boites"
-  >[];
+  const { data: accountsRaw } = await supabase.from("accounts").select("*").order("name");
+  const accounts = (accountsRaw ?? []) as Account[];
 
   const { data: purchasesRaw } = await supabase
     .from("account_product_purchases")

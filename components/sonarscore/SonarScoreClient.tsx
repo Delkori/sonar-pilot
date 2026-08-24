@@ -6,15 +6,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { SegmentBadge } from "@/components/ui/Badge";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
-import { formatNumber } from "@/lib/utils";
+import { formatNumber, formatPct } from "@/lib/utils";
 import { computeBrandVelocities, computeProductAlerts, type PurchaseLine } from "@/lib/sonarscore/velocity";
 import { computeRfmsScores, assignSonarTiers, TIER_META, type SonarTier } from "@/lib/sonarscore/rfms";
 import { buildContractMatrix, QUADRANT_META, type MatrixQuadrant } from "@/lib/sonarscore/contractMatrix";
 import { predictNextOrders, forecastForPeriod } from "@/lib/sonarscore/prediction";
+import { runForecastBacktest, runBrandBacktest } from "@/lib/forecast-backtest";
+import type { BacktestPurchaseLine, BacktestResult, BrandBacktestReport } from "@/lib/forecast-backtest";
 import type { Account, AccountProductPurchase } from "@/types/database";
 import { TrendingUp, AlertTriangle, FlaskConical, Target } from "lucide-react";
 
-type AccountSlim = Pick<Account, "id" | "name" | "segment" | "city" | "price_list" | "objectif_boites" | "realise_boites">;
+type AccountSlim = Account;
 type PurchaseSlim = Pick<AccountProductPurchase, "account_id" | "brand" | "purchase_date" | "qty" | "value_eur">;
 
 type SortKey = "name" | "segment" | "score" | "tier" | "quadrant" | "avancement" | "retard" | "prochaine" | "q3";
@@ -26,6 +28,21 @@ const TIER_COLOR: Record<SonarTier, string> = {
   tier_4: "#94a3b8",
 };
 
+const MONTH_LABELS_FULL = [
+  "Janvier",
+  "Février",
+  "Mars",
+  "Avril",
+  "Mai",
+  "Juin",
+  "Juillet",
+  "Août",
+  "Septembre",
+  "Octobre",
+  "Novembre",
+  "Décembre",
+];
+
 // Q3 2026 — fenêtre de test explicite (à ajuster si le calendrier de
 // validation change).
 const Q3_START = "2026-07-01";
@@ -35,6 +52,8 @@ export function SonarScoreClient({ accounts, purchases }: { accounts: AccountSli
   const [search, setSearch] = useState("");
   const [tierFilter, setTierFilter] = useState<SonarTier | "all">("all");
   const [quadrantFilter, setQuadrantFilter] = useState<MatrixQuadrant | "all">("all");
+  const [backtestWindow, setBacktestWindow] = useState<1 | 2 | 3 | 6>(3);
+  const [backtestCategoryFilter, setBacktestCategoryFilter] = useState<"all" | "filler" | "dermo">("all");
 
   const purchaseLines: (PurchaseLine & { value_eur: number })[] = useMemo(
     () =>
@@ -72,6 +91,43 @@ export function SonarScoreClient({ accounts, purchases }: { accounts: AccountSli
   const predictions = useMemo(() => predictNextOrders(purchaseLines, brandVelocities), [purchaseLines, brandVelocities]);
   const q3Forecast = useMemo(() => forecastForPeriod(predictions, Q3_START, Q3_END), [predictions]);
   const q3ByAccount = useMemo(() => new Map(q3Forecast.map((f) => [f.accountId, f])), [q3Forecast]);
+
+  // ── Backtest : rejoue le générateur à "aujourd'hui − N mois" avec
+  // uniquement les données disponibles à l'époque, compare aux commandes
+  // réellement passées depuis (déjà en base) — sur la fenêtre des N derniers
+  // mois complets, pour que tous les mois testés soient bien dans le passé.
+  const backtestCutoff = useMemo(() => {
+    const now = new Date();
+    let year = now.getFullYear();
+    let month = now.getMonth() + 1 - backtestWindow;
+    while (month < 1) {
+      month += 12;
+      year -= 1;
+    }
+    return { year, month };
+  }, [backtestWindow]);
+
+  const backtestLines: BacktestPurchaseLine[] = useMemo(
+    () =>
+      purchaseLines.map((p) => ({
+        account_id: p.account_id,
+        brand: p.brand,
+        purchase_date: p.purchase_date,
+        qty: p.qty,
+        value_eur: p.value_eur,
+      })),
+    [purchaseLines]
+  );
+
+  const backtestResult: BacktestResult = useMemo(
+    () => runForecastBacktest(accounts, backtestLines, backtestCutoff.year, backtestCutoff.month, backtestWindow),
+    [accounts, backtestLines, backtestCutoff, backtestWindow]
+  );
+
+  const brandBacktestReport: BrandBacktestReport = useMemo(
+    () => runBrandBacktest(backtestLines, backtestCutoff.year, backtestCutoff.month, backtestWindow),
+    [backtestLines, backtestCutoff, backtestWindow]
+  );
 
   const alertsByAccount = useMemo(() => {
     const map = new Map<string, { retard: number; essaiUnique: number }>();
@@ -337,6 +393,158 @@ export function SonarScoreClient({ accounts, purchases }: { accounts: AccountSli
                 ))}
               </tbody>
             </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <CardTitle>Backtest — le signal produit améliore-t-il vraiment le générateur Pilotage ?</CardTitle>
+              <CardDescription>
+                Rejoue le générateur (lib/forecast.ts) à &quot;aujourd&apos;hui − N mois&quot; avec seulement les données
+                connues à l&apos;époque, et compare ses prévisions aux commandes réellement passées depuis — deux
+                variantes : avec et sans le signal produit (RHA4/RHA3...), sur les mêmes données par ailleurs.
+              </CardDescription>
+            </div>
+            <select
+              value={backtestWindow}
+              onChange={(e) => setBacktestWindow(Number(e.target.value) as 1 | 2 | 3 | 6)}
+              className="rounded-lg border border-border px-2 py-1.5 text-sm"
+            >
+              <option value={1}>Dernier mois</option>
+              <option value={2}>2 derniers mois</option>
+              <option value={3}>3 derniers mois</option>
+              <option value={6}>6 derniers mois</option>
+            </select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Fenêtre testée : {MONTH_LABELS_FULL[backtestResult.targetMonths[0].month - 1]} {backtestResult.targetMonths[0].year}
+            {" → "}
+            {MONTH_LABELS_FULL[backtestResult.targetMonths[backtestResult.targetMonths.length - 1].month - 1]}{" "}
+            {backtestResult.targetMonths[backtestResult.targetMonths.length - 1].year} · basé sur ce qui était connu
+            avant le {MONTH_LABELS_FULL[backtestResult.cutoff.month - 1]} {backtestResult.cutoff.year}
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {[backtestResult.withProductSignal, backtestResult.withoutProductSignal].map((v) => (
+              <div key={v.label} className="rounded-lg border border-border p-3">
+                <p className="mb-2 text-xs font-semibold text-foreground">{v.label}</p>
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <div className="flex items-center justify-between">
+                    <span>Précision (prévisions confirmées par une vraie commande)</span>
+                    <span className="font-medium text-foreground">
+                      {v.precision !== null ? formatPct(v.precision) : "—"} ({v.hits}/{v.predictedCount})
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Rappel (mois réellement commandés qui ont été anticipés)</span>
+                    <span className="font-medium text-foreground">
+                      {v.recall !== null ? formatPct(v.recall) : "—"} ({v.hits}/{v.actualOrderMonths})
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>F1 (équilibre précision/rappel)</span>
+                    <span className="font-medium text-foreground">{v.f1 !== null ? formatPct(v.f1) : "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Biais de montant (sur les mois correctement anticipés)</span>
+                    <span className={`font-medium ${v.caBiasPct !== null && v.caBiasPct > 0 ? "text-amber-600" : "text-foreground"}`}>
+                      {v.caBiasPct !== null ? `${v.caBiasPct >= 0 ? "+" : ""}${formatPct(v.caBiasPct)}` : "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[10px] text-muted-foreground">
+            Rappel et précision comptent un &quot;succès&quot; dès qu&apos;un compte prévu ce mois-ci a effectivement commandé
+            (n&apos;importe quelle marque) — le biais de montant compare ensuite le CA prévu au CA réel, uniquement sur ces
+            succès, pour isoler l&apos;erreur de montant de l&apos;erreur de timing. Fenêtre courte (1-2 mois) = échantillon
+            réduit, à interpréter avec prudence.
+          </p>
+
+          <div className="mt-5 border-t border-border pt-4">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-foreground">Détail par référence</p>
+              <div className="flex rounded-lg border border-border bg-surface p-0.5">
+                {([
+                  { key: "all", label: "Toutes" },
+                  { key: "filler", label: "Fillers" },
+                  { key: "dermo", label: "Dermo" },
+                ] as const).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => setBacktestCategoryFilter(key)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                      backtestCategoryFilter === key
+                        ? "bg-primary-100 text-primary-700"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="mb-3 text-[11px] text-muted-foreground">
+              Même principe, mais par marque : &quot;prévu&quot; = une prédiction compte × marque dont la date attendue tombe
+              dans la fenêtre ; &quot;succès&quot; = ce compte a bien racheté CETTE marque ce mois-là (pas une autre). Les 12
+              fillers connus restent toujours affichés, même à 0 (pas assez d&apos;historique — état normal). Les
+              références &quot;Dermo&quot; couvrent le reste : vraie gamme cosmétique, mais aussi d&apos;éventuelles lignes non
+              commerciales (bandeaux, cartes implant) si elles remontent comme &quot;marque&quot; à l&apos;import — un score
+              proche de zéro sur ces dernières est attendu, pas un défaut du modèle.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border text-left text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <th className="px-2 py-1.5 font-medium">Référence</th>
+                    <th className="px-2 py-1.5 font-medium">Catégorie</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Prévu</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Succès</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Précision</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Réel</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Rappel</th>
+                    <th className="px-2 py-1.5 text-right font-medium">F1</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {brandBacktestReport.brands
+                    .filter((b) => (backtestCategoryFilter === "all" ? true : b.category === backtestCategoryFilter))
+                    .map((b) => (
+                      <tr key={b.brand} className="border-b border-border/60 last:border-0">
+                        <td className="px-2 py-1.5 font-medium text-foreground">{b.brand}</td>
+                        <td className="px-2 py-1.5">
+                          <span
+                            className={`rounded-full px-1.5 py-0.5 text-[9px] font-medium ${
+                              b.category === "filler"
+                                ? "bg-primary-50 text-primary-700"
+                                : "bg-surface-muted text-muted-foreground"
+                            }`}
+                          >
+                            {b.category === "filler" ? "Filler" : "Dermo"}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-muted-foreground">{b.predictedCount}</td>
+                        <td className="px-2 py-1.5 text-right text-muted-foreground">{b.hits}</td>
+                        <td className="px-2 py-1.5 text-right font-medium text-foreground">
+                          {b.precision !== null ? formatPct(b.precision) : "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-muted-foreground">{b.actualOrderCount}</td>
+                        <td className="px-2 py-1.5 text-right font-medium text-foreground">
+                          {b.recall !== null ? formatPct(b.recall) : "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-right font-medium text-foreground">
+                          {b.f1 !== null ? formatPct(b.f1) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </CardContent>
       </Card>
