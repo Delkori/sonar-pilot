@@ -5,7 +5,8 @@ import type { RecurrenceBucket } from "./accounts";
 import { computeBrandVelocities } from "./sonarscore/velocity";
 import type { PurchaseLine } from "./sonarscore/velocity";
 import { predictNextOrders } from "./sonarscore/prediction";
-import type { AccountBrandPrediction } from "./sonarscore/prediction";
+import type { AccountBrandPrediction, PredictionConfidence } from "./sonarscore/prediction";
+import { predictSeasonalOrders } from "./sonarscore/seasonality";
 
 export interface SuggestedForecast {
   year: number;
@@ -170,29 +171,60 @@ function monthIndexFromDateStr(dateStr: string): number {
 }
 
 /**
- * Signal "réappro produit attendu" — repose sur `sonarscore/prediction.ts`
- * (déjà validé côté SonarScore) : pour chaque marque du compte, la prochaine
- * date de commande probable, au rythme PROPRE du compte sur cette marque
- * quand il y a assez d'historique, avec repli sur la vélocité de la marque
- * (population) pour un essai unique. Plus précis que la récurrence agrégée
- * toutes marques confondues ci-dessous (RHA4 tous les 2 mois et RHA3 tous
- * les 6 mois sont deux rythmes différents, noyés si on ne regarde que le
- * total du compte) — prioritaire quand disponible.
+ * Ordre de confiance quand plusieurs signaux produit se disputent le même
+ * mois : rythme propre au compte (mesuré directement) > vélocité de marque
+ * en population (repli sur un essai unique) > motif saisonnier (mois
+ * anniversaire, plus flou par nature — voir sonarscore/seasonality.ts).
  */
-function productMonthSignal(predictions: AccountBrandPrediction[], tmIdx: number): MonthSignal | null {
-  const matches = predictions.filter(
-    (p) => p.expectedNextOrderDate !== null && monthIndexFromDateStr(p.expectedNextOrderDate) === tmIdx
-  );
+function confidenceRank(c: PredictionConfidence): number {
+  if (c === "compte") return 0;
+  if (c === "marque") return 1;
+  return 2; // "saisonnier" (ou "insuffisante", qui n'a pas de date donc n'atteint jamais ce comparateur)
+}
+
+/**
+ * Signal "réappro produit attendu" — combine deux sources indépendantes,
+ * fusionnées en amont dans `brandPredictions` (voir predictPortfolioForecast) :
+ *  - `sonarscore/prediction.ts` (rythme par intervalle, propre au compte ou
+ *    replié sur la vélocité de marque) → correspondance EXACTE au mois,
+ *    la date est déjà calculée précisément à partir de l'historique réel.
+ *  - `sonarscore/seasonality.ts` (motif saisonnier : rachat autour du même
+ *    mois calendaire d'une année sur l'autre) → tolérance ±1 mois, car le
+ *    signal lui-même est intrinsèquement flou (un achat de mars peut se
+ *    reproduire en février, mars OU avril l'année suivante — voir le
+ *    docstring du module).
+ * `consumedBrands` empêche qu'un même signal (une seule commande attendue)
+ * ne génère plusieurs lignes sur des mois consécutifs à cause de la
+ * tolérance : une fois une marque utilisée pour un mois, elle est retirée
+ * de la compétition pour les mois suivants de ce même compte.
+ */
+function productMonthSignal(
+  predictions: AccountBrandPrediction[],
+  tmIdx: number,
+  consumedBrands: Set<string>
+): MonthSignal | null {
+  const matches = predictions.filter((p) => {
+    if (!p.expectedNextOrderDate || consumedBrands.has(p.brand)) return false;
+    const predIdx = monthIndexFromDateStr(p.expectedNextOrderDate);
+    const tolerance = p.confidence === "saisonnier" ? 1 : 0;
+    return Math.abs(predIdx - tmIdx) <= tolerance;
+  });
   if (matches.length === 0) return null;
 
-  // Priorité à la meilleure confiance dispo (rythme propre au compte avant
-  // repli population).
-  matches.sort((a, b) => (a.confidence === "compte" ? 0 : 1) - (b.confidence === "compte" ? 0 : 1));
+  matches.sort((a, b) => confidenceRank(a.confidence) - confidenceRank(b.confidence));
   const best = matches[0];
-  const weight = best.confidence === "compte" ? 1 : 0.6;
+  for (const m of matches) consumedBrands.add(m.brand);
+
+  const weight = best.confidence === "compte" ? 1 : best.confidence === "marque" ? 0.6 : 0.5;
+  const confidenceLabel =
+    best.confidence === "compte"
+      ? "rythme propre au compte"
+      : best.confidence === "marque"
+        ? "vélocité de la marque"
+        : "motif saisonnier";
   const reason =
     matches.length === 1
-      ? `${best.brand} attendu ce mois-ci (${best.confidence === "compte" ? "rythme propre au compte" : "vélocité de la marque"})`
+      ? `${best.brand} attendu ce mois-ci (${confidenceLabel})`
       : `${matches.map((m) => m.brand).join(", ")} attendus ce mois-ci`;
   return { weight, reason };
 }
@@ -202,8 +234,8 @@ function productMonthSignal(predictions: AccountBrandPrediction[], tmIdx: number
  * poids — selon des critères de récurrence réels plutôt qu'un lissage
  * générique :
  *  0. Une marque précise du compte a une date de réappro attendue ce
- *     mois-ci (`productMonthSignal`, ci-dessus) → signal le plus précis
- *     disponible, prioritaire sur tout le reste.
+ *     mois-ci (`productMonthSignal`, ci-dessus — intervalle ou saisonnier)
+ *     → signal le plus précis disponible, prioritaire sur tout le reste.
  *  1. Sinon, le mois cible tombe dans le rythme de commande habituel du
  *     compte toutes marques confondues (mensuel/bimestriel/trimestriel),
  *     avec un retard modéré (moins de 2 cycles) → poids plein. Au-delà, la
@@ -214,7 +246,9 @@ function productMonthSignal(predictions: AccountBrandPrediction[], tmIdx: number
  *     habituel.
  *  2. Le compte n'a pas commandé le mois précédent cette année, mais
  *     commandait déjà ce même mois calendaire l'an dernier → relance
- *     saisonnière, poids modéré (retard probable, pas un vrai silence).
+ *     saisonnière (agrégée, tous produits confondus — repli quand le signal
+ *     saisonnier par marque ci-dessus n'a pas assez d'historique), poids
+ *     modéré.
  *  3. Silence prolongé (≥ 8 semaines) sur un compte déjà actif (pas un pur
  *     prospect) → relance possible mais poids modéré, pour ne pas sur-prédire.
  *  4. Prospect sans historique réel → poids volontairement léger.
@@ -225,13 +259,14 @@ function evaluateMonthSignal(
   account: Account,
   orderedMonths: number[],
   tmIdx: number,
-  brandPredictions: AccountBrandPrediction[]
+  brandPredictions: AccountBrandPrediction[],
+  consumedBrands: Set<string>
 ): MonthSignal | null {
   // Une commande réelle existe déjà ce mois-ci : le réalisé suffit, inutile
   // de la doubler d'une prévision.
   if (orderedMonths.includes(tmIdx)) return null;
 
-  const productSignal = productMonthSignal(brandPredictions, tmIdx);
+  const productSignal = productMonthSignal(brandPredictions, tmIdx, consumedBrands);
   if (productSignal) return productSignal;
 
   const lastOrderIdx = orderedMonths.length > 0 ? orderedMonths[orderedMonths.length - 1] : null;
@@ -456,6 +491,10 @@ export function predictMonthlyForecast(
   const sortedTargets = [...targetMonths].sort(
     (a, b) => monthIndex(a.year, a.month) - monthIndex(b.year, b.month)
   );
+  // Un même signal produit (intervalle ou saisonnier) ne doit générer qu'une
+  // seule ligne, même si sa tolérance (±1 mois pour le saisonnier) chevauche
+  // plusieurs mois cibles consécutifs — voir productMonthSignal.
+  const consumedBrands = new Set<string>();
 
   const results: PredictedForecast[] = [];
   for (const tm of sortedTargets) {
@@ -471,7 +510,7 @@ export function predictMonthlyForecast(
 
     if (lastIdx !== null && tmIdx - lastIdx < minGapMonths) continue; // stock pas encore écoulé
 
-    const signal = evaluateMonthSignal(account, orderedMonths, tmIdx, brandPredictions);
+    const signal = evaluateMonthSignal(account, orderedMonths, tmIdx, brandPredictions, consumedBrands);
     if (!signal) continue;
 
     const boites = Math.min(Math.round(typicalOrder * signal.weight), restantLeft);
@@ -519,13 +558,23 @@ const TOP_UP_MIN_BOITES = 1;
 // un peu plus tôt pour combler l'objectif, sans le faire commander deux fois
 // le même mois.
 const TOP_UP_GAP_DIVISOR = 2;
+// Aucun compte ne devrait représenter une part disproportionnée de
+// l'objectif d'un seul mois, même s'il a largement assez de potentiel pour
+// ça — un secteur ne repose jamais sur un seul client. Plafond appliqué au
+// total planifié pour ce compte ce mois-ci (base + top-up cumulés), pas
+// seulement à la contribution de cette passe.
+const TOP_UP_MAX_SHARE_PER_ACCOUNT = 0.25;
 
 /**
  * Complète en place (`out`) le prévisionnel déjà généré pour que le total par
  * mois se rapproche de l'objectif secteur, en répartissant l'écart sur les
- * comptes actifs qui ont encore du potentiel non consommé — priorité aux
- * comptes ayant la plus grande marge restante, pour combler l'écart avec le
- * moins de comptes forcés possible plutôt que de pousser chaque petit compte.
+ * comptes actifs **déjà éprouvés** (au moins un achat réel connu) qui ont
+ * encore du potentiel non consommé — priorité à ceux déjà retenus par la
+ * génération de base ce mois-ci (renforcer un signal déjà jugé plausible),
+ * puis aux comptes ayant la plus grande marge restante. Les prospects sans
+ * aucun historique d'achat sont exclus du comblement : combler un objectif
+ * avec une commande jamais observée chez ce compte, c'est le genre de ligne
+ * qu'un commercial ne prendra jamais au sérieux.
  */
 function applySectorObjectiveTopUp(
   out: PredictedForecast[],
@@ -539,12 +588,16 @@ function applySectorObjectiveTopUp(
   if (sectorObjectives.length === 0) return;
 
   const monthKey = (y: number, m: number) => `${y}-${m}`;
+  const accountMonthKey = (accId: string, y: number, m: number) => `${accId}-${y}-${m}`;
   const plannedCaByMonth = new Map<string, number>();
+  const plannedCaByAccountMonth = new Map<string, number>();
   const plannedBoitesByAccountTotal = new Map<string, number>();
   const lastPlannedIdxByAccount = new Map<string, number>();
 
   function addPlanned(accountId: string, year: number, month: number, boites: number, ca: number) {
     plannedCaByMonth.set(monthKey(year, month), (plannedCaByMonth.get(monthKey(year, month)) ?? 0) + ca);
+    const amKey = accountMonthKey(accountId, year, month);
+    plannedCaByAccountMonth.set(amKey, (plannedCaByAccountMonth.get(amKey) ?? 0) + ca);
     plannedBoitesByAccountTotal.set(accountId, (plannedBoitesByAccountTotal.get(accountId) ?? 0) + boites);
   }
   function noteLastIdx(accountId: string, idx: number) {
@@ -581,10 +634,12 @@ function applySectorObjectiveTopUp(
     if (gapCa <= 0) continue;
 
     const tmIdx = monthIndex(tm.year, tm.month);
+    const maxCaPerAccountThisMonth = objectifCa * TOP_UP_MAX_SHARE_PER_ACCOUNT;
 
     const candidates = accounts
       .filter((a) => a.status !== "lost")
       .map((account) => {
+        const orderedForAccount = orderedMonthIndices(salesByAccount.get(account.id) ?? []);
         const caParBoite =
           account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
             ? account.ca_2026_ytd / account.realise_boites
@@ -595,16 +650,29 @@ function applySectorObjectiveTopUp(
         // marché, une fois déduits le réalisé et tout ce qui est déjà prévu
         // (base + manuel + top-up précédent) sur l'horizon.
         const headroomTotal = Math.max(potentiel - (account.realise_boites ?? 0) - alreadyPlanned, 0);
-        return { account, caParBoite, headroomTotal };
+        const hasBaselineThisMonth = out.some(
+          (f) => f.account_id === account.id && f.year === tm.year && f.month === tm.month
+        );
+        return { account, caParBoite, headroomTotal, orderedForAccount, hasBaselineThisMonth };
       })
-      .filter((c) => c.headroomTotal > 0 && c.caParBoite > 0)
-      .sort((a, b) => b.headroomTotal - a.headroomTotal);
+      // Un prospect sans aucun historique d'achat réel n'a pas sa place dans
+      // le comblement : combler un écart d'objectif avec une commande jamais
+      // observée chez ce compte, c'est exactement le genre de ligne "que je
+      // ne risque pas de prendre" — le top-up ne fait que solliciter DAVANTAGE
+      // des comptes déjà éprouvés, jamais en inventer sur des comptes vierges.
+      .filter((c) => c.headroomTotal > 0 && c.caParBoite > 0 && c.orderedForAccount.length > 0)
+      .sort((a, b) => {
+        // Priorité 1 : renforcer un compte déjà retenu par la génération de
+        // base ce mois-ci (déjà jugé plausible) plutôt que d'ouvrir une
+        // nouvelle ligne sur un compte que le modèle n'avait pas sélectionné.
+        if (a.hasBaselineThisMonth !== b.hasBaselineThisMonth) return a.hasBaselineThisMonth ? -1 : 1;
+        return b.headroomTotal - a.headroomTotal;
+      });
 
     for (const cand of candidates) {
       if (gapCa <= 0) break;
-      const { account, caParBoite, headroomTotal } = cand;
+      const { account, caParBoite, headroomTotal, orderedForAccount: ordered } = cand;
 
-      const ordered = orderedMonthIndices(salesByAccount.get(account.id) ?? []);
       const bucket = recurrenceBucket(ordered);
       const normalGap = RECURRENCE_GAP_MONTHS[bucket] ?? GAP_MOIS_PAR_DEFAUT;
       const relaxedGap = Math.max(1, Math.floor(normalGap / TOP_UP_GAP_DIVISOR));
@@ -613,7 +681,15 @@ function applySectorObjectiveTopUp(
       // de temps pour écouler ce qui vient de lui être prévu.
       if (lastIdx !== undefined && tmIdx - lastIdx < relaxedGap) continue;
 
-      const boitesForGap = Math.ceil(gapCa / caParBoite);
+      // Plafond de concentration : ce que ce compte a déjà (base + top-up
+      // précédent) ce mois-ci ne doit pas dépasser sa part maximale de
+      // l'objectif — sinon on passe au candidat suivant plutôt que de tout
+      // faire reposer sur un seul client.
+      const alreadyThisAccountMonth = plannedCaByAccountMonth.get(accountMonthKey(account.id, tm.year, tm.month)) ?? 0;
+      const remainingCapForAccount = Math.max(maxCaPerAccountThisMonth - alreadyThisAccountMonth, 0);
+      if (remainingCapForAccount <= 0) continue;
+
+      const boitesForGap = Math.ceil(Math.min(gapCa, remainingCapForAccount) / caParBoite);
       const boites = Math.min(boitesForGap, headroomTotal);
       if (boites < TOP_UP_MIN_BOITES) continue;
 
@@ -686,10 +762,23 @@ export function predictPortfolioForecast(
   // Vélocité par marque calculée sur tout le portefeuille (repli "population"
   // pour les essais uniques), puis prédiction compte × marque — voir
   // sonarscore/velocity.ts et sonarscore/prediction.ts, réutilisés tels
-  // quels.
+  // quels. Fusionné avec le signal saisonnier (sonarscore/seasonality.ts) :
+  // deux sources indépendantes, départagées par confiance dans
+  // productMonthSignal si elles se chevauchent sur le même mois.
+  //
+  // `asOfMonthIndex` (le mois juste avant le premier mois cible) sert de
+  // point de référence pour "chercher la prochaine occurrence dans le
+  // futur" côté saisonnier — dérivé des mois cibles eux-mêmes plutôt que de
+  // la date du jour réelle, pour rester cohérent que la fonction tourne en
+  // production ou dans un backtest simulant une date passée.
   const brandVelocities = computeBrandVelocities(purchaseLines);
+  const asOfMonthIndex = Math.min(...targetMonths.map((m) => monthIndex(m.year, m.month))) - 1;
   const brandPredictionsByAccount = new Map<string, AccountBrandPrediction[]>();
-  for (const p of predictNextOrders(purchaseLines, brandVelocities)) {
+  const combinedPredictions = [
+    ...predictNextOrders(purchaseLines, brandVelocities),
+    ...predictSeasonalOrders(purchaseLines, asOfMonthIndex),
+  ];
+  for (const p of combinedPredictions) {
     const arr = brandPredictionsByAccount.get(p.accountId);
     if (arr) arr.push(p);
     else brandPredictionsByAccount.set(p.accountId, [p]);
