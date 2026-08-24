@@ -144,6 +144,35 @@ function runVariant(
 }
 
 /**
+ * Reconstruit `realise_boites` et `ca_2026_ytd` tels qu'ils étaient à la
+ * date de coupure, à partir des lignes d'achat déjà tronquées (`knownLines`)
+ * — plutôt que d'utiliser l'état actuel du compte en base, qui reflète tout
+ * l'historique jusqu'à aujourd'hui, y compris les mois postérieurs au
+ * cutoff qu'on est censé ignorer.
+ *
+ * Sans ça, `predictMonthlyForecast` calcule `restantLeft` (objectif − déjà
+ * réalisé) avec le réalisé D'AUJOURD'HUI : pour un compte qui a déjà atteint
+ * ou dépassé son objectif annuel à date, `restantLeft` tombe à 0 et la
+ * fonction s'arrête avant même d'évaluer un signal — quelle que soit la
+ * variante testée. Résultat : des comptes exclus du backtest pour une
+ * mauvaise raison (fuite d'information du futur), pas parce que le modèle
+ * a jugé qu'ils n'avaient rien à prévoir.
+ */
+function asOfCutoffAccounts(accounts: Account[], knownLines: BacktestPurchaseLine[]): Account[] {
+  const boitesByAccount = new Map<string, number>();
+  const caByAccount = new Map<string, number>();
+  for (const line of knownLines) {
+    boitesByAccount.set(line.account_id, (boitesByAccount.get(line.account_id) ?? 0) + line.qty);
+    caByAccount.set(line.account_id, (caByAccount.get(line.account_id) ?? 0) + line.value_eur);
+  }
+  return accounts.map((a) => ({
+    ...a,
+    realise_boites: boitesByAccount.get(a.id) ?? 0,
+    ca_2026_ytd: caByAccount.get(a.id) ?? 0,
+  }));
+}
+
+/**
  * Rejoue le générateur à une date passée (`cutoffYear`/`cutoffMonth` = premier
  * mois "inconnu" à l'époque) sur `horizonMonths` mois, et compare aux
  * commandes réellement passées ensuite. `allPurchaseLines` doit couvrir tout
@@ -173,10 +202,11 @@ export function runForecastBacktest(
   for (const [key, ca] of actualByAccountMonth) if (ca <= 0) actualByAccountMonth.delete(key);
 
   const knownSales = aggregateToMonthlySales(knownLines);
+  const backtestAccounts = asOfCutoffAccounts(accounts, knownLines);
 
   const withProductSignal = runVariant(
     "Avec signal produit",
-    accounts,
+    backtestAccounts,
     knownSales,
     knownLines,
     targetMonths,
@@ -184,7 +214,7 @@ export function runForecastBacktest(
   );
   const withoutProductSignal = runVariant(
     "Sans signal produit (comportement précédent)",
-    accounts,
+    backtestAccounts,
     knownSales,
     [],
     targetMonths,
