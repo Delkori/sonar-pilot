@@ -42,7 +42,7 @@ const YEAR_FIELDS: Record<number, keyof Account> = {
   2026: "ca_2026_ytd",
 };
 const YEARS = [2024, 2025, 2026];
-const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"];
+const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Août", "Sep", "Oct", "Nov", "Déc"];
 
 interface MonthlySale {
   account_id: string;

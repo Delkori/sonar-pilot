@@ -10,7 +10,7 @@ import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import type { Account, AccountForecast, ForecastKind } from "@/types/database";
 import { Plus, Trash2, Loader2, Sparkles, CalendarRange, CalendarPlus, DownloadCloud } from "lucide-react";
 
-const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"];
+const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Août", "Sep", "Oct", "Nov", "Déc"];
 
 type Period = "mois" | "trimestre" | "semestre" | "annee";
 type SortKey = "period" | "boites" | "ca";

@@ -1,7 +1,11 @@
-import type { Account } from "@/types/database";
+import type { Account, SectorObjective } from "@/types/database";
 import { prixBoiteHT, computeTargetingScore } from "./scoring";
 import { recurrenceBucket, isProspect } from "./accounts";
 import type { RecurrenceBucket } from "./accounts";
+import { computeBrandVelocities } from "./sonarscore/velocity";
+import type { PurchaseLine } from "./sonarscore/velocity";
+import { predictNextOrders } from "./sonarscore/prediction";
+import type { AccountBrandPrediction } from "./sonarscore/prediction";
 
 export interface SuggestedForecast {
   year: number;
@@ -160,17 +164,54 @@ function orderedMonthIndices(sales: MonthlySaleRow[]): number[] {
     .sort((a, b) => a - b);
 }
 
+function monthIndexFromDateStr(dateStr: string): number {
+  const d = new Date(dateStr);
+  return monthIndex(d.getFullYear(), d.getMonth() + 1);
+}
+
+/**
+ * Signal "réappro produit attendu" — repose sur `sonarscore/prediction.ts`
+ * (déjà validé côté SonarScore) : pour chaque marque du compte, la prochaine
+ * date de commande probable, au rythme PROPRE du compte sur cette marque
+ * quand il y a assez d'historique, avec repli sur la vélocité de la marque
+ * (population) pour un essai unique. Plus précis que la récurrence agrégée
+ * toutes marques confondues ci-dessous (RHA4 tous les 2 mois et RHA3 tous
+ * les 6 mois sont deux rythmes différents, noyés si on ne regarde que le
+ * total du compte) — prioritaire quand disponible.
+ */
+function productMonthSignal(predictions: AccountBrandPrediction[], tmIdx: number): MonthSignal | null {
+  const matches = predictions.filter(
+    (p) => p.expectedNextOrderDate !== null && monthIndexFromDateStr(p.expectedNextOrderDate) === tmIdx
+  );
+  if (matches.length === 0) return null;
+
+  // Priorité à la meilleure confiance dispo (rythme propre au compte avant
+  // repli population).
+  matches.sort((a, b) => (a.confidence === "compte" ? 0 : 1) - (b.confidence === "compte" ? 0 : 1));
+  const best = matches[0];
+  const weight = best.confidence === "compte" ? 1 : 0.6;
+  const reason =
+    matches.length === 1
+      ? `${best.brand} attendu ce mois-ci (${best.confidence === "compte" ? "rythme propre au compte" : "vélocité de la marque"})`
+      : `${matches.map((m) => m.brand).join(", ")} attendus ce mois-ci`;
+  return { weight, reason };
+}
+
 /**
  * Décide si un compte mérite une prévision sur un mois donné, et avec quel
  * poids — selon des critères de récurrence réels plutôt qu'un lissage
  * générique :
- *  1. Le mois cible tombe dans le rythme de commande habituel du compte
- *     (mensuel/bimestriel/trimestriel), avec un retard modéré (moins de 2
- *     cycles) → poids plein. Au-delà, la confiance décroît avec le nombre de
- *     cycles manqués : un compte en retard de 25 mois sur un rythme
- *     trimestriel n'est plus "dû ce mois-ci" avec la même certitude qu'un
- *     compte en retard de 3 mois — c'est un compte qu'il faut re-conquérir,
- *     pas relancer sur son rythme habituel.
+ *  0. Une marque précise du compte a une date de réappro attendue ce
+ *     mois-ci (`productMonthSignal`, ci-dessus) → signal le plus précis
+ *     disponible, prioritaire sur tout le reste.
+ *  1. Sinon, le mois cible tombe dans le rythme de commande habituel du
+ *     compte toutes marques confondues (mensuel/bimestriel/trimestriel),
+ *     avec un retard modéré (moins de 2 cycles) → poids plein. Au-delà, la
+ *     confiance décroît avec le nombre de cycles manqués : un compte en
+ *     retard de 25 mois sur un rythme trimestriel n'est plus "dû ce
+ *     mois-ci" avec la même certitude qu'un compte en retard de 3 mois —
+ *     c'est un compte qu'il faut re-conquérir, pas relancer sur son rythme
+ *     habituel.
  *  2. Le compte n'a pas commandé le mois précédent cette année, mais
  *     commandait déjà ce même mois calendaire l'an dernier → relance
  *     saisonnière, poids modéré (retard probable, pas un vrai silence).
@@ -180,10 +221,18 @@ function orderedMonthIndices(sales: MonthlySaleRow[]): number[] {
  * Sinon, aucune prévision n'est générée pour ce mois : mieux vaut un tableau
  * plus court mais fiable qu'une prévision sur chaque médecin par défaut.
  */
-function evaluateMonthSignal(account: Account, orderedMonths: number[], tmIdx: number): MonthSignal | null {
+function evaluateMonthSignal(
+  account: Account,
+  orderedMonths: number[],
+  tmIdx: number,
+  brandPredictions: AccountBrandPrediction[]
+): MonthSignal | null {
   // Une commande réelle existe déjà ce mois-ci : le réalisé suffit, inutile
   // de la doubler d'une prévision.
   if (orderedMonths.includes(tmIdx)) return null;
+
+  const productSignal = productMonthSignal(brandPredictions, tmIdx);
+  if (productSignal) return productSignal;
 
   const lastOrderIdx = orderedMonths.length > 0 ? orderedMonths[orderedMonths.length - 1] : null;
   const bucket = recurrenceBucket(orderedMonths);
@@ -231,6 +280,7 @@ export interface ExistingForecastEntry {
   year: number;
   month: number;
   boites_prevues: number | null;
+  ca_prevu: number | null;
   source: "auto" | "manuel";
 }
 
@@ -347,7 +397,8 @@ export function predictMonthlyForecast(
   hcps: HcpLite[],
   sales: MonthlySaleRow[],
   targetMonths: { year: number; month: number }[],
-  existingForAccount: ExistingForecastEntry[] = []
+  existingForAccount: ExistingForecastEntry[] = [],
+  brandPredictions: AccountBrandPrediction[] = []
 ): PredictedForecast[] {
   const orderedMonths = orderedMonthIndices(sales);
 
@@ -420,7 +471,7 @@ export function predictMonthlyForecast(
 
     if (lastIdx !== null && tmIdx - lastIdx < minGapMonths) continue; // stock pas encore écoulé
 
-    const signal = evaluateMonthSignal(account, orderedMonths, tmIdx);
+    const signal = evaluateMonthSignal(account, orderedMonths, tmIdx, brandPredictions);
     if (!signal) continue;
 
     const boites = Math.min(Math.round(typicalOrder * signal.weight), restantLeft);
@@ -448,19 +499,176 @@ export function predictMonthlyForecast(
   return results;
 }
 
+// ── Comblement de l'écart vs objectif secteur ────────────────────────────
+// La génération de base (`predictMonthlyForecast`) est volontairement
+// prudente compte par compte, et ignore l'objectif du secteur (`objectif_ca`
+// par mois, saisi dans Paramètres) : rien ne garantit que la somme des
+// prévisions atteigne ce total. Cette passe complémentaire ne remplace pas le
+// modèle de base, elle intervient seulement si un écart subsiste : elle
+// sollicite davantage les comptes qui ont encore de la marge, en assouplissant
+// les seuils de prudence (montant minimum rentable, espacement entre
+// commandes) — mais jamais le seul plafond qui reste dur : le potentiel réel
+// du compte (`potentiel_boites`). On ne comble jamais un objectif secteur en
+// inventant de la capacité de marché qui n'existe pas ; si la somme des
+// potentiels du portefeuille est elle-même inférieure à l'objectif, l'écart
+// restant est un signal réel (portefeuille trop petit / objectif trop
+// ambitieux), pas un bug du générateur.
+const TOP_UP_MIN_BOITES = 1;
+// Espacement minimum réduit de moitié (arrondi au plancher, jamais < 1 mois)
+// par rapport à la génération de base : on accepte de re-solliciter un compte
+// un peu plus tôt pour combler l'objectif, sans le faire commander deux fois
+// le même mois.
+const TOP_UP_GAP_DIVISOR = 2;
+
+/**
+ * Complète en place (`out`) le prévisionnel déjà généré pour que le total par
+ * mois se rapproche de l'objectif secteur, en répartissant l'écart sur les
+ * comptes actifs qui ont encore du potentiel non consommé — priorité aux
+ * comptes ayant la plus grande marge restante, pour combler l'écart avec le
+ * moins de comptes forcés possible plutôt que de pousser chaque petit compte.
+ */
+function applySectorObjectiveTopUp(
+  out: PredictedForecast[],
+  accounts: Account[],
+  hcpsByAccount: Map<string, HcpLite[]>,
+  salesByAccount: Map<string, MonthlySaleRow[]>,
+  existing: ExistingForecastEntry[],
+  sectorObjectives: SectorObjective[],
+  targetMonths: { year: number; month: number }[]
+): void {
+  if (sectorObjectives.length === 0) return;
+
+  const monthKey = (y: number, m: number) => `${y}-${m}`;
+  const plannedCaByMonth = new Map<string, number>();
+  const plannedBoitesByAccountTotal = new Map<string, number>();
+  const lastPlannedIdxByAccount = new Map<string, number>();
+
+  function addPlanned(accountId: string, year: number, month: number, boites: number, ca: number) {
+    plannedCaByMonth.set(monthKey(year, month), (plannedCaByMonth.get(monthKey(year, month)) ?? 0) + ca);
+    plannedBoitesByAccountTotal.set(accountId, (plannedBoitesByAccountTotal.get(accountId) ?? 0) + boites);
+  }
+  function noteLastIdx(accountId: string, idx: number) {
+    const cur = lastPlannedIdxByAccount.get(accountId);
+    if (cur === undefined || idx > cur) lastPlannedIdxByAccount.set(accountId, idx);
+  }
+
+  // Point de départ : ce qui sera réellement affiché — la génération de base
+  // qui vient d'être calculée, plus les lignes manuelles existantes (jamais
+  // recalculées). Les anciennes lignes 'auto' d'une génération précédente
+  // sont ignorées : elles seront remplacées par `out` au moment de l'upsert.
+  for (const f of out) {
+    addPlanned(f.account_id, f.year, f.month, f.boites_prevues, f.ca_prevu);
+    noteLastIdx(f.account_id, monthIndex(f.year, f.month));
+  }
+  for (const e of existing) {
+    if (e.source !== "manuel") continue;
+    addPlanned(e.account_id, e.year, e.month, e.boites_prevues ?? 0, e.ca_prevu ?? 0);
+    noteLastIdx(e.account_id, monthIndex(e.year, e.month));
+  }
+  for (const [accId, salesArr] of salesByAccount) {
+    const ordered = orderedMonthIndices(salesArr);
+    if (ordered.length > 0) noteLastIdx(accId, ordered[ordered.length - 1]);
+  }
+
+  const sortedTargets = [...targetMonths].sort(
+    (a, b) => monthIndex(a.year, a.month) - monthIndex(b.year, b.month)
+  );
+
+  for (const tm of sortedTargets) {
+    const objectifCa = sectorObjectives.find((o) => o.year === tm.year && o.month === tm.month)?.objectif_ca ?? 0;
+    if (objectifCa <= 0) continue;
+    let gapCa = objectifCa - (plannedCaByMonth.get(monthKey(tm.year, tm.month)) ?? 0);
+    if (gapCa <= 0) continue;
+
+    const tmIdx = monthIndex(tm.year, tm.month);
+
+    const candidates = accounts
+      .filter((a) => a.status !== "lost")
+      .map((account) => {
+        const caParBoite =
+          account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
+            ? account.ca_2026_ytd / account.realise_boites
+            : prixBoiteHT(account.price_list);
+        const potentiel = account.potentiel_boites ?? 0;
+        const alreadyPlanned = plannedBoitesByAccountTotal.get(account.id) ?? 0;
+        // Le seul plafond dur : ce qu'il reste réellement de potentiel de
+        // marché, une fois déduits le réalisé et tout ce qui est déjà prévu
+        // (base + manuel + top-up précédent) sur l'horizon.
+        const headroomTotal = Math.max(potentiel - (account.realise_boites ?? 0) - alreadyPlanned, 0);
+        return { account, caParBoite, headroomTotal };
+      })
+      .filter((c) => c.headroomTotal > 0 && c.caParBoite > 0)
+      .sort((a, b) => b.headroomTotal - a.headroomTotal);
+
+    for (const cand of candidates) {
+      if (gapCa <= 0) break;
+      const { account, caParBoite, headroomTotal } = cand;
+
+      const ordered = orderedMonthIndices(salesByAccount.get(account.id) ?? []);
+      const bucket = recurrenceBucket(ordered);
+      const normalGap = RECURRENCE_GAP_MONTHS[bucket] ?? GAP_MOIS_PAR_DEFAUT;
+      const relaxedGap = Math.max(1, Math.floor(normalGap / TOP_UP_GAP_DIVISOR));
+      const lastIdx = lastPlannedIdxByAccount.get(account.id);
+      // Assoupli, pas supprimé : un compte a quand même besoin d'un minimum
+      // de temps pour écouler ce qui vient de lui être prévu.
+      if (lastIdx !== undefined && tmIdx - lastIdx < relaxedGap) continue;
+
+      const boitesForGap = Math.ceil(gapCa / caParBoite);
+      const boites = Math.min(boitesForGap, headroomTotal);
+      if (boites < TOP_UP_MIN_BOITES) continue;
+
+      const ca = Math.round(boites * caParBoite);
+
+      // Un compte déjà prévu ce mois-ci par la génération de base reçoit un
+      // complément sur la même ligne plutôt qu'une seconde ligne concurrente
+      // (l'upsert (account_id, year, month, kind) ne pourrait garder que
+      // l'une des deux).
+      const existingLine = out.find(
+        (f) => f.account_id === account.id && f.year === tm.year && f.month === tm.month
+      );
+      if (existingLine) {
+        existingLine.boites_prevues += boites;
+        existingLine.ca_prevu += ca;
+        existingLine.note = `${existingLine.note} · Complément pour l'objectif secteur`;
+      } else {
+        out.push({
+          account_id: account.id,
+          year: tm.year,
+          month: tm.month,
+          boites_prevues: boites,
+          ca_prevu: ca,
+          note: "Complément auto — pour atteindre l'objectif secteur",
+          hcp: allocateToHcps(hcpsByAccount.get(account.id) ?? [], boites, ca),
+        });
+      }
+
+      addPlanned(account.id, tm.year, tm.month, boites, ca);
+      noteLastIdx(account.id, tmIdx);
+      gapCa -= ca;
+    }
+  }
+}
+
 /**
  * Applique le modèle prédictif à tout le portefeuille. Chaque mois cible est
  * recalculé pour les comptes non "lost" — y compris les mois déjà remplis
  * par une précédente exécution du générateur (`source: 'auto'`), qui sont
  * ainsi actualisés avec les données les plus fraîches. Les mois saisis à la
  * main (`source: 'manuel'`) ne sont jamais recalculés ni écrasés.
+ *
+ * `purchaseLines` (optionnel, `account_product_purchases`) alimente le signal
+ * produit de `evaluateMonthSignal` — sans cette donnée, le modèle se rabat
+ * intégralement sur la récurrence agrégée toutes marques confondues, comme
+ * avant.
  */
 export function predictPortfolioForecast(
   accounts: Account[],
   hcpsByAccount: Map<string, HcpLite[]>,
   sales: MonthlySaleRow[],
   existing: ExistingForecastEntry[],
-  targetMonths: { year: number; month: number }[]
+  targetMonths: { year: number; month: number }[],
+  sectorObjectives: SectorObjective[] = [],
+  purchaseLines: PurchaseLine[] = []
 ): PredictedForecast[] {
   const salesByAccount = new Map<string, MonthlySaleRow[]>();
   for (const s of sales) {
@@ -475,6 +683,18 @@ export function predictPortfolioForecast(
     else existingByAccount.set(e.account_id, [e]);
   }
 
+  // Vélocité par marque calculée sur tout le portefeuille (repli "population"
+  // pour les essais uniques), puis prédiction compte × marque — voir
+  // sonarscore/velocity.ts et sonarscore/prediction.ts, réutilisés tels
+  // quels.
+  const brandVelocities = computeBrandVelocities(purchaseLines);
+  const brandPredictionsByAccount = new Map<string, AccountBrandPrediction[]>();
+  for (const p of predictNextOrders(purchaseLines, brandVelocities)) {
+    const arr = brandPredictionsByAccount.get(p.accountId);
+    if (arr) arr.push(p);
+    else brandPredictionsByAccount.set(p.accountId, [p]);
+  }
+
   const out: PredictedForecast[] = [];
   for (const account of accounts) {
     if (account.status === "lost") continue;
@@ -483,10 +703,16 @@ export function predictPortfolioForecast(
       hcpsByAccount.get(account.id) ?? [],
       salesByAccount.get(account.id) ?? [],
       targetMonths,
-      existingByAccount.get(account.id) ?? []
+      existingByAccount.get(account.id) ?? [],
+      brandPredictionsByAccount.get(account.id) ?? []
     );
     out.push(...preds);
   }
+
+  // Écart résiduel vs objectif secteur : comble ce que la génération de base,
+  // volontairement prudente, laisse de côté — voir applySectorObjectiveTopUp.
+  applySectorObjectiveTopUp(out, accounts, hcpsByAccount, salesByAccount, existing, sectorObjectives, targetMonths);
+
   return out;
 }
 

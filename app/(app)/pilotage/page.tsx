@@ -1,7 +1,7 @@
 import { TopBar } from "@/components/layout/TopBar";
 import { PilotageBoard } from "@/components/pilotage/PilotageBoard";
 import { createClient } from "@/lib/supabase/server";
-import type { Account, AccountForecast, Hcp, SectorObjective } from "@/types/database";
+import type { Account, AccountForecast, AccountProductPurchase, Hcp, SectorObjective } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +36,14 @@ export default async function PilotagePage() {
   const { data: objRaw } = await supabase.from("sector_objectives").select("*");
   const sectorObjectives = (objRaw ?? []) as SectorObjective[];
 
+  const { data: purchasesRaw } = await supabase
+    .from("account_product_purchases")
+    .select("account_id, brand, purchase_date, qty");
+  const purchaseLines = (purchasesRaw ?? []) as Pick<
+    AccountProductPurchase,
+    "account_id" | "brand" | "purchase_date" | "qty"
+  >[];
+
   return (
     <div>
       <TopBar
@@ -50,6 +58,7 @@ export default async function PilotagePage() {
           hcps={hcps}
           products={products}
           sectorObjectives={sectorObjectives}
+          purchaseLines={purchaseLines}
         />
       </main>
     </div>

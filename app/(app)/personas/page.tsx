@@ -3,6 +3,7 @@ import { PersonaClient } from "@/components/personas/PersonaClient";
 import type { PersonaAccountRow } from "@/components/personas/PersonaClient";
 import { createClient } from "@/lib/supabase/server";
 import { computePersonaModels, personaRecommendations, PERSONAS, type Persona } from "@/lib/persona";
+import { isFillerBrand } from "@/lib/brands";
 import type { Account } from "@/types/database";
 
 export const dynamic = "force-dynamic";
@@ -20,12 +21,17 @@ export default async function PersonasPage() {
   const { data: productsRaw } = await supabase
     .from("account_products")
     .select("account_id, brand, qty_ordered_cy, sales_value_cy");
-  const products = (productsRaw ?? []) as {
+  // Filtré aux seules références filler : les imports "Croissance par
+  // marque" contiennent aussi des lignes non commerciales (bandeaux, cartes
+  // implant...) qui remontent comme "marque" et fausseraient les modèles
+  // persona (pénétration/quantité médiane calculées sur du bruit) si on ne
+  // les excluait pas ici.
+  const products = ((productsRaw ?? []) as {
     account_id: string;
     brand: string;
     qty_ordered_cy: number | null;
     sales_value_cy: number | null;
-  }[];
+  }[]).filter((p) => isFillerBrand(p.brand));
 
   // Persona STOCKÉ sur le compte (synchronisé depuis Nexora dans Paramètres).
   const personaByAccount = new Map<string, Persona>();

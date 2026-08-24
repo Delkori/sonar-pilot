@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { predictPortfolioForecast, suggestMonthlyForecast, allocateToHcps } from "@/lib/forecast";
 import type { HcpLite } from "@/lib/forecast";
+import type { PurchaseLine } from "@/lib/sonarscore/velocity";
 import { generateMonthlyPlan } from "@/lib/planning";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
 import type { Opportunity } from "@/lib/opportunities";
@@ -59,6 +60,7 @@ export function PilotageBoard({
   hcps,
   products,
   sectorObjectives,
+  purchaseLines = [],
 }: {
   accounts: Account[];
   initialForecasts: AccountForecast[];
@@ -66,6 +68,7 @@ export function PilotageBoard({
   hcps: HcpRow[];
   products: ProductRow[];
   sectorObjectives: SectorObjective[];
+  purchaseLines?: PurchaseLine[];
 }) {
   const [forecasts, setForecasts] = useState(initialForecasts);
   const [isSaving, setIsSaving] = useState(false);
@@ -405,9 +408,18 @@ export function PilotageBoard({
         year: f.year,
         month: f.month,
         boites_prevues: f.boites_prevues,
+        ca_prevu: f.ca_prevu,
         source: f.source,
       }));
-    const predictions = predictPortfolioForecast(accounts, hcpsByAccount, monthlySales, existingEntries, months);
+    const predictions = predictPortfolioForecast(
+      accounts,
+      hcpsByAccount,
+      monthlySales,
+      existingEntries,
+      months,
+      sectorObjectives,
+      purchaseLines
+    );
     const supabase = createClient();
 
     // Un mois que le modèle jugeait éligible lors d'une génération précédente

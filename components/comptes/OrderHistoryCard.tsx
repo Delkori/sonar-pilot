@@ -7,7 +7,7 @@ interface Sale {
   ca: number;
 }
 
-const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Aoû", "Sep", "Oct", "Nov", "Déc"];
+const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Août", "Sep", "Oct", "Nov", "Déc"];
 
 /**
  * Historique de commandes + récurrence, à partir des ventes mensuelles

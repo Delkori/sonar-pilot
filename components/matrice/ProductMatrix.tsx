@@ -8,6 +8,7 @@ import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { computeTargetingScore } from "@/lib/scoring";
+import { brandCategory } from "@/lib/brands";
 import { TrendingUp, TrendingDown } from "lucide-react";
 import type { Account, Segment } from "@/types/database";
 
@@ -27,6 +28,11 @@ type SortKey = "name" | "segment" | "score" | "missing" | "ca_nc" | "boites" | "
 // du calcul de retard et du classement des références à prioriser.
 const DISCONTINUED_BRANDS = new Set(["Global Action", "Ultimate", "Kiss", "Deep Lines"]);
 
+// Fillers = gamme injectable (acide hyaluronique) — classification partagée,
+// voir lib/brands.ts. Toute marque importée qui n'en fait pas partie est
+// classée Dermo (gamme cosmétique/dermo-cosmétique, ex. lignes de soin).
+type ProductCategory = "all" | "filler" | "dermo";
+
 export function ProductMatrix({ accounts, products }: { accounts: Account[]; products: ProductRow[] }) {
   const [segment, setSegment] = useState<Segment | "all">("all");
   const [search, setSearch] = useState("");
@@ -35,6 +41,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
   const [onlyRetard, setOnlyRetard] = useState(false);
   const [cellMetric, setCellMetric] = useState<"boites" | "ca">("boites");
   const [selectedBrands, setSelectedBrands] = useState<Set<string>>(new Set());
+  const [brandCategoryFilter, setBrandCategoryFilter] = useState<ProductCategory>("all");
 
   const brands = useMemo(() => {
     const totals = new Map<string, number>();
@@ -59,8 +66,10 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
       cur.caLy += p.sales_value_ly ?? 0;
       totals.set(p.brand, cur);
     }
-    return brands.map((brand) => ({ brand, ...(totals.get(brand) ?? { qtyCy: 0, qtyLy: 0, caCy: 0, caLy: 0 }) }));
-  }, [brands, products]);
+    return brands
+      .map((brand) => ({ brand, ...(totals.get(brand) ?? { qtyCy: 0, qtyLy: 0, caCy: 0, caLy: 0 }) }))
+      .filter((b) => (brandCategoryFilter === "all" ? true : brandCategory(b.brand) === brandCategoryFilter));
+  }, [brands, products, brandCategoryFilter]);
 
   function toggleBrand(brand: string) {
     setSelectedBrands((prev) => {
@@ -69,6 +78,14 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
       else next.add(brand);
       return next;
     });
+  }
+
+  function setCategoryFilter(cat: ProductCategory) {
+    setBrandCategoryFilter(cat);
+    if (cat === "all") return;
+    // Évite un filtre "marque sélectionnée" actif mais invisible si elle
+    // sort de la catégorie choisie.
+    setSelectedBrands((prev) => new Set(Array.from(prev).filter((b) => brandCategory(b) === cat)));
   }
 
   // Par compte × marque : quantité et CA, année en cours et N-1 (même
@@ -293,18 +310,39 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
       {/* ── Références vendues vs N-1 : cliquer une ou plusieurs marques
           filtre le tableau ci-dessous aux comptes qui les commandent ── */}
       <div className="rounded-xl border border-border bg-surface p-3">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Références vendues vs N-1 — cliquez pour filtrer le tableau
           </p>
-          {selectedBrands.size > 0 && (
-            <button
-              onClick={() => setSelectedBrands(new Set())}
-              className="text-xs text-primary underline hover:text-primary-700"
-            >
-              Réinitialiser ({selectedBrands.size})
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-border bg-surface p-0.5">
+              {([
+                { key: "all", label: "Toutes" },
+                { key: "filler", label: "Fillers" },
+                { key: "dermo", label: "Dermo" },
+              ] as const).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setCategoryFilter(key)}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                    brandCategoryFilter === key
+                      ? "bg-primary-100 text-primary-700"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {selectedBrands.size > 0 && (
+              <button
+                onClick={() => setSelectedBrands(new Set())}
+                className="text-xs text-primary underline hover:text-primary-700"
+              >
+                Réinitialiser ({selectedBrands.size})
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           {brandSummary.map(({ brand, qtyCy, qtyLy, caCy, caLy }) => {
