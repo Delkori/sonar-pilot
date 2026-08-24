@@ -12,14 +12,11 @@ export const FILLER_BRANDS = new Set([
   "RHA 2",
   "RHA 3",
   "RHA 4",
-  "RHA Kiss Volume",
   "Kiss",
+  "RHA Kiss Volume",
+  "Ultra Deep",
   "Redensity 1",
   "Redensity 2",
-  "Ultra Deep",
-  "Deep Lines",
-  "Global Action",
-  "Ultimate",
 ]);
 
 export function isFillerBrand(brand: string): boolean {
