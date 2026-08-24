@@ -13,6 +13,7 @@ export interface PersonaAccountRow {
   persona: Persona | null;
   ca: number;
   recos: string[];
+  crossSell: { brand: string; reason: string }[];
 }
 
 type SortKey = "name" | "persona" | "ca" | "recos";
@@ -70,8 +71,9 @@ export function PersonaClient({ models, rows }: { models: PersonaModel[]; rows: 
         <div className="border-b border-border px-5 py-3">
           <p className="text-sm font-semibold text-foreground">Comptes & recommandations</p>
           <p className="text-xs text-muted-foreground">
-            Références que les pairs du même persona achètent majoritairement, mais que le compte n&apos;a pas encore — à
-            proposer pour préparer le trimestre.
+            &quot;À proposer&quot; : références que les pairs du même persona achètent majoritairement, mais que le compte
+            n&apos;a pas encore. &quot;Cross-sell ciblé&quot; : propre à ce que CE compte achète déjà — ex. les comptes qui
+            achètent X ont statistiquement plus de chances d&apos;acheter Y aussi (survolez pour le détail).
           </p>
         </div>
         <div className="overflow-x-auto">
@@ -81,7 +83,10 @@ export function PersonaClient({ models, rows }: { models: PersonaModel[]; rows: 
                 <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="px-5" />
                 <SortableTh label="Persona" sortKey="persona" activeKey={sortKey} dir={dir} onSort={toggle} />
                 <SortableTh label="CA YTD" sortKey="ca" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
-                <SortableTh label="À proposer" sortKey="recos" activeKey={sortKey} dir={dir} onSort={toggle} className="px-5" />
+                <SortableTh label="À proposer (persona)" sortKey="recos" activeKey={sortKey} dir={dir} onSort={toggle} className="px-5" />
+                <th className="px-5 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Cross-sell ciblé
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -116,11 +121,28 @@ export function PersonaClient({ models, rows }: { models: PersonaModel[]; rows: 
                       <span className="text-xs text-muted-foreground">—</span>
                     )}
                   </td>
+                  <td className="px-5 py-3">
+                    {r.crossSell.length > 0 ? (
+                      <span className="flex flex-wrap gap-1">
+                        {r.crossSell.map((c) => (
+                          <span
+                            key={c.brand}
+                            title={c.reason}
+                            className="rounded-full bg-primary-50 px-2 py-0.5 text-[10px] font-medium text-primary-700"
+                          >
+                            {c.brand}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-5 py-10 text-center text-muted-foreground">
+                  <td colSpan={5} className="px-5 py-10 text-center text-muted-foreground">
                     Aucun compte avec persona déterminé — importez les médecins (Salesforce) et vérifiez la connexion Nexora.
                   </td>
                 </tr>

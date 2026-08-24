@@ -157,3 +157,116 @@ export function personaRecommendations(
   if (!model) return [];
   return model.brands.filter((b) => b.penetration >= minPenetration && !accountBrands.has(b.brand)).slice(0, max);
 }
+
+// ── Corrélation produit-à-produit (règles d'association) ──────────────────
+// Raffinement de la pénétration par persona ci-dessus : au lieu de regarder
+// "cette référence est achetée par X% du persona" (générique, ne dépend pas
+// de ce que CE compte achète déjà), on regarde "parmi les comptes qui
+// achètent déjà A, quelle part achète aussi B" — un signal propre au compte,
+// pas seulement à son persona. Validé sur données réelles (export SAP) :
+// ex. Dermatologue, RHA4 → RHA1, confiance 51% contre 41% de base (lift 1,24).
+
+export interface AssociationRule {
+  from: string; // référence déjà achetée, qui déclenche la règle
+  to: string; // référence candidate au cross-sell
+  supportFrom: number; // part des comptes du persona achetant `from`
+  supportTo: number; // part des comptes du persona achetant `to` (base de comparaison)
+  confidence: number; // P(achète `to` | achète `from`)
+  lift: number; // confidence / supportTo — > 1 = corrélation positive réelle, pas due au hasard
+  sampleSize: number; // nb de comptes achetant `from`, sur lesquels la règle est mesurée
+}
+
+/**
+ * Calcule, pour chaque persona, les règles d'association entre références
+ * (support / confiance / lift — méthode classique d'analyse de panier).
+ * `minSampleSize` écarte les règles mesurées sur trop peu de comptes pour
+ * être fiables (un lift de 3 sur 4 comptes ne veut rien dire).
+ */
+export function computeAssociationRules(
+  personaByAccount: Map<string, Persona>,
+  products: ProductRow[],
+  minSampleSize = 15
+): Map<Persona, AssociationRule[]> {
+  const accountsByPersona = new Map<Persona, Set<string>>();
+  for (const [acc, p] of personaByAccount) {
+    const set = accountsByPersona.get(p) ?? new Set<string>();
+    set.add(acc);
+    accountsByPersona.set(p, set);
+  }
+
+  const brandsByAccount = new Map<string, Set<string>>();
+  for (const pr of products) {
+    if ((pr.qty_ordered_cy ?? 0) <= 0) continue;
+    const set = brandsByAccount.get(pr.account_id) ?? new Set<string>();
+    set.add(pr.brand);
+    brandsByAccount.set(pr.account_id, set);
+  }
+
+  const result = new Map<Persona, AssociationRule[]>();
+  for (const persona of PERSONAS) {
+    const accts = Array.from(accountsByPersona.get(persona) ?? []).filter((a) => brandsByAccount.has(a));
+    const n = accts.length;
+    if (n === 0) {
+      result.set(persona, []);
+      continue;
+    }
+
+    const allBrands = new Set<string>();
+    for (const acc of accts) for (const b of brandsByAccount.get(acc) ?? []) allBrands.add(b);
+
+    const support = new Map<string, number>();
+    for (const brand of allBrands) {
+      const buyers = accts.filter((a) => brandsByAccount.get(a)!.has(brand)).length;
+      support.set(brand, buyers / n);
+    }
+
+    const rules: AssociationRule[] = [];
+    for (const from of allBrands) {
+      const buyersFrom = accts.filter((a) => brandsByAccount.get(a)!.has(from));
+      const sampleSize = buyersFrom.length;
+      if (sampleSize < minSampleSize) continue;
+      for (const to of allBrands) {
+        if (to === from) continue;
+        const supportTo = support.get(to) ?? 0;
+        if (supportTo <= 0) continue;
+        const both = buyersFrom.filter((a) => brandsByAccount.get(a)!.has(to)).length;
+        const confidence = both / sampleSize;
+        const lift = confidence / supportTo;
+        rules.push({ from, to, supportFrom: support.get(from) ?? 0, supportTo, confidence, lift, sampleSize });
+      }
+    }
+    rules.sort((a, b) => b.lift - a.lift);
+    result.set(persona, rules);
+  }
+  return result;
+}
+
+/**
+ * Pistes de cross-sell pour UN compte précis : parmi les règles de son
+ * persona, celles dont il a déjà la référence déclenchante (`from`) mais pas
+ * encore la référence candidate (`to`) — plus précis que
+ * `personaRecommendations` puisque fondé sur ce que CE compte achète
+ * réellement, pas seulement sur la moyenne du persona. Une seule règle
+ * retenue par référence candidate (la plus forte en lift), pour éviter
+ * d'afficher plusieurs raisons concurrentes pour la même recommandation.
+ */
+export function crossSellRecommendations(
+  rules: AssociationRule[] | undefined,
+  accountBrands: Set<string>,
+  minLift = 1.2,
+  minConfidence = 0.3,
+  max = 4
+): AssociationRule[] {
+  if (!rules) return [];
+  const seen = new Set<string>();
+  const out: AssociationRule[] = [];
+  for (const r of rules) {
+    if (!accountBrands.has(r.from) || accountBrands.has(r.to)) continue;
+    if (r.lift < minLift || r.confidence < minConfidence) continue;
+    if (seen.has(r.to)) continue; // règle plus forte déjà retenue pour cette référence
+    seen.add(r.to);
+    out.push(r);
+    if (out.length >= max) break;
+  }
+  return out;
+}

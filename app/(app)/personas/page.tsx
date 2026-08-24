@@ -2,7 +2,14 @@ import { TopBar } from "@/components/layout/TopBar";
 import { PersonaClient } from "@/components/personas/PersonaClient";
 import type { PersonaAccountRow } from "@/components/personas/PersonaClient";
 import { createClient } from "@/lib/supabase/server";
-import { computePersonaModels, personaRecommendations, PERSONAS, type Persona } from "@/lib/persona";
+import {
+  computePersonaModels,
+  personaRecommendations,
+  computeAssociationRules,
+  crossSellRecommendations,
+  PERSONAS,
+  type Persona,
+} from "@/lib/persona";
 import { isFillerBrand } from "@/lib/brands";
 import type { Account } from "@/types/database";
 
@@ -43,6 +50,11 @@ export default async function PersonasPage() {
   const models = computePersonaModels(personaByAccount, products, caByAccount);
   const modelByPersona = new Map(models.map((m) => [m.persona, m] as const));
 
+  // Corrélation produit-à-produit (raffinement de la pénétration ci-dessus,
+  // propre à ce que CE compte achète déjà plutôt qu'à la moyenne du persona)
+  // — voir lib/persona.ts.
+  const rulesByPersona = computeAssociationRules(personaByAccount, products);
+
   // marques achetées par compte
   const brandsByAccount = new Map<string, Set<string>>();
   for (const p of products) {
@@ -55,10 +67,17 @@ export default async function PersonasPage() {
   const rows: PersonaAccountRow[] = accounts
     .map((a) => {
       const persona = personaByAccount.get(a.id) ?? null;
+      const accountBrands = brandsByAccount.get(a.id) ?? new Set<string>();
       const recos = persona
-        ? personaRecommendations(modelByPersona.get(persona), brandsByAccount.get(a.id) ?? new Set()).map((b) => b.brand)
+        ? personaRecommendations(modelByPersona.get(persona), accountBrands).map((b) => b.brand)
         : [];
-      return { id: a.id, name: a.name, persona, ca: a.ca_2026_ytd ?? 0, recos };
+      const crossSell = persona
+        ? crossSellRecommendations(rulesByPersona.get(persona), accountBrands).map((r) => ({
+            brand: r.to,
+            reason: `Achète déjà ${r.from} (+${Math.round((r.confidence - r.supportTo) * 100)} pts vs base du persona)`,
+          }))
+        : [];
+      return { id: a.id, name: a.name, persona, ca: a.ca_2026_ytd ?? 0, recos, crossSell };
     })
     .filter((r) => r.persona !== null);
 
