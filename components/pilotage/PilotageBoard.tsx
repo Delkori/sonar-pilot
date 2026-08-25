@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { predictPortfolioForecast, suggestMonthlyForecast, allocateToHcps } from "@/lib/forecast";
@@ -80,6 +80,29 @@ export function PilotageBoard({
 
   const months = useMemo(() => nextMonths(horizon), [horizon]);
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a] as const)), [accounts]);
+
+  // Un compte peut passer "Lost" après une génération précédente : sans ce
+  // nettoyage, ses lignes 'auto' restent affichées jusqu'au prochain clic sur
+  // "Générer" (qui seul les aurait exclues). On les purge dès le chargement,
+  // pas seulement à la prochaine génération — les lignes manuelles ('manuel'
+  // ou commentées) ne sont jamais touchées, c'est une décision humaine
+  // explicite qui doit rester visible même sur un compte perdu depuis.
+  useEffect(() => {
+    const lostIds = new Set(accounts.filter((a) => a.status === "lost").map((a) => a.id));
+    if (lostIds.size === 0) return;
+    const staleIds = forecasts
+      .filter((f) => f.kind === "prevision" && f.source === "auto" && !f.commentaire && lostIds.has(f.account_id))
+      .map((f) => f.id);
+    if (staleIds.length === 0) return;
+    const supabase = createClient();
+    supabase
+      .from("account_forecasts")
+      .delete()
+      .in("id", staleIds)
+      .then(() => setForecasts((prev) => prev.filter((f) => !staleIds.includes(f.id))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const hcpsByAccount = useMemo(() => {
     const map = new Map<string, HcpLite[]>();
     for (const h of hcps) {

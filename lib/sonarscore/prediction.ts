@@ -12,7 +12,7 @@
 
 import type { BrandVelocity, PurchaseLine } from "./velocity";
 
-export type PredictionConfidence = "compte" | "marque" | "insuffisante";
+export type PredictionConfidence = "compte" | "marque" | "saisonnier" | "insuffisante";
 
 export interface AccountBrandPrediction {
   accountId: string;

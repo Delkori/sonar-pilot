@@ -19,6 +19,7 @@ import type { MonthlySaleRow } from "./forecast";
 import { computeBrandVelocities } from "./sonarscore/velocity";
 import type { PurchaseLine } from "./sonarscore/velocity";
 import { predictNextOrders } from "./sonarscore/prediction";
+import { predictSeasonalOrders } from "./sonarscore/seasonality";
 import { FILLER_BRANDS, brandCategory } from "./brands";
 import type { BrandCategory } from "./brands";
 
@@ -296,14 +297,29 @@ export function runBrandBacktest(
   }
 
   const velocities = computeBrandVelocities(knownLines);
-  const predictions = predictNextOrders(knownLines, velocities);
-  const relevantPredictionsByBrand = new Map<string, { accountId: string; monthIdx: number }[]>();
+  const asOfMonthIndex = cutoffIdx - 1;
+  const predictions = [...predictNextOrders(knownLines, velocities), ...predictSeasonalOrders(knownLines, asOfMonthIndex)];
+  const relevantPredictionsByBrand = new Map<
+    string,
+    { accountId: string; monthIdx: number; predictedIdx: number; tolerance: number }[]
+  >();
   for (const p of predictions) {
     if (!p.expectedNextOrderDate) continue;
-    const idx = monthIndexFromDateStr(p.expectedNextOrderDate);
-    if (!targetIdxSet.has(idx)) continue;
+    const predictedIdx = monthIndexFromDateStr(p.expectedNextOrderDate);
+    const tolerance = p.confidence === "saisonnier" ? 1 : 0;
+    // Une prédiction ne compte que pour le mois cible le plus proche dans sa
+    // tolérance — jamais pour plusieurs mois à la fois, sinon un seul signal
+    // saisonnier gonflerait artificiellement "prévu" en comptant 2-3 fois.
+    let bestTarget: number | null = null;
+    for (const tmCandidate of targetIdxSet) {
+      if (Math.abs(predictedIdx - tmCandidate) > tolerance) continue;
+      if (bestTarget === null || Math.abs(predictedIdx - tmCandidate) < Math.abs(predictedIdx - bestTarget)) {
+        bestTarget = tmCandidate;
+      }
+    }
+    if (bestTarget === null) continue;
     const arr = relevantPredictionsByBrand.get(p.brand) ?? [];
-    arr.push({ accountId: p.accountId, monthIdx: idx });
+    arr.push({ accountId: p.accountId, monthIdx: bestTarget, predictedIdx, tolerance });
     relevantPredictionsByBrand.set(p.brand, arr);
   }
 
@@ -320,7 +336,12 @@ export function runBrandBacktest(
     .map((brand) => {
       const preds = relevantPredictionsByBrand.get(brand) ?? [];
       const actualSet = actualByBrand.get(brand) ?? new Set<string>();
-      const hits = preds.filter((p) => actualSet.has(`${p.accountId}|${p.monthIdx}`)).length;
+      const hits = preds.filter((p) => {
+        for (let offset = -p.tolerance; offset <= p.tolerance; offset++) {
+          if (actualSet.has(`${p.accountId}|${p.predictedIdx + offset}`)) return true;
+        }
+        return false;
+      }).length;
       const precision = preds.length > 0 ? hits / preds.length : null;
       const actualOrderCount = actualSet.size;
       const recall = actualOrderCount > 0 ? hits / actualOrderCount : null;
