@@ -22,8 +22,8 @@ function isPersona(v: string | null): v is Persona {
 export default async function PersonasPage() {
   const supabase = await createClient();
 
-  const { data: accountsRaw } = await supabase.from("accounts").select("id, name, ca_2026_ytd, persona");
-  const accounts = (accountsRaw ?? []) as Pick<Account, "id" | "name" | "ca_2026_ytd" | "persona">[];
+  const { data: accountsRaw } = await supabase.from("accounts").select("id, name, ca_2026_ytd, persona, status");
+  const accounts = (accountsRaw ?? []) as Pick<Account, "id" | "name" | "ca_2026_ytd" | "persona" | "status">[];
 
   const { data: productsRaw } = await supabase
     .from("account_products")
@@ -65,6 +65,7 @@ export default async function PersonasPage() {
   }
 
   const rows: PersonaAccountRow[] = accounts
+    .filter((a) => a.status !== "lost")
     .map((a) => {
       const persona = personaByAccount.get(a.id) ?? null;
       const accountBrands = brandsByAccount.get(a.id) ?? new Set<string>();
@@ -79,6 +80,10 @@ export default async function PersonasPage() {
         : [];
       return { id: a.id, name: a.name, persona, ca: a.ca_2026_ytd ?? 0, recos, crossSell };
     })
+    // Un compte perdu n'a pas sa place dans une liste de recommandations —
+    // ses statistiques d'achat passées restent utiles aux modèles persona
+    // ci-dessus (plus de données = règles plus robustes), mais lui proposer
+    // du cross-sell n'a aucun sens.
     .filter((r) => r.persona !== null);
 
   return (

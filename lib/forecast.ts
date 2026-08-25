@@ -152,6 +152,15 @@ const SILENCE_MODERE_SEMAINES = 8;
 interface MonthSignal {
   weight: number;
   reason: string;
+  /**
+   * Quantité typique de CETTE marque précise, quand le signal produit fournit
+   * une valeur mesurée (médiane des achats propres au compte, ou de la
+   * marque en population) — à préférer à `typicalOrder` (moyenne lissée
+   * toutes marques du compte) quand disponible : plus précis, puisque
+   * propre à la référence réellement détectée plutôt qu'à une moyenne qui
+   * mélange tout ce que le compte achète.
+   */
+  expectedQty?: number | null;
 }
 
 function monthIndex(year: number, month: number): number {
@@ -226,7 +235,13 @@ function productMonthSignal(
     matches.length === 1
       ? `${best.brand} attendu ce mois-ci (${confidenceLabel})`
       : `${matches.map((m) => m.brand).join(", ")} attendus ce mois-ci`;
-  return { weight, reason };
+  // Somme des quantités typiques de chaque marque détectée ce mois-ci (une
+  // marque peut ne pas avoir de quantité mesurée si sa propre confiance est
+  // insuffisante malgré la date — dans ce cas elle n'ajoute rien plutôt que
+  // de fausser le total avec un 0 artificiel).
+  const qtys = matches.map((m) => m.expectedQty).filter((q): q is number => q !== null && q !== undefined);
+  const expectedQty = qtys.length > 0 ? qtys.reduce((s, q) => s + q, 0) : null;
+  return { weight, reason, expectedQty };
 }
 
 /**
@@ -513,7 +528,15 @@ export function predictMonthlyForecast(
     const signal = evaluateMonthSignal(account, orderedMonths, tmIdx, brandPredictions, consumedBrands);
     if (!signal) continue;
 
-    const boites = Math.min(Math.round(typicalOrder * signal.weight), restantLeft);
+    // La quantité de la marque précise détectée (`expectedQty`, médiane
+    // mesurée sur cette référence) est préférée à `typicalOrder` (moyenne
+    // lissée toutes marques du compte) quand disponible — sinon le "quand"
+    // pointe vers RHA4 mais le "combien" reste calculé sur un mélange de
+    // tout ce que le compte achète, ce qui n'a pas de sens une fois qu'on
+    // sait précisément quelle marque est attendue. `signal.weight` continue
+    // de s'appliquer (retard, confiance) même sur une quantité mesurée.
+    const baseQty = signal.expectedQty ?? typicalOrder;
+    const boites = Math.min(Math.round(baseQty * signal.weight), restantLeft);
     // Pas rentable de proposer un passage pour une commande symbolique — on
     // saute ce mois plutôt que d'afficher un chiffre qui ne justifie pas
     // l'effort commercial.
