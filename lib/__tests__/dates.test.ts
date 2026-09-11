@@ -2,6 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   addDays,
+  currentMonthIndex,
   daysBetween,
   daysSince,
   fromMonthIndex,
@@ -9,6 +10,7 @@ import {
   monthIndexFromDateStr,
   monthLong,
   monthShort,
+  monthsFrom,
   toDateStr,
   weeksSince,
   DAY_MS,
@@ -115,5 +117,44 @@ describe("libellés de mois", () => {
   test("renvoient une chaîne vide hors plage plutôt que undefined", () => {
     assert.equal(monthShort(0), "");
     assert.equal(monthLong(13), "");
+  });
+});
+
+describe("monthsFrom", () => {
+  test("produit des mois consécutifs à partir du point demandé", () => {
+    assert.deepEqual(monthsFrom(monthIndex(2026, 11), 3), [
+      { year: 2026, month: 11 },
+      { year: 2026, month: 12 },
+      { year: 2027, month: 1 },
+    ]);
+  });
+
+  test("accepte un point de départ passé", () => {
+    // Le pilotage doit pouvoir revenir sur un trimestre écoulé pour
+    // confronter le prévisionnel au réalisé.
+    assert.deepEqual(monthsFrom(monthIndex(2024, 2), 2), [
+      { year: 2024, month: 2 },
+      { year: 2024, month: 3 },
+    ]);
+  });
+
+  test("reste cohérent sur un horizon qui couvre plusieurs années", () => {
+    const suite = monthsFrom(monthIndex(2025, 6), 24);
+    assert.equal(suite.length, 24);
+    assert.deepEqual(suite.at(-1), { year: 2027, month: 5 });
+    for (let i = 1; i < suite.length; i++) {
+      const ecart = monthIndex(suite[i].year, suite[i].month) - monthIndex(suite[i - 1].year, suite[i - 1].month);
+      assert.equal(ecart, 1);
+    }
+  });
+
+  test("renvoie une liste vide pour un horizon nul ou négatif", () => {
+    assert.deepEqual(monthsFrom(monthIndex(2026, 1), 0), []);
+    assert.deepEqual(monthsFrom(monthIndex(2026, 1), -3), []);
+  });
+
+  test("currentMonthIndex situe bien le mois en cours", () => {
+    const now = new Date(2026, 8, 11); // septembre 2026
+    assert.equal(currentMonthIndex(now), monthIndex(2026, 9));
   });
 });

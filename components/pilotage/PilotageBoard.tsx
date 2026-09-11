@@ -19,9 +19,21 @@ import { SegmentBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import type { Account, AccountForecast, Hcp, SectorObjective } from "@/types/database";
-import { GripVertical, Trash2, Loader2, Target, Wand2, Stethoscope, FileDown } from "lucide-react";
+import {
+  CalendarClock,
+  ChevronLeft,
+  ChevronRight,
+  FileDown,
+  GripVertical,
+  History,
+  Loader2,
+  Stethoscope,
+  Target,
+  Trash2,
+  Wand2,
+} from "lucide-react";
 import * as XLSX from "xlsx";
-import { MONTHS_LONG } from "@/lib/dates";
+import { currentMonthIndex, fromMonthIndex, monthIndex, monthsFrom, MONTHS_LONG } from "@/lib/dates";
 
 type HcpRow = Pick<Hcp, "id" | "account_id" | "name" | "potentiel_boites">;
 type ProductRow = {
@@ -40,19 +52,6 @@ interface MonthlySale {
   year: number;
   month: number;
   ca: number;
-}
-
-function nextMonths(count: number): { year: number; month: number }[] {
-  const now = new Date();
-  const result: { year: number; month: number }[] = [];
-  let y = now.getFullYear();
-  let m = now.getMonth() + 1;
-  for (let i = 0; i < count; i++) {
-    result.push({ year: y, month: m });
-    m++;
-    if (m > 12) { m = 1; y++; }
-  }
-  return result;
 }
 
 export function PilotageBoard({
@@ -80,7 +79,41 @@ export function PilotageBoard({
   const [horizon, setHorizon] = useState<1 | 3 | 6 | 12 | 24>(3);
   const [cardSort, setCardSort] = useState<CardSort>("ca");
 
-  const months = useMemo(() => nextMonths(horizon), [horizon]);
+  // Mois de départ de la période affichée. Le pilotage partait toujours du
+  // mois en cours, ce qui interdisait de revenir sur un trimestre écoulé
+  // pour confronter le prévisionnel au réalisé.
+  const nowIdx = useMemo(() => currentMonthIndex(), []);
+  const [startIdx, setStartIdx] = useState(nowIdx);
+
+  const months = useMemo(() => monthsFrom(startIdx, horizon), [startIdx, horizon]);
+  const surLeMoisCourant = startIdx === nowIdx;
+  // Période entièrement écoulée : la génération y produirait des « prévisions »
+  // pour des mois déjà facturés.
+  const periodePassee = startIdx + horizon - 1 < nowIdx;
+
+  // Bornes du sélecteur : de la plus ancienne donnée connue (vente réelle ou
+  // prévision déjà saisie) jusqu'à deux ans devant, pour qu'on ne puisse pas
+  // se perdre dans des années sans le moindre chiffre.
+  const [minIdx, maxIdx] = useMemo(() => {
+    const indices = [
+      ...monthlySales.map((m) => monthIndex(m.year, m.month)),
+      ...initialForecasts.map((f) => monthIndex(f.year, f.month)),
+    ];
+    const plusAncien = indices.length > 0 ? Math.min(...indices, nowIdx) : nowIdx - 24;
+    return [plusAncien, nowIdx + 24] as const;
+  }, [monthlySales, initialForecasts, nowIdx]);
+
+  const anneesDisponibles = useMemo(() => {
+    const premiere = fromMonthIndex(minIdx).year;
+    const derniere = fromMonthIndex(maxIdx).year;
+    return Array.from({ length: derniere - premiere + 1 }, (_, i) => premiere + i);
+  }, [minIdx, maxIdx]);
+
+  const debut = fromMonthIndex(startIdx);
+
+  function allerA(index: number) {
+    setStartIdx(Math.min(Math.max(index, minIdx), maxIdx));
+  }
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a] as const)), [accounts]);
 
   // Un compte peut passer "Lost" après une génération précédente : sans ce
@@ -224,7 +257,21 @@ export function PilotageBoard({
     return { totalCa, totalBoites, comptes: accountIds.size, prospects, tiers, realise, objectif };
   }, [forecasts, months, accountById, realiseByMonth, sectorObjectives]);
 
-  const periodLabel = horizon === 1 ? "ce mois" : horizon === 3 ? "ce trimestre" : horizon === 6 ? "ce semestre" : horizon === 12 ? "cette année" : "les 2 prochaines années";
+  // « ce trimestre » ne veut plus rien dire dès qu'on se place ailleurs que
+  // sur le mois courant : on nomme alors la période telle qu'elle est.
+  const periodLabel = surLeMoisCourant
+    ? horizon === 1
+      ? "ce mois"
+      : horizon === 3
+        ? "ce trimestre"
+        : horizon === 6
+          ? "ce semestre"
+          : horizon === 12
+            ? "cette année"
+            : "les 2 prochaines années"
+    : horizon === 1
+      ? `${MONTHS_LONG[debut.month - 1].toLowerCase()} ${debut.year}`
+      : `${horizon} mois à partir de ${MONTHS_LONG[debut.month - 1].toLowerCase()} ${debut.year}`;
 
   const accountSegment = useMemo(
     () => new Map(accounts.map((a) => [a.id, a.segment] as const)),
@@ -657,8 +704,11 @@ export function PilotageBoard({
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, "Prévisionnel");
+    // La période affichée fait partie du nom : sans elle, l'export d'un
+    // trimestre passé écrasait celui du trimestre courant.
     const label = horizon === 1 ? "mois" : horizon === 3 ? "trimestre" : horizon === 6 ? "semestre" : horizon === 12 ? "annee" : "2ans";
-    XLSX.writeFile(workbook, `previsionnel-pilotage-${label}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const depuis = `${debut.year}-${String(debut.month).padStart(2, "0")}`;
+    XLSX.writeFile(workbook, `previsionnel-pilotage-${label}-depuis-${depuis}.xlsx`);
   }
 
   return (
@@ -884,8 +934,12 @@ export function PilotageBoard({
         <div className="mb-3 flex items-center justify-end gap-2">
           <button
             onClick={autoFillPortfolio}
-            disabled={autoFilling}
-            title="Remplit automatiquement le prévisionnel de tout le portefeuille sur la période affichée, à partir de la saisonnalité des commandes passées (ou du score/silence à défaut d'historique) — n'écrase jamais un mois déjà renseigné"
+            disabled={autoFilling || periodePassee}
+            title={
+              periodePassee
+                ? "Période entièrement écoulée : générer y créerait des prévisions pour des mois déjà facturés. Revenez sur le mois courant pour planifier."
+                : "Remplit automatiquement le prévisionnel de tout le portefeuille sur la période affichée, à partir de la saisonnalité des commandes passées (ou du score/silence à défaut d'historique) — n'écrase jamais un mois déjà renseigné"
+            }
             className="mr-auto flex items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-60"
           >
             {autoFilling ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
@@ -926,6 +980,94 @@ export function PilotageBoard({
             </button>
           ))}
         </div>
+
+        {/* ── Choix du mois de départ ───────────────────────────────── */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Période à partir de :</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => allerA(startIdx - 1)}
+              disabled={startIdx <= minIdx}
+              aria-label="Mois précédent"
+              title="Mois précédent"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ChevronLeft size={15} />
+            </button>
+            <select
+              value={debut.month}
+              onChange={(e) => allerA(monthIndex(debut.year, Number(e.target.value)))}
+              aria-label="Mois de départ"
+              className={cn(fieldClass, "px-2 text-xs")}
+            >
+              {MONTHS_LONG.map((libelle, i) => (
+                <option key={libelle} value={i + 1}>
+                  {libelle}
+                </option>
+              ))}
+            </select>
+            <select
+              value={debut.year}
+              onChange={(e) => allerA(monthIndex(Number(e.target.value), debut.month))}
+              aria-label="Année de départ"
+              className={cn(fieldClass, "px-2 text-xs")}
+            >
+              {anneesDisponibles.map((an) => (
+                <option key={an} value={an}>
+                  {an}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => allerA(startIdx + 1)}
+              disabled={startIdx >= maxIdx}
+              aria-label="Mois suivant"
+              title="Mois suivant"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ChevronRight size={15} />
+            </button>
+          </div>
+
+          {/* Décalage d'une période entière — le geste le plus courant quand on
+              compare un trimestre au précédent. */}
+          <button
+            type="button"
+            onClick={() => allerA(startIdx - horizon)}
+            disabled={startIdx - horizon < minIdx}
+            title={`Reculer de ${horizon} mois`}
+            className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            − {horizon} mois
+          </button>
+          <button
+            type="button"
+            onClick={() => allerA(startIdx + horizon)}
+            disabled={startIdx + horizon > maxIdx}
+            title={`Avancer de ${horizon} mois`}
+            className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            + {horizon} mois
+          </button>
+
+          {!surLeMoisCourant && (
+            <button
+              type="button"
+              onClick={() => allerA(nowIdx)}
+              className="flex items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-2.5 py-1.5 text-xs font-medium text-primary-700 transition-colors hover:bg-primary-100"
+            >
+              <CalendarClock size={13} /> Revenir au mois courant
+            </button>
+          )}
+
+          {periodePassee && (
+            <span className="flex items-center gap-1.5 rounded-lg bg-warning/10 px-2.5 py-1.5 text-xs font-medium text-warning">
+              <History size={13} /> Période écoulée — lecture seule pour la génération
+            </span>
+          )}
+        </div>
         <div
           className={`grid grid-cols-1 gap-3 ${
             horizon === 1
@@ -946,6 +1088,9 @@ export function PilotageBoard({
           const atteinteObjectifMonth = objectifMonth > 0 ? Math.min(realise / objectifMonth, 1) : 0;
           const key = `${year}-${month}`;
           const isTarget = dropTarget === key;
+          const idx = monthIndex(year, month);
+          const moisEcoule = idx < nowIdx;
+          const moisCourant = idx === nowIdx;
 
           return (
             <div
@@ -967,9 +1112,21 @@ export function PilotageBoard({
               }`}
             >
               <div className="border-b border-border p-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-semibold text-foreground">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
                     {MONTHS_LONG[month - 1]} <span className="text-muted-foreground">{year}</span>
+                    {/* Repère explicite : sur une période passée, rien ne
+                        distinguait sinon un mois clos d'un mois à venir. */}
+                    {moisCourant && (
+                      <span className="rounded-full bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium text-primary-700">
+                        en cours
+                      </span>
+                    )}
+                    {moisEcoule && (
+                      <span className="flex items-center gap-1 rounded-full bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        <History size={9} /> clos
+                      </span>
+                    )}
                   </h4>
                   {isSaving && <Loader2 size={13} className="animate-spin text-muted-foreground" />}
                 </div>

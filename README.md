@@ -207,6 +207,25 @@ npm run typecheck
 npm run build
 ```
 
+## Pilotage — période affichée
+
+Le tableau des prévisions part par défaut du mois en cours, sur l'horizon
+choisi (1 / 3 / 6 / 12 / 24 mois). Le mois de départ se règle librement, y
+compris sur un mois passé : c'est ainsi qu'on confronte le prévisionnel d'un
+trimestre écoulé à son réalisé, mois par mois.
+
+- flèches `‹` / `›` pour un mois, `− N mois` / `+ N mois` pour une période
+  entière (comparer un trimestre au précédent) ;
+- sélecteurs mois + année pour aller directement quelque part ;
+- les bornes proposées vont de la plus ancienne donnée connue (vente réelle
+  ou prévision saisie) à deux ans devant.
+
+Chaque colonne indique si le mois est **en cours** ou **clos**. Sur une
+période entièrement écoulée, « Générer le prévisionnel du portefeuille » est
+désactivé : il y créerait des prévisions pour des mois déjà facturés. La
+saisie reste possible (glisser une opportunité dans le mois, ou passer par la
+fiche compte, qui accepte n'importe quel mois).
+
 ## Module Mapping
 
 Carte choroplèthe SVG des 12 départements AURA (Ain, Allier, Ardèche, Cantal, Drôme, Isère, Loire, Haute-Loire, Puy-de-Dôme, Rhône, Savoie, Haute-Savoie), colorée selon l'écart objectif/réalisé, avec les comptes géocodés superposés en points cliquables (taille selon segment). Filtres segment/statut, clic sur un département pour isoler la zone, panneau latéral pour ouvrir la fiche compte.

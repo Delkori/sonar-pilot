@@ -98,3 +98,19 @@ export function monthIndexFromDateStr(dateStr: string): number {
 export function fromMonthIndex(index: number): { year: number; month: number } {
   return { year: Math.floor((index - 1) / 12), month: ((index - 1) % 12) + 1 };
 }
+
+/** Index absolu du mois en cours. */
+export function currentMonthIndex(now: Date = new Date()): number {
+  return monthIndex(now.getFullYear(), now.getMonth() + 1);
+}
+
+/**
+ * Suite de `count` mois consécutifs à partir d'un index absolu.
+ *
+ * Le point de départ est un paramètre, pas la date du jour : le pilotage doit
+ * pouvoir se placer sur un trimestre écoulé pour confronter le prévisionnel
+ * au réalisé, ce qu'un simple « N prochains mois » interdisait.
+ */
+export function monthsFrom(startIndex: number, count: number): { year: number; month: number }[] {
+  return Array.from({ length: Math.max(count, 0) }, (_, i) => fromMonthIndex(startIndex + i));
+}
