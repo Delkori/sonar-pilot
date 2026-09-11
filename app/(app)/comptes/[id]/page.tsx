@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
-import { TopBar } from "@/components/layout/TopBar";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
+import { PageShell } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { AccountActionsPanel } from "@/components/comptes/AccountActionsPanel";
 import { ForecastPanel } from "@/components/comptes/ForecastPanel";
@@ -15,6 +17,7 @@ import { allocateToHcps } from "@/lib/forecast";
 import { getLabsByRpps } from "@/lib/nexora/queries";
 import { createClient } from "@/lib/supabase/server";
 import { formatEUR, formatNumber } from "@/lib/utils";
+import { monthIndex } from "@/lib/dates";
 import type { Account, AccountAction, AccountForecast, AccountProduct, Hcp } from "@/types/database";
 
 export const dynamic = "force-dynamic";
@@ -23,37 +26,30 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: account } = await supabase.from("accounts").select("*").eq("id", id).single();
-  if (!account) notFound();
-  const acc = account as Account;
+  // Six lectures indépendantes : en série elles cumulaient leurs latences
+  // avant le premier octet de la fiche.
+  const [accountRes, actionsRes, productsRes, forecastsRes, hcpsRes, monthlyRes] = await Promise.all([
+    supabase.from("accounts").select("*").eq("id", id).maybeSingle(),
+    supabase.from("account_actions").select("*").eq("account_id", id).order("created_at", { ascending: false }),
+    supabase.from("account_products").select("*").eq("account_id", id),
+    supabase.from("account_forecasts").select("*").eq("account_id", id),
+    supabase.from("hcps").select("*").eq("account_id", id).order("name"),
+    supabase.from("account_monthly_sales").select("year, month, ca").eq("account_id", id),
+  ]);
 
-  const { data: actionsRaw } = await supabase
-    .from("account_actions")
-    .select("*")
-    .eq("account_id", id)
-    .order("created_at", { ascending: false });
-  const actions = (actionsRaw ?? []) as AccountAction[];
-
-  const { data: productsRaw } = await supabase.from("account_products").select("*").eq("account_id", id);
-  const products = (productsRaw ?? []) as AccountProduct[];
-
-  const { data: forecastsRaw } = await supabase.from("account_forecasts").select("*").eq("account_id", id);
-  const forecasts = (forecastsRaw ?? []) as AccountForecast[];
-
-  const { data: hcpsRaw } = await supabase.from("hcps").select("*").eq("account_id", id).order("name");
-  const hcps = (hcpsRaw ?? []) as Hcp[];
-
-  const { data: monthlyRaw } = await supabase
-    .from("account_monthly_sales")
-    .select("year, month, ca")
-    .eq("account_id", id);
-  const monthlySales = (monthlyRaw ?? []) as { year: number; month: number; ca: number }[];
+  if (!accountRes.data) notFound();
+  const acc = accountRes.data as Account;
+  const actions = (actionsRes.data ?? []) as AccountAction[];
+  const products = (productsRes.data ?? []) as AccountProduct[];
+  const forecasts = (forecastsRes.data ?? []) as AccountForecast[];
+  const hcps = (hcpsRes.data ?? []) as Hcp[];
+  const monthlySales = (monthlyRes.data ?? []) as { year: number; month: number; ca: number }[];
 
   // Sponsoring des médecins du compte, en direct depuis la base Transparence
   // Santé (Nexora), rapproché via le RPPS.
   const rppsList = hcps.map((h) => h.rpps).filter((r): r is string => !!r);
   const nameByRpps = new Map(hcps.filter((h) => h.rpps).map((h) => [h.rpps as string, h.name] as const));
-  const labs = await getLabsByRpps(rppsList);
+  const labs = rppsList.length > 0 ? await getLabsByRpps(rppsList) : [];
   const sponsorships: SponsorshipRow[] = labs.map((l, i) => ({
     id: `${l.rpps}-${i}`,
     medecin: nameByRpps.get(l.rpps) ?? l.rpps,
@@ -67,7 +63,7 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
   // du compte, au prorata de leur potentiel — pour que "les médecins dans le
   // mois aient une prévision" jusque dans la fiche.
   const now = new Date();
-  const nowIdx = now.getFullYear() * 12 + (now.getMonth() + 1);
+  const nowIdx = monthIndex(now.getFullYear(), now.getMonth() + 1);
   const upcomingPrevision = forecasts
     .filter((f) => f.kind === "prevision" && f.year * 12 + f.month >= nowIdx)
     .reduce(
@@ -90,10 +86,20 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
   }
 
   return (
-    <div>
-      <TopBar title={acc.name} subtitle={`${acc.external_ref} · ${acc.city ?? "Ville inconnue"} ${acc.postal_code ?? ""}`} />
-
-      <main className="grid grid-cols-1 gap-6 px-8 py-6 lg:grid-cols-3">
+    <PageShell
+      title={acc.name}
+      subtitle={`${acc.external_ref} · ${acc.city ?? "Ville inconnue"} ${acc.postal_code ?? ""}`}
+      actions={
+        <Link
+          href="/comptes"
+          className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3.5 text-sm font-medium text-foreground transition-colors hover:bg-surface-muted"
+        >
+          <ArrowLeft size={15} /> Tous les comptes
+        </Link>
+      }
+      contentClassName="grid grid-cols-1 gap-6 space-y-0 lg:grid-cols-3"
+    >
+      <>
         <div className="space-y-6 lg:col-span-1">
           <TargetingScoreCard account={acc} refsAcheteesCount={products.length > 0 ? refsAcheteesCount : undefined} />
 
@@ -192,8 +198,8 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
             </Card>
           )}
         </div>
-      </main>
-    </div>
+      </>
+    </PageShell>
   );
 }
 

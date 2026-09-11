@@ -2,8 +2,8 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { formatEUR, formatPct } from "@/lib/utils";
+import { MONTHS_INITIAL } from "@/lib/dates";
 
-const MONTH_LABELS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
 
 /**
  * Objectif annuel du secteur + courbe d'atterrissage : cumul du réalisé vs
@@ -85,7 +85,7 @@ export function AnnualObjectiveCard({
                   title={`Réalisé cumulé : ${formatEUR(cumReal[i])}`}
                 />
               </div>
-              <span className="text-[9px] text-muted-foreground">{MONTH_LABELS[i]}</span>
+              <span className="text-[9px] text-muted-foreground">{MONTHS_INITIAL[i]}</span>
             </div>
           ))}
         </div>

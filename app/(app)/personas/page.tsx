@@ -1,7 +1,8 @@
-import { TopBar } from "@/components/layout/TopBar";
+import { PageShell } from "@/components/layout/PageShell";
 import { PersonaClient } from "@/components/personas/PersonaClient";
 import type { PersonaAccountRow } from "@/components/personas/PersonaClient";
 import { createClient } from "@/lib/supabase/server";
+import { getAccountProducts, getAccounts } from "@/lib/data/queries";
 import {
   computePersonaModels,
   personaRecommendations,
@@ -11,7 +12,6 @@ import {
   type Persona,
 } from "@/lib/persona";
 import { isFillerBrand } from "@/lib/brands";
-import type { Account } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
@@ -22,23 +22,14 @@ function isPersona(v: string | null): v is Persona {
 export default async function PersonasPage() {
   const supabase = await createClient();
 
-  const { data: accountsRaw } = await supabase.from("accounts").select("id, name, ca_2026_ytd, persona, status");
-  const accounts = (accountsRaw ?? []) as Pick<Account, "id" | "name" | "ca_2026_ytd" | "persona" | "status">[];
+  const [accounts, allProducts] = await Promise.all([getAccounts(supabase), getAccountProducts(supabase)]);
 
-  const { data: productsRaw } = await supabase
-    .from("account_products")
-    .select("account_id, brand, qty_ordered_cy, sales_value_cy");
   // Filtré aux seules références filler : les imports "Croissance par
   // marque" contiennent aussi des lignes non commerciales (bandeaux, cartes
   // implant...) qui remontent comme "marque" et fausseraient les modèles
   // persona (pénétration/quantité médiane calculées sur du bruit) si on ne
   // les excluait pas ici.
-  const products = ((productsRaw ?? []) as {
-    account_id: string;
-    brand: string;
-    qty_ordered_cy: number | null;
-    sales_value_cy: number | null;
-  }[]).filter((p) => isFillerBrand(p.brand));
+  const products = allProducts.filter((p) => isFillerBrand(p.brand));
 
   // Persona STOCKÉ sur le compte (synchronisé depuis Nexora dans Paramètres).
   const personaByAccount = new Map<string, Persona>();
@@ -65,36 +56,33 @@ export default async function PersonasPage() {
   }
 
   const rows: PersonaAccountRow[] = accounts
-    .filter((a) => a.status !== "lost")
-    .map((a) => {
-      const persona = personaByAccount.get(a.id) ?? null;
-      const accountBrands = brandsByAccount.get(a.id) ?? new Set<string>();
-      const recos = persona
-        ? personaRecommendations(modelByPersona.get(persona), accountBrands).map((b) => b.brand)
-        : [];
-      const crossSell = persona
-        ? crossSellRecommendations(rulesByPersona.get(persona), accountBrands).map((r) => ({
-            brand: r.to,
-            reason: `Achète déjà ${r.from} (+${Math.round((r.confidence - r.supportTo) * 100)} pts vs base du persona)`,
-          }))
-        : [];
-      return { id: a.id, name: a.name, persona, ca: a.ca_2026_ytd ?? 0, recos, crossSell };
-    })
     // Un compte perdu n'a pas sa place dans une liste de recommandations —
     // ses statistiques d'achat passées restent utiles aux modèles persona
     // ci-dessus (plus de données = règles plus robustes), mais lui proposer
     // du cross-sell n'a aucun sens.
-    .filter((r) => r.persona !== null);
+    .filter((a) => a.status !== "lost" && isPersona(a.persona))
+    .map((a) => {
+      const persona = personaByAccount.get(a.id)!;
+      const accountBrands = brandsByAccount.get(a.id) ?? new Set<string>();
+      return {
+        id: a.id,
+        name: a.name,
+        persona,
+        ca: a.ca_2026_ytd ?? 0,
+        recos: personaRecommendations(modelByPersona.get(persona), accountBrands).map((b) => b.brand),
+        crossSell: crossSellRecommendations(rulesByPersona.get(persona), accountBrands).map((r) => ({
+          brand: r.to,
+          reason: `Achète déjà ${r.from} (+${Math.round((r.confidence - r.supportTo) * 100)} pts vs base du persona)`,
+        })),
+      };
+    });
 
   return (
-    <div>
-      <TopBar
-        title="Personas"
-        subtitle="Profils d'achat type par spécialité — pour orienter les recommandations et préparer les trimestres"
-      />
-      <main className="px-8 py-6">
-        <PersonaClient models={models} rows={rows} />
-      </main>
-    </div>
+    <PageShell
+      title="Personas"
+      subtitle="Profils d'achat type par spécialité — pour orienter les recommandations et préparer les trimestres"
+    >
+      <PersonaClient models={models} rows={rows} />
+    </PageShell>
   );
 }

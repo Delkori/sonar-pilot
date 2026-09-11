@@ -1,8 +1,9 @@
-import { TopBar } from "@/components/layout/TopBar";
+import { PageShell } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { ProspectsTable } from "@/components/sponsoring/ProspectsTable";
 import type { ProspectRow } from "@/components/sponsoring/ProspectsTable";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAll } from "@/lib/supabase/fetchAll";
 import { formatEUR } from "@/lib/utils";
 import {
   nexoraConfigured,
@@ -20,28 +21,25 @@ const CONCURRENT_LABS = new Set(["Teoxane"]); // pour distinguer votre labo des 
 export default async function SponsoringPage() {
   if (!nexoraConfigured()) {
     return (
-      <div>
-        <TopBar title="Sponsoring & concurrence" subtitle="Base Transparence Santé (Nexora)" />
-        <main className="px-8 py-6">
-          <Card>
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              Connexion Nexora non configurée. Ajoutez <code>NEXORA_SUPABASE_URL</code> et{" "}
-              <code>NEXORA_SUPABASE_ANON_KEY</code> (ou service role) dans les variables d&apos;environnement Vercel.
-            </CardContent>
-          </Card>
-        </main>
-      </div>
+      <PageShell title="Sponsoring & concurrence" subtitle="Base Transparence Santé (Nexora)">
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">
+            Connexion Nexora non configurée. Ajoutez <code>NEXORA_SUPABASE_URL</code> et{" "}
+            <code>NEXORA_SUPABASE_ANON_KEY</code> (ou service role) dans les variables d&apos;environnement Vercel.
+          </CardContent>
+        </Card>
+      </PageShell>
     );
   }
 
   const supabase = await createClient();
-  const { data: hcpsRaw } = await supabase.from("hcps").select("rpps");
-  const hcpRpps = new Set(((hcpsRaw ?? []) as Pick<Hcp, "rpps">[]).map((h) => h.rpps).filter(Boolean) as string[]);
 
-  const [amounts, prospectsRaw] = await Promise.all([
+  const [hcpRows, amounts, prospectsRaw] = await Promise.all([
+    fetchAll<Pick<Hcp, "rpps">>(() => supabase.from("hcps").select("rpps")),
     getCompetitorAmounts(SECTEUR_REGION),
     getProspects({ depts: SECTEUR_DEPTS, onlySponso: true, onlyEsth: true, limit: 500 }),
   ]);
+  const hcpRpps = new Set(hcpRows.map((h) => h.rpps).filter((r): r is string => !!r));
 
   const totalConcurrents = amounts.filter((a) => !CONCURRENT_LABS.has(a.nom_labo)).reduce((s, a) => s + a.montant, 0);
   const maxMontant = Math.max(...amounts.map((a) => a.montant), 1);
@@ -58,12 +56,10 @@ export default async function SponsoringPage() {
   const absents = prospects.filter((p) => !p.dansSalesforce).length;
 
   return (
-    <div>
-      <TopBar
-        title="Sponsoring & concurrence"
-        subtitle="Base Transparence Santé — médecins sponsorisés et investissement des laboratoires sur votre secteur"
-      />
-      <main className="space-y-6 px-8 py-6">
+    <PageShell
+      title="Sponsoring & concurrence"
+      subtitle="Base Transparence Santé — médecins sponsorisés et investissement des laboratoires sur votre secteur"
+    >
         {amounts.length === 0 && prospects.length === 0 && (
           <Card>
             <CardContent className="py-4 text-sm text-muted-foreground">
@@ -121,8 +117,7 @@ export default async function SponsoringPage() {
             </CardDescription>
           </CardHeader>
           <ProspectsTable rows={prospects} />
-        </Card>
-      </main>
-    </div>
+      </Card>
+    </PageShell>
   );
 }

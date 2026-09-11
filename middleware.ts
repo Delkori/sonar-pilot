@@ -63,5 +63,12 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  // `api/calendar.ics` est explicitement exclu : c'est un flux d'abonnement
+  // consommé par Apple Calendar / Google Agenda, qui ne présentent aucun
+  // cookie de session. Le middleware le redirigeait donc vers /login, et
+  // l'abonnement ne remontait jamais le moindre événement — la route se
+  // protège elle-même par le jeton opaque passé en query.
+  matcher: [
+    "/((?!api/calendar\\.ics|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };

@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { formatEUR } from "@/lib/utils";
+import { MONTHS_SHORT } from "@/lib/dates";
 
 interface Sale {
   year: number;
@@ -7,7 +8,6 @@ interface Sale {
   ca: number;
 }
 
-const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Août", "Sep", "Oct", "Nov", "Déc"];
 
 /**
  * Historique de commandes + récurrence, à partir des ventes mensuelles
@@ -65,7 +65,7 @@ export function OrderHistoryCard({ sales }: { sales: Sale[] }) {
           <div className="rounded-lg border border-border p-2">
             <p className="text-xs text-muted-foreground">Dernière</p>
             <p className="text-sm font-semibold text-foreground">
-              {last ? `${MONTH_LABELS[last.month - 1]} ${last.year}` : "—"}
+              {last ? `${MONTHS_SHORT[last.month - 1]} ${last.year}` : "—"}
             </p>
           </div>
         </div>
@@ -76,9 +76,9 @@ export function OrderHistoryCard({ sales }: { sales: Sale[] }) {
               <div
                 className={`w-full rounded-t ${s.ca > 0 ? "bg-primary-100" : "bg-surface-muted"}`}
                 style={{ height: `${Math.max((s.ca / max) * 70, s.ca > 0 ? 4 : 2)}px` }}
-                title={`${MONTH_LABELS[s.month - 1]} ${s.year} : ${formatEUR(s.ca)}`}
+                title={`${MONTHS_SHORT[s.month - 1]} ${s.year} : ${formatEUR(s.ca)}`}
               />
-              <span className="text-[9px] text-muted-foreground">{MONTH_LABELS[s.month - 1]}</span>
+              <span className="text-[9px] text-muted-foreground">{MONTHS_SHORT[s.month - 1]}</span>
             </div>
           ))}
         </div>

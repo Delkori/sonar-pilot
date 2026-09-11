@@ -9,8 +9,8 @@ import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import type { Account, AccountForecast, ForecastKind } from "@/types/database";
 import { Plus, Trash2, Loader2, Sparkles, CalendarRange, CalendarPlus, DownloadCloud } from "lucide-react";
+import { MONTHS_SHORT } from "@/lib/dates";
 
-const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Août", "Sep", "Oct", "Nov", "Déc"];
 
 type Period = "mois" | "trimestre" | "semestre" | "annee";
 type SortKey = "period" | "boites" | "ca";
@@ -205,7 +205,7 @@ export function ForecastPanel({
     if (period === "mois") {
       return forecasts.map((f) => ({
         key: f.id,
-        label: `${MONTH_LABELS[f.month - 1]} ${f.year}`,
+        label: `${MONTHS_SHORT[f.month - 1]} ${f.year}`,
         year: f.year,
         sortIdx: f.year * 12 + f.month,
         boites: f.boites_prevues ?? 0,
@@ -263,7 +263,7 @@ export function ForecastPanel({
               onChange={(e) => setNewMonth(Number(e.target.value))}
               className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
             >
-              {MONTH_LABELS.map((m, i) => (
+              {MONTHS_SHORT.map((m, i) => (
                 <option key={m} value={i + 1}>{m}</option>
               ))}
             </select>

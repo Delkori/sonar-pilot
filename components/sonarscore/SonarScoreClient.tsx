@@ -15,6 +15,7 @@ import { runForecastBacktest, runBrandBacktest } from "@/lib/forecast-backtest";
 import type { BacktestPurchaseLine, BacktestResult, BrandBacktestReport } from "@/lib/forecast-backtest";
 import type { Account, AccountProductPurchase } from "@/types/database";
 import { TrendingUp, AlertTriangle, FlaskConical, Target } from "lucide-react";
+import { MONTHS_LONG } from "@/lib/dates";
 
 type AccountSlim = Account;
 type PurchaseSlim = Pick<AccountProductPurchase, "account_id" | "brand" | "purchase_date" | "qty" | "value_eur">;
@@ -28,20 +29,6 @@ const TIER_COLOR: Record<SonarTier, string> = {
   tier_4: "#94a3b8",
 };
 
-const MONTH_LABELS_FULL = [
-  "Janvier",
-  "Février",
-  "Mars",
-  "Avril",
-  "Mai",
-  "Juin",
-  "Juillet",
-  "Août",
-  "Septembre",
-  "Octobre",
-  "Novembre",
-  "Décembre",
-];
 
 // Q3 2026 — fenêtre de test explicite (à ajuster si le calendrier de
 // validation change).
@@ -422,11 +409,11 @@ export function SonarScoreClient({ accounts, purchases }: { accounts: AccountSli
         </CardHeader>
         <CardContent>
           <p className="mb-3 text-xs text-muted-foreground">
-            Fenêtre testée : {MONTH_LABELS_FULL[backtestResult.targetMonths[0].month - 1]} {backtestResult.targetMonths[0].year}
+            Fenêtre testée : {MONTHS_LONG[backtestResult.targetMonths[0].month - 1]} {backtestResult.targetMonths[0].year}
             {" → "}
-            {MONTH_LABELS_FULL[backtestResult.targetMonths[backtestResult.targetMonths.length - 1].month - 1]}{" "}
+            {MONTHS_LONG[backtestResult.targetMonths[backtestResult.targetMonths.length - 1].month - 1]}{" "}
             {backtestResult.targetMonths[backtestResult.targetMonths.length - 1].year} · basé sur ce qui était connu
-            avant le {MONTH_LABELS_FULL[backtestResult.cutoff.month - 1]} {backtestResult.cutoff.year}
+            avant le {MONTHS_LONG[backtestResult.cutoff.month - 1]} {backtestResult.cutoff.year}
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {[backtestResult.withProductSignal, backtestResult.withoutProductSignal].map((v) => (

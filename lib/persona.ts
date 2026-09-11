@@ -3,6 +3,8 @@
 // médecins (via RPPS → Nexora). Le modèle type d'un persona = classement des
 // références selon leur pénétration chez les comptes de ce persona.
 
+import { medianOrZero } from "@/lib/stats";
+
 export const PERSONAS = ["Dermatologue", "Chirurgien plasticien", "Médecin esthétique"] as const;
 export type Persona = (typeof PERSONAS)[number];
 
@@ -68,13 +70,6 @@ export interface PersonaModel {
   brands: BrandStat[];
 }
 
-function median(nums: number[]): number {
-  if (nums.length === 0) return 0;
-  const s = [...nums].sort((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
-
 /**
  * Modèles types par persona : pour chaque persona, le classement des
  * références par pénétration (part des comptes qui les achètent).
@@ -135,7 +130,7 @@ export function computePersonaModels(
         brand,
         buyers: bb.qtys.length,
         penetration: bb.qtys.length / accts.size,
-        medianQty: median(bb.qtys),
+        medianQty: medianOrZero(bb.qtys),
         totalValue: bb.value,
       }))
       .sort((a, b) => b.penetration - a.penetration || b.medianQty - a.medianQty);

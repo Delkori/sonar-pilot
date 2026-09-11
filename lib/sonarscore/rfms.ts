@@ -22,6 +22,7 @@
 // score déjà identifié comme travail futur).
 
 import type { PurchaseLine } from "./velocity";
+import { daysBetween } from "@/lib/dates";
 
 export interface AccountOrder {
   date: string; // ISO
@@ -116,7 +117,7 @@ export function computeRfmsScores(
   for (const [accountId, orders] of ordersByAccount) {
     if (orders.length === 0) continue;
     const last = orders[orders.length - 1];
-    const daysSinceLastOrder = Math.round((asOf.getTime() - new Date(last.date).getTime()) / 86400000);
+    const daysSinceLastOrder = daysBetween(last.date, asOf);
 
     const orders12m = orders.filter((o) => o.date >= cutoff12mStr && o.date <= asOfStr);
     const totalValue12m = orders12m.reduce((s, o) => s + o.value, 0);
@@ -125,7 +126,7 @@ export function computeRfmsScores(
     if (orders.length >= 3) {
       const intervals: number[] = [];
       for (let i = 1; i < orders.length; i++) {
-        intervals.push((new Date(orders[i].date).getTime() - new Date(orders[i - 1].date).getTime()) / 86400000);
+        intervals.push(daysBetween(orders[i - 1].date, orders[i].date));
       }
       const mean = intervals.reduce((s, v) => s + v, 0) / intervals.length;
       if (mean > 0) {

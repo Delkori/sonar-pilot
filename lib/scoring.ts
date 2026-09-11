@@ -1,4 +1,5 @@
 import type { Account } from "@/types/database";
+import { weeksSince } from "@/lib/dates";
 
 /**
  * Score de ciblage /100 — reproduction exacte du barème du PAS :
@@ -74,10 +75,8 @@ export interface TargetingScore {
 
 function silenceEnSemaines(account: Account): number | null {
   // Formule PAS : (TODAY() - date dernière commande SAP) / 7
-  if (account.last_order_date) {
-    const days = (Date.now() - new Date(account.last_order_date).getTime()) / 86400000;
-    return Math.max(Math.floor(days / 7), 0);
-  }
+  const weeks = weeksSince(account.last_order_date);
+  if (weeks !== null) return weeks;
   // repli : colonne SILENCE du PAS (en jours)
   if (account.jours_silence !== null) return Math.floor(account.jours_silence / 7);
   return null;

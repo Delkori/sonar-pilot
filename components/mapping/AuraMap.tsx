@@ -111,7 +111,13 @@ export function AuraMap({
     [sponsoringLabs]
   );
   const [sponsorFilter, setSponsorFilter] = useState<string | "all">("all");
-  const sponsoredIds = sponsorFilter !== "all" ? sponsoredAccountIdsByLab.get(sponsorFilter) ?? new Set<string>() : null;
+  // Mémoïsé : recréer le Set à chaque rendu invalidait le useMemo du filtre
+  // de comptes en aval, qui refiltrait donc l'intégralité du secteur à la
+  // moindre interaction (survol d'un point, changement d'onglet…).
+  const sponsoredIds = useMemo(
+    () => (sponsorFilter === "all" ? null : sponsoredAccountIdsByLab.get(sponsorFilter) ?? new Set<string>()),
+    [sponsorFilter, sponsoredAccountIdsByLab]
+  );
   const [hoveredAccountId, setHoveredAccountId] = useState<string | null>(null);
   const hcpsByAccount = useMemo(() => {
     const m = new Map<string, { name: string; rpps: string | null }[]>();

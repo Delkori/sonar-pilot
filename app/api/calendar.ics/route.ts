@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetchAll";
 import { buildIcsCalendar } from "@/lib/ics";
 import type { IcsEvent } from "@/lib/ics";
 
@@ -27,22 +28,56 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Jeton invalide" }, { status: 401 });
   }
 
-  const { data: accountsRaw } = await supabase
-    .from("accounts")
-    .select("id, name, last_order_date, potentiel_boites");
-  const accountById = new Map((accountsRaw ?? []).map((a) => [a.id, a] as const));
-  const nameById = new Map((accountsRaw ?? []).map((a) => [a.id, a.name] as const));
+  // Quatre lectures indépendantes, désormais en parallèle et paginées : au
+  // delà de 1000 lignes, les pages suivantes d'actions/prévisions/événements
+  // étaient purement et simplement absentes du flux.
+  type AccountLite = { id: string; name: string; last_order_date: string | null; potentiel_boites: number | null };
+  type ActionLite = { id: string; account_id: string; type: string; content: string; due_date: string | null };
+  type ForecastLite = {
+    id: string;
+    account_id: string;
+    year: number;
+    month: number;
+    boites_prevues: number | null;
+    ca_prevu: number | null;
+    note: string | null;
+  };
+  type PlanningLite = {
+    id: string;
+    account_id: string | null;
+    type: string;
+    title: string | null;
+    note: string | null;
+    start_at: string;
+    end_at: string;
+  };
+
+  const [accountsRaw, actions, forecasts, planningEvents] = await Promise.all([
+    fetchAll<AccountLite>(() => supabase.from("accounts").select("id, name, last_order_date, potentiel_boites")),
+    fetchAll<ActionLite>(() =>
+      supabase
+        .from("account_actions")
+        .select("id, account_id, type, content, due_date")
+        .not("due_date", "is", null)
+        .eq("done", false)
+    ),
+    fetchAll<ForecastLite>(() =>
+      supabase
+        .from("account_forecasts")
+        .select("id, account_id, year, month, boites_prevues, ca_prevu, note")
+        .eq("kind", "prevision")
+    ),
+    fetchAll<PlanningLite>(() =>
+      supabase.from("planning_events").select("id, account_id, type, title, note, start_at, end_at")
+    ),
+  ]);
+
+  const accountById = new Map(accountsRaw.map((a) => [a.id, a] as const));
 
   const events: IcsEvent[] = [];
 
-  const { data: actions } = await supabase
-    .from("account_actions")
-    .select("id, account_id, type, content, due_date, done")
-    .not("due_date", "is", null)
-    .eq("done", false);
-
-  for (const a of actions ?? []) {
-    const accountName = nameById.get(a.account_id) ?? "Compte";
+  for (const a of actions) {
+    const accountName = accountById.get(a.account_id)?.name ?? "Compte";
     events.push({
       uid: `action-${a.id}`,
       title: `${a.type === "relance" ? "Relance" : "Action"} — ${accountName}`,
@@ -52,13 +87,8 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const { data: forecasts } = await supabase
-    .from("account_forecasts")
-    .select("id, account_id, year, month, boites_prevues, ca_prevu, note")
-    .eq("kind", "prevision");
-
-  for (const f of forecasts ?? []) {
-    const accountName = nameById.get(f.account_id) ?? "Compte";
+  for (const f of forecasts) {
+    const accountName = accountById.get(f.account_id)?.name ?? "Compte";
     const date = `${f.year}-${String(f.month).padStart(2, "0")}-01`;
     events.push({
       uid: `forecast-${f.id}`,
@@ -75,12 +105,11 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const { data: forecastsForPlanning } = await supabase
-    .from("account_forecasts")
-    .select("account_id, year, month, boites_prevues, ca_prevu")
-    .eq("kind", "prevision");
-  const forecastByAccount = new Map<string, { boites_prevues: number | null; ca_prevu: number | null; year: number; month: number }>();
-  for (const f of forecastsForPlanning ?? []) {
+  // Prévision la plus importante par compte, réutilisée pour enrichir les
+  // événements de planning — la même requête était exécutée une seconde fois
+  // juste pour cela.
+  const forecastByAccount = new Map<string, ForecastLite>();
+  for (const f of forecasts) {
     const cur = forecastByAccount.get(f.account_id);
     if (!cur || (f.ca_prevu ?? 0) > (cur.ca_prevu ?? 0)) forecastByAccount.set(f.account_id, f);
   }
@@ -92,11 +121,7 @@ export async function GET(req: NextRequest) {
     admin: "Administratif",
   };
 
-  const { data: planningEvents } = await supabase
-    .from("planning_events")
-    .select("id, account_id, type, title, note, start_at, end_at");
-
-  for (const p of planningEvents ?? []) {
+  for (const p of planningEvents) {
     const account = p.account_id ? accountById.get(p.account_id) : null;
     const forecast = p.account_id ? forecastByAccount.get(p.account_id) : null;
     const descParts = [

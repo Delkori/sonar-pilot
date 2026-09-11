@@ -1,12 +1,13 @@
 {
-  "name": "pas-cockpit",
+  "name": "sonar-pilot",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",
@@ -22,7 +23,6 @@
     "recharts": "^3.9.2",
     "server-only": "^0.0.1",
     "tailwind-merge": "^3.6.0",
-    "topojson-client": "^3.1.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

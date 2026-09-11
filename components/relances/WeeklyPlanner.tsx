@@ -19,6 +19,7 @@ import { formatEUR, formatNumber } from "@/lib/utils";
 import type { Account, AccountAction, AccountForecast, PlanningEvent, PlanningEventType } from "@/types/database";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Wand2, Trash2, Loader2, Phone, FileText, MapPin, Compass, X, Target, CalendarClock, Check } from "lucide-react";
+import { MONTHS_LONG } from "@/lib/dates";
 
 const locales = { fr };
 const localizer = dateFnsLocalizer({
@@ -29,7 +30,6 @@ const localizer = dateFnsLocalizer({
   locales,
 });
 
-const MONTH_LABELS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 
 const TYPE_META: Record<PlanningEventType, { label: string; color: string; icon: typeof MapPin }> = {
   visite: { label: "Visite", color: "#4f46e5", icon: MapPin },
@@ -521,7 +521,7 @@ export function WeeklyPlanner({
                     <p className="mt-1.5 text-sm text-foreground">
                       {formatNumber(selectedForecast.boites_prevues)} boîtes · {formatEUR(selectedForecast.ca_prevu)}
                       {" "}
-                      ({MONTH_LABELS[selectedForecast.month - 1]} {selectedForecast.year})
+                      ({MONTHS_LONG[selectedForecast.month - 1]} {selectedForecast.year})
                       {selectedForecast.commentaire && (
                         <span className="mt-1 block text-xs text-muted-foreground">{selectedForecast.commentaire}</span>
                       )}

@@ -11,6 +11,8 @@
 // pondération récence des intervalles, etc.).
 
 import type { BrandVelocity, PurchaseLine } from "./velocity";
+import { median } from "@/lib/stats";
+import { addDays, daysBetween } from "@/lib/dates";
 
 export type PredictionConfidence = "compte" | "marque" | "saisonnier" | "insuffisante";
 
@@ -23,19 +25,6 @@ export interface AccountBrandPrediction {
   confidence: PredictionConfidence;
   intervalUsedDays: number | null;
   purchaseCount: number;
-}
-
-function median(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-}
-
-function addDays(dateStr: string, days: number): string {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + Math.round(days));
-  return d.toISOString().slice(0, 10);
 }
 
 function groupByAccountBrand(lines: PurchaseLine[]): Map<string, PurchaseLine[]> {
@@ -77,10 +66,7 @@ export function predictNextOrders(
     if (purchases.length >= 2) {
       const intervals: number[] = [];
       for (let i = 1; i < purchases.length; i++) {
-        intervals.push(
-          (new Date(purchases[i].purchase_date).getTime() - new Date(purchases[i - 1].purchase_date).getTime()) /
-            86400000
-        );
+        intervals.push(daysBetween(purchases[i - 1].purchase_date, purchases[i].purchase_date));
       }
       const ownInterval = median(intervals)!;
       predictions.push({

@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { PriorityAccountsTable } from "@/components/dashboard/PriorityAccountsTable";
 import { QuickActionCard } from "@/components/dashboard/QuickActionCard";
-import { DepartmentBreakdown, DEPT_NAMES } from "@/components/dashboard/DepartmentBreakdown";
+import { DepartmentBreakdown } from "@/components/dashboard/DepartmentBreakdown";
 import { InteractiveMonthlyChart } from "@/components/dashboard/InteractiveMonthlyChart";
 import { CustomizableLayout, type LayoutBlock } from "@/components/dashboard/CustomizableLayout";
 import { TopFlopClientsCard } from "@/components/dashboard/TopFlopClientsCard";
@@ -15,6 +15,8 @@ import { OrderRecurrenceCard } from "@/components/dashboard/OrderRecurrenceCard"
 import { CompetitorShareCard } from "@/components/dashboard/CompetitorShareCard";
 import type { CompetitorAmount } from "@/lib/nexora/queries";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
+import { DEPT_NAMES, departmentCodeOf } from "@/lib/geo";
+import { MONTHS_SHORT } from "@/lib/dates";
 import { suggestMonthlyForecast } from "@/lib/forecast";
 import { computeTargetingScore, ACTION_META } from "@/lib/scoring";
 import type { ActionCode } from "@/lib/scoring";
@@ -33,7 +35,7 @@ import {
   Percent,
   MapPin,
 } from "lucide-react";
-import type { Account, AccountAction, Hcp, HcpSponsorship } from "@/types/database";
+import type { Account } from "@/types/database";
 import Link from "next/link";
 
 const YEAR_FIELDS: Record<number, keyof Account> = {
@@ -42,7 +44,6 @@ const YEAR_FIELDS: Record<number, keyof Account> = {
   2026: "ca_2026_ytd",
 };
 const YEARS = [2024, 2025, 2026];
-const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Août", "Sep", "Oct", "Nov", "Déc"];
 
 interface MonthlySale {
   account_id: string;
@@ -66,9 +67,6 @@ export function DashboardClient({
   products,
   forecasts,
   objectifs,
-  actions = [],
-  hcps = [],
-  sponsorships = [],
   competitorAmounts = [],
   lastImportLabel,
 }: {
@@ -77,9 +75,6 @@ export function DashboardClient({
   products: ProductRow[];
   forecasts: ForecastRow[];
   objectifs: ForecastRow[];
-  actions?: AccountAction[];
-  hcps?: Hcp[];
-  sponsorships?: HcpSponsorship[];
   competitorAmounts?: CompetitorAmount[];
   lastImportLabel: string;
 }) {
@@ -90,10 +85,7 @@ export function DashboardClient({
   // ── Filtre des comptes par département
   const filteredAccounts = useMemo(() => {
     if (!selectedDept) return accounts;
-    return accounts.filter((a) => {
-      const code = a.department_code || (a.postal_code ? a.postal_code.slice(0, 2) : "");
-      return code === selectedDept;
-    });
+    return accounts.filter((a) => departmentCodeOf(a) === selectedDept);
   }, [accounts, selectedDept]);
 
   const availableMonthsByYear = useMemo(() => {
@@ -330,9 +322,9 @@ export function DashboardClient({
   const displayedCa = month !== null ? caMonth : caYear;
   const displayedCaLabel =
     month !== null
-      ? `CA réalisé ${MONTH_LABELS[month - 1]} ${year}`
+      ? `CA réalisé ${MONTHS_SHORT[month - 1]} ${year}`
       : ytdPace
-      ? `CA réalisé YTD ${year} (à fin ${MONTH_LABELS[ytdPace.cutoffMonth - 1]})`
+      ? `CA réalisé YTD ${year} (à fin ${MONTHS_SHORT[ytdPace.cutoffMonth - 1]})`
       : `CA réalisé ${year}`;
 
   return (
@@ -376,7 +368,7 @@ export function DashboardClient({
                     month === m ? "bg-primary-100 text-primary-700" : "text-muted-foreground hover:bg-surface-muted"
                   }`}
                 >
-                  {MONTH_LABELS[m - 1]}
+                  {MONTHS_SHORT[m - 1]}
                 </button>
               ))}
             </div>

@@ -5,8 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import type { SectorObjective } from "@/types/database";
 import { Loader2, CalendarRange } from "lucide-react";
+import { MONTHS_LONG } from "@/lib/dates";
 
-const MONTHS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 
 export function SectorObjectivesEditor({ initial }: { initial: SectorObjective[] }) {
   const now = new Date();
@@ -107,7 +107,7 @@ export function SectorObjectivesEditor({ initial }: { initial: SectorObjective[]
           </tr>
         </thead>
         <tbody>
-          {MONTHS.map((label, i) => {
+          {MONTHS_LONG.map((label, i) => {
             const m = i + 1;
             const row = byMonth.get(m);
             return (

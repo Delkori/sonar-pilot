@@ -3,26 +3,10 @@
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { formatEUR, formatPct } from "@/lib/utils";
+import { departmentCodeOf, departmentLabel } from "@/lib/geo";
 import { computeTargetingScore } from "@/lib/scoring";
 import type { Account } from "@/types/database";
 import { MapPin } from "lucide-react";
-
-export const DEPT_NAMES: Record<string, string> = {
-  "01": "Ain",
-  "03": "Allier",
-  "07": "Ardèche",
-  "15": "Cantal",
-  "26": "Drôme",
-  "38": "Isère",
-  "42": "Loire",
-  "43": "Haute-Loire",
-  "58": "Nièvre",
-  "63": "Puy-de-Dôme",
-  "69": "Rhône",
-  "71": "Saône-et-Loire",
-  "73": "Savoie",
-  "74": "Haute-Savoie",
-};
 
 interface DepartmentBreakdownProps {
   accounts: Account[];
@@ -51,14 +35,8 @@ export function DepartmentBreakdown({
     >();
 
     for (const account of accounts) {
-      // extraire le code département depuis account.department_code ou le postal_code
-      let code = account.department_code;
-      if (!code && account.postal_code) {
-        code = account.postal_code.slice(0, 2);
-      }
-      if (!code) code = "NC"; // Non Classé
-
-      const deptName = DEPT_NAMES[code] ?? (code === "NC" ? "Non renseigné" : `Dép ${code}`);
+      const code = departmentCodeOf(account) || "NC"; // NC = non classé
+      const deptName = departmentLabel(code);
       const score = computeTargetingScore(account);
       const caVal = (account[yearField] as number | null) ?? 0;
 

@@ -1,35 +1,32 @@
-import { TopBar } from "@/components/layout/TopBar";
+import { PageShell } from "@/components/layout/PageShell";
 import { Card } from "@/components/ui/Card";
 import { MatchReviewPanel } from "@/components/admin/MatchReviewPanel";
 import { createClient } from "@/lib/supabase/server";
-import type { Account, NameMatchCandidate } from "@/types/database";
+import { fetchAll } from "@/lib/supabase/fetchAll";
+import { getAccounts } from "@/lib/data/queries";
+import type { NameMatchCandidate } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
 export default async function CorrespondancesPage() {
   const supabase = await createClient();
 
-  const { data: candidatesRaw } = await supabase
-    .from("name_match_candidates")
-    .select("*")
-    .eq("status", "pending")
-    .order("created_at", { ascending: false });
-  const candidates = (candidatesRaw ?? []) as NameMatchCandidate[];
-
-  const { data: accountsRaw } = await supabase.from("accounts").select("*").order("name");
-  const accounts = (accountsRaw ?? []) as Account[];
+  const [candidates, accounts] = await Promise.all([
+    fetchAll<NameMatchCandidate>(
+      () => supabase.from("name_match_candidates").select("*").eq("status", "pending"),
+      { orderBy: "created_at", ascending: false }
+    ),
+    getAccounts(supabase),
+  ]);
 
   return (
-    <div>
-      <TopBar
-        title="Correspondances à valider"
-        subtitle="Noms de facture qui ne correspondent pas clairement à un compte du référentiel — confirmez le bon compte, puis relancez l'import pour appliquer les données"
-      />
-      <main className="px-8 py-6">
-        <Card className="overflow-hidden">
-          <MatchReviewPanel candidates={candidates} accounts={accounts} />
-        </Card>
-      </main>
-    </div>
+    <PageShell
+      title="Correspondances à valider"
+      subtitle="Noms de facture qui ne correspondent pas clairement à un compte du référentiel — confirmez le bon compte, puis relancez l'import pour appliquer les données"
+    >
+      <Card className="overflow-hidden">
+        <MatchReviewPanel candidates={candidates} accounts={accounts} />
+      </Card>
+    </PageShell>
   );
 }

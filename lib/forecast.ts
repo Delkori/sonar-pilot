@@ -7,6 +7,7 @@ import type { PurchaseLine } from "./sonarscore/velocity";
 import { predictNextOrders } from "./sonarscore/prediction";
 import type { AccountBrandPrediction, PredictionConfidence } from "./sonarscore/prediction";
 import { predictSeasonalOrders } from "./sonarscore/seasonality";
+import { monthIndex, monthIndexFromDateStr } from "@/lib/dates";
 
 export interface SuggestedForecast {
   year: number;
@@ -163,20 +164,11 @@ interface MonthSignal {
   expectedQty?: number | null;
 }
 
-function monthIndex(year: number, month: number): number {
-  return year * 12 + month;
-}
-
 function orderedMonthIndices(sales: MonthlySaleRow[]): number[] {
   return sales
     .filter((s) => s.ca > 0)
     .map((s) => monthIndex(s.year, s.month))
     .sort((a, b) => a - b);
-}
-
-function monthIndexFromDateStr(dateStr: string): number {
-  const d = new Date(dateStr);
-  return monthIndex(d.getFullYear(), d.getMonth() + 1);
 }
 
 /**

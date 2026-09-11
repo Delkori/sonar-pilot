@@ -4,6 +4,9 @@
 // été validée sur données réelles : le backtest utilisateur montre des
 // écarts de 2 à 3x avec la réalité (RHA1 = 95j, pas 35j).
 
+import { median } from "@/lib/stats";
+import { daysBetween } from "@/lib/dates";
+
 export interface PurchaseLine {
   account_id: string;
   brand: string;
@@ -16,17 +19,6 @@ export interface BrandVelocity {
   medianDays: number | null; // médiane des intervalles entre achats du même compte, tous comptes confondus
   sampleSize: number; // nombre d'intervalles utilisés (comptes ayant acheté ≥ 2 fois)
   accountsWithRepeatPurchase: number;
-}
-
-function median(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-}
-
-function daysBetween(a: string, b: string): number {
-  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000);
 }
 
 /** Regroupe les lignes par compte × marque, triées par date. */

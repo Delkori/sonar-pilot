@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { UploadCloud, CheckCircle2, AlertCircle, Loader2, Trash2 } from "lucide-react";
+import { UploadCloud, CheckCircle2, AlertCircle, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/Button";
 
 interface ImportResult {
   importId?: string;
@@ -47,7 +48,12 @@ export function ImportForm() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | { error: string } | null>(null);
   const [geocoding, setGeocoding] = useState(false);
-  const [geocodeResult, setGeocodeResult] = useState<{ geocoded: number; failed: number } | null>(null);
+  const [geocodeResult, setGeocodeResult] = useState<{
+    geocoded: number;
+    failed: number;
+    remaining: number;
+    done: boolean;
+  } | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [cleanupResult, setCleanupResult] = useState<{ cleaned: number } | null>(null);
 
@@ -74,7 +80,11 @@ export function ImportForm() {
     );
     if (!confirmed) return;
     setCleaning(true);
-    const res = await fetch("/api/cleanup-pas", { method: "POST" });
+    const res = await fetch("/api/cleanup-pas", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: "cleanup-pas" }),
+    });
     const json = await res.json();
     setCleanupResult(json);
     setCleaning(false);
@@ -108,14 +118,10 @@ export function ImportForm() {
           ))}
         </div>
 
-        <button
-          onClick={handleImport}
-          disabled={!canImport || loading}
-          className="mt-6 flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-600 disabled:opacity-50"
-        >
-          {loading ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+        <Button variant="primary" className="mt-6" onClick={handleImport} disabled={!canImport} loading={loading}>
+          {!loading && <UploadCloud size={15} />}
           Lancer l&apos;import
-        </button>
+        </Button>
       </div>
 
       {result && (
@@ -158,14 +164,10 @@ export function ImportForm() {
           plus alimentés par le nouveau pipeline et faussent le dashboard s&apos;ils restent figés. Le score de ciblage
           n&apos;est pas affecté, il est recalculé en direct.
         </p>
-        <button
-          onClick={handleCleanupPas}
-          disabled={cleaning}
-          className="flex items-center gap-2 rounded-lg border border-danger/40 px-4 py-2 text-sm font-medium text-danger hover:bg-danger/5 disabled:opacity-50"
-        >
-          {cleaning ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+        <Button variant="danger" onClick={handleCleanupPas} loading={cleaning}>
+          {!cleaning && <Trash2 size={15} />}
           Nettoyer les données PAS
-        </button>
+        </Button>
         {cleanupResult && (
           <p className="mt-3 text-sm text-muted-foreground">{cleanupResult.cleaned} compte(s) nettoyé(s).</p>
         )}
@@ -177,17 +179,21 @@ export function ImportForm() {
         <p className="mb-3 text-sm text-muted-foreground">
           Convertit ville + code postal en latitude/longitude pour les comptes qui n&apos;en ont pas encore, stocke le résultat en base.
         </p>
-        <button
-          onClick={handleGeocode}
-          disabled={geocoding}
-          className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-surface-muted disabled:opacity-50"
-        >
-          {geocoding ? <Loader2 size={16} className="animate-spin" /> : null}
+        <Button onClick={handleGeocode} loading={geocoding}>
           Lancer le géocodage
-        </button>
+        </Button>
         {geocodeResult && (
           <p className="mt-3 text-sm text-muted-foreground">
             {geocodeResult.geocoded} compte(s) géocodé(s), {geocodeResult.failed} échec(s).
+            {/* Le lot s'arrête avant le timeout plateforme : sans ce rappel,
+                un secteur volumineux paraissait géocodé alors qu'il restait
+                des comptes à traiter. */}
+            {!geocodeResult.done && (
+              <>
+                {" "}
+                <strong>{geocodeResult.remaining} compte(s) restant(s)</strong> — relancez le géocodage pour continuer.
+              </>
+            )}
           </p>
         )}
       </div>

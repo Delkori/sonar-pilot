@@ -1,32 +1,20 @@
-import { TopBar } from "@/components/layout/TopBar";
+import { PageShell } from "@/components/layout/PageShell";
 import { SonarScoreClient } from "@/components/sonarscore/SonarScoreClient";
 import { createClient } from "@/lib/supabase/server";
-import type { Account, AccountProductPurchase } from "@/types/database";
+import { getAccounts, getPurchaseLines } from "@/lib/data/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function SonarScorePage() {
   const supabase = await createClient();
-  const { data: accountsRaw } = await supabase.from("accounts").select("*").order("name");
-  const accounts = (accountsRaw ?? []) as Account[];
-
-  const { data: purchasesRaw } = await supabase
-    .from("account_product_purchases")
-    .select("account_id, brand, purchase_date, qty, value_eur");
-  const purchases = (purchasesRaw ?? []) as Pick<
-    AccountProductPurchase,
-    "account_id" | "brand" | "purchase_date" | "qty" | "value_eur"
-  >[];
+  const [accounts, purchases] = await Promise.all([getAccounts(supabase), getPurchaseLines(supabase)]);
 
   return (
-    <div>
-      <TopBar
-        title="SonarScore"
-        subtitle="Module de scoring comportemental en test — RFM-S, vélocités de réapprovisionnement, matrice contrat, prévision d'achat (en coexistence avec le score de ciblage existant)"
-      />
-      <main className="px-8 py-6">
-        <SonarScoreClient accounts={accounts} purchases={purchases} />
-      </main>
-    </div>
+    <PageShell
+      title="SonarScore"
+      subtitle="Scoring comportemental (bêta) — RFM-S, vélocités de réapprovisionnement, matrice contrat et prévision d'achat, en coexistence avec le score de ciblage"
+    >
+      <SonarScoreClient accounts={accounts} purchases={purchases} />
+    </PageShell>
   );
 }

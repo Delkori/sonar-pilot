@@ -13,8 +13,8 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { formatEUR } from "@/lib/utils";
+import { MONTHS_SHORT } from "@/lib/dates";
 
-const MONTH_LABELS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Jun", "Jul", "Août", "Sep", "Oct", "Nov", "Déc"];
 
 interface InteractiveMonthlyChartProps {
   year: number;
@@ -33,7 +33,7 @@ export function InteractiveMonthlyChart({
   selectedMonth,
   onSelectMonth,
 }: InteractiveMonthlyChartProps) {
-  const chartData = MONTH_LABELS.map((label, index) => ({
+  const chartData = MONTHS_SHORT.map((label, index) => ({
     monthNum: index + 1,
     name: label,
     Réalisé: caByMonth[index] || 0,

@@ -1,4 +1,5 @@
 import type { Account, AccountAction } from "@/types/database";
+import { addDays, toDateStr } from "@/lib/dates";
 import { ACTION_META, computeTargetingScore } from "./scoring";
 import type { TargetingScore } from "./scoring";
 
@@ -18,8 +19,8 @@ const SILENCE_THRESHOLD_DAYS = 21;
  */
 export function getPhoneFollowUps(accounts: Account[], actions: AccountAction[]): PhoneFollowUp[] {
   const today = new Date();
-  const todayStr = today.toISOString().slice(0, 10);
-  const in7DaysStr = new Date(today.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+  const todayStr = toDateStr(today);
+  const in7DaysStr = addDays(today, 7);
 
   const hasPendingThisWeek = new Set(
     actions
@@ -62,7 +63,10 @@ export function nextWeekdays(count: number): string[] {
   while (days.length < count) {
     d.setDate(d.getDate() + 1);
     const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) days.push(d.toISOString().slice(0, 10));
+    // `toDateStr` (et non toISOString) : en heure d'été, minuit local tombe
+    // la veille en UTC — une relance planifiée un lundi se retrouvait datée
+    // du dimanche, donc filtrée comme non ouvrée en aval.
+    if (dow !== 0 && dow !== 6) days.push(toDateStr(d));
   }
   return days;
 }

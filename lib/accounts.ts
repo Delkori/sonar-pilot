@@ -1,4 +1,5 @@
 import type { Account, AccountStatus } from "@/types/database";
+import { daysSince, monthIndex } from "@/lib/dates";
 
 /**
  * Statut dérivé de l'activité réelle (dernière commande facturée), pas d'un
@@ -6,8 +7,8 @@ import type { Account, AccountStatus } from "@/types/database";
  * imports. Un compte n'ayant jamais commandé reste "à suivre" (prospect).
  */
 export function statusFromLastOrder(lastOrderDate: string | null): AccountStatus {
-  if (!lastOrderDate) return "a_suivre";
-  const silenceDays = Math.floor((Date.now() - new Date(lastOrderDate).getTime()) / 86400000);
+  const silenceDays = daysSince(lastOrderDate);
+  if (silenceDays === null) return "a_suivre";
   if (silenceDays <= 180) return "actif";
   if (silenceDays <= 730) return "a_risque";
   return "lost";
@@ -43,7 +44,7 @@ export function recurrenceByAccount(
   const byAcc = new Map<string, number[]>();
   for (const s of sales) {
     if (s.ca <= 0) continue;
-    const idx = s.year * 12 + s.month;
+    const idx = monthIndex(s.year, s.month);
     const arr = byAcc.get(s.account_id);
     if (arr) arr.push(idx);
     else byAcc.set(s.account_id, [idx]);
@@ -60,10 +61,8 @@ export function recurrenceByAccount(
  */
 export function isProspect(a: Account): boolean {
   if (a.status === "lost" || a.status === "new") return true;
-  if (a.last_order_date) {
-    const days = (Date.now() - new Date(a.last_order_date).getTime()) / 86400000;
-    return days > 365;
-  }
+  const days = daysSince(a.last_order_date);
+  if (days !== null) return days > 365;
   // aucune date de commande connue → jamais commandé
   return (a.ca_2024 ?? 0) === 0 && (a.ca_2025 ?? 0) === 0 && (a.ca_2026_ytd ?? 0) === 0;
 }

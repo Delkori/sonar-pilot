@@ -19,6 +19,7 @@ import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import type { Account, AccountForecast, Hcp, SectorObjective } from "@/types/database";
 import { GripVertical, Trash2, Loader2, Target, Wand2, Stethoscope, FileDown } from "lucide-react";
 import * as XLSX from "xlsx";
+import { MONTHS_LONG } from "@/lib/dates";
 
 type HcpRow = Pick<Hcp, "id" | "account_id" | "name" | "potentiel_boites">;
 type ProductRow = {
@@ -31,7 +32,6 @@ type ProductRow = {
 type CardSort = "ca" | "boites" | "score" | "nom" | "silence";
 const SEGMENTS = ["A", "B", "C", "D", "E"] as const;
 
-const MONTH_LABELS = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 
 interface MonthlySale {
   account_id: string;
@@ -267,7 +267,7 @@ export function PilotageBoard({
 
   const periodRange =
     months.length > 0
-      ? `${MONTH_LABELS[months[0].month - 1].slice(0, 3)} ${months[0].year} → ${MONTH_LABELS[months[months.length - 1].month - 1].slice(0, 3)} ${months[months.length - 1].year}`
+      ? `${MONTHS_LONG[months[0].month - 1].slice(0, 3)} ${months[0].year} → ${MONTHS_LONG[months[months.length - 1].month - 1].slice(0, 3)} ${months[months.length - 1].year}`
       : "";
 
   // Couverture du portefeuille : comptes planifiés vs total, prospects.
@@ -635,7 +635,7 @@ export function PilotageBoard({
         const accHcps = hcpsByAccount.get(f.account_id) ?? [];
         const allocation = allocateToHcps(accHcps, f.boites_prevues ?? 0, f.ca_prevu ?? 0);
         return {
-          Mois: `${MONTH_LABELS[month - 1]} ${year}`,
+          Mois: `${MONTHS_LONG[month - 1]} ${year}`,
           Compte: account?.name ?? "—",
           Segment: account?.segment ?? "",
           Score: account ? computeTargetingScore(account).total : "",
@@ -825,7 +825,7 @@ export function PilotageBoard({
                       title={`Réalisé : ${formatEUR(realise)}`}
                     />
                   </div>
-                  <span className="text-[9px] text-muted-foreground">{MONTH_LABELS[i].slice(0, 3)}</span>
+                  <span className="text-[9px] text-muted-foreground">{MONTHS_LONG[i].slice(0, 3)}</span>
                 </div>
               );
             })}
@@ -967,7 +967,7 @@ export function PilotageBoard({
               <div className="border-b border-border p-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-sm font-semibold text-foreground">
-                    {MONTH_LABELS[month - 1]} <span className="text-muted-foreground">{year}</span>
+                    {MONTHS_LONG[month - 1]} <span className="text-muted-foreground">{year}</span>
                   </h4>
                   {isSaving && <Loader2 size={13} className="animate-spin text-muted-foreground" />}
                 </div>
@@ -1079,7 +1079,7 @@ export function PilotageBoard({
                           >
                             {months.map((m) => (
                               <option key={`${m.year}-${m.month}`} value={`${m.year}-${m.month}`}>
-                                {MONTH_LABELS[m.month - 1]} {m.year}
+                                {MONTHS_LONG[m.month - 1]} {m.year}
                               </option>
                             ))}
                           </select>
@@ -1244,7 +1244,7 @@ function OpportunityCard({
         >
           {months.map((m) => (
             <option key={`${m.year}-${m.month}`} value={`${m.year}-${m.month}`}>
-              {MONTH_LABELS[m.month - 1]} {m.year}
+              {MONTHS_LONG[m.month - 1]} {m.year}
             </option>
           ))}
         </select>

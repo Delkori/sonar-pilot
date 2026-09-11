@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -9,7 +9,21 @@ export const runtime = "nodejs";
  * factures) — les laisser en place donnerait une impression de données
  * à jour alors qu'elles sont figées à la date du dernier PAS importé.
  */
-export async function POST() {
+/**
+ * Opération irréversible portant sur TOUS les comptes : elle exige un
+ * marqueur explicite dans le corps de la requête. Sans lui, un POST parti
+ * par accident (préchargement, rejeu d'historique, script de test) effaçait
+ * silencieusement cinq colonnes sur l'intégralité du référentiel.
+ */
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => null);
+  if (!body || body.confirm !== "cleanup-pas") {
+    return NextResponse.json(
+      { error: "Confirmation manquante : envoyez { \"confirm\": \"cleanup-pas\" }." },
+      { status: 400 }
+    );
+  }
+
   const supabase = await createClient();
 
   const { data, error } = await supabase

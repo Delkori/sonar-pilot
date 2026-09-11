@@ -1,81 +1,55 @@
-import { TopBar } from "@/components/layout/TopBar";
+import { PageShell } from "@/components/layout/PageShell";
 import { DashboardClient } from "@/components/dashboard/DashboardClient";
 import { createClient } from "@/lib/supabase/server";
+import {
+  getAccounts,
+  getAccountProducts,
+  getForecasts,
+  getLastImportLabel,
+  getMonthlySales,
+  getSectorObjectives,
+} from "@/lib/data/queries";
 import { getCompetitorAmounts, SECTEUR_REGION } from "@/lib/nexora/queries";
-import type { Account, AccountAction, Hcp, HcpSponsorship } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
-  const { data: accountsRaw } = await supabase.from("accounts").select("*");
-  const accounts = (accountsRaw ?? []) as Account[];
 
-  const { data: monthlyRaw } = await supabase
-    .from("account_monthly_sales")
-    .select("account_id, year, month, ca");
-  const monthlySales = monthlyRaw ?? [];
+  // Requêtes indépendantes : en série, la page attendait la somme des
+  // latences Supabase (6 aller-retours) avant le premier octet.
+  const [accounts, monthlySales, products, forecasts, sectorObjectives, lastImportLabel] = await Promise.all([
+    getAccounts(supabase),
+    getMonthlySales(supabase),
+    getAccountProducts(supabase),
+    getForecasts(supabase, "prevision"),
+    getSectorObjectives(supabase),
+    getLastImportLabel(supabase),
+  ]);
 
-  const { data: productsRaw } = await supabase
-    .from("account_products")
-    .select("account_id, brand, sales_value_ly, sales_value_cy, qty_ordered_ly, qty_ordered_cy, growth_rate_pct");
-  const products = productsRaw ?? [];
-
-  const { data: forecastsRaw } = await supabase
-    .from("account_forecasts")
-    .select("account_id, year, month, boites_prevues, ca_prevu")
-    .eq("kind", "prevision");
-  const forecasts = forecastsRaw ?? [];
-
-  const { data: actionsRaw } = await supabase.from("account_actions").select("*");
-  const actions = (actionsRaw ?? []) as AccountAction[];
-
-  const { data: hcpsRaw } = await supabase.from("hcps").select("*");
-  const hcps = (hcpsRaw ?? []) as Hcp[];
-
-  const { data: sponsoRaw } = await supabase.from("hcp_sponsorships").select("*");
-  const sponsorships = (sponsoRaw ?? []) as HcpSponsorship[];
-
-  // Objectifs du secteur (saisis dans Paramètres) — mappés au format attendu
-  // par le dashboard pour alimenter le graphique Objectif vs Réalisé.
-  const { data: sectorObjRaw } = await supabase.from("sector_objectives").select("*");
-  const objectifs = (sectorObjRaw ?? []).map((o) => ({
+  // Objectifs du secteur (saisis dans Paramètres) — remis au format
+  // attendu par le graphique Objectif vs Réalisé.
+  const objectifs = sectorObjectives.map((o) => ({
     account_id: "",
-    year: o.year as number,
-    month: o.month as number,
-    boites_prevues: o.objectif_boites as number,
-    ca_prevu: o.objectif_ca as number,
+    year: o.year,
+    month: o.month,
+    boites_prevues: o.objectif_boites,
+    ca_prevu: o.objectif_ca,
   }));
-
-  const lastImport = await supabase
-    .from("imports")
-    .select("imported_at, filename")
-    .order("imported_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const lastImportLabel = lastImport.data
-    ? `Dernière mise à jour : ${new Date(lastImport.data.imported_at).toLocaleString("fr-FR")} (${lastImport.data.filename})`
-    : "Aucun import réalisé pour le moment — rendez-vous dans Import";
 
   const competitorAmounts = await getCompetitorAmounts(SECTEUR_REGION);
 
   return (
-    <div>
-      <TopBar title="Dashboard — Secteur Auvergne-Rhône-Alpes" />
+    <PageShell title="Dashboard" subtitle="Secteur Auvergne-Rhône-Alpes">
       <DashboardClient
         accounts={accounts}
         monthlySales={monthlySales}
         products={products}
         forecasts={forecasts}
         objectifs={objectifs}
-        actions={actions}
-        hcps={hcps}
-        sponsorships={sponsorships}
         competitorAmounts={competitorAmounts}
         lastImportLabel={lastImportLabel}
       />
-    </div>
+    </PageShell>
   );
 }
-

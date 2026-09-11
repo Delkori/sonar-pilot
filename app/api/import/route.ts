@@ -30,6 +30,7 @@ import { validateKpiRows, validatePasRows } from "@/lib/import/validator";
 import type { ImportLogEntry } from "@/lib/import/validator";
 import { bestMatch, HIGH_CONFIDENCE } from "@/lib/import/nameResolver";
 import { statusFromLastOrder } from "@/lib/accounts";
+import { daysSince } from "@/lib/dates";
 import type { Hcp } from "@/types/database";
 
 export const runtime = "nodejs";
@@ -96,7 +97,10 @@ export async function POST(req: NextRequest) {
       rowsTotal += rawPasRows.length;
 
       for (const row of validPas) {
-        const { _row, _comment, ...patch } = row as typeof row & { _comment?: string | null };
+        // `_row` (numéro de ligne du fichier) ne sert qu'au journal d'erreurs
+        // et ne doit pas partir en base : on l'écarte explicitement.
+        const { _row: _rowNumber, _comment, ...patch } = row as typeof row & { _comment?: string | null };
+        void _rowNumber;
         accountsByRef.set(patch.external_ref!, { ...patch, _comment });
       }
 
@@ -164,7 +168,8 @@ export async function POST(req: NextRequest) {
       rowsTotal += rawKpiRows.length;
 
       for (const row of validKpi) {
-        const { _row, ...patch } = row;
+        const { _row: _rowNumber, ...patch } = row;
+        void _rowNumber;
         const existing = accountsByRef.get(patch.external_ref!);
         if (existing) {
           Object.assign(existing, patch, { status: patch.status ?? existing.status });
@@ -196,10 +201,13 @@ export async function POST(req: NextRequest) {
 
     // upsert accounts by external_ref — pas de fichier référentiel (Salesforce/
     // PAS/KPI) dans cet import : rien à upserter, on garde les comptes existants.
-    const accountsPayload = Array.from(accountsByRef.values()).map(({ _comment, ...acc }) => ({
-      ...acc,
-      import_id: importRow.id,
-    }));
+    // `_comment` est réinjecté plus bas dans `account_actions` : il ne fait
+    // pas partie des colonnes de `accounts`.
+    const accountsPayload = Array.from(accountsByRef.values()).map((row) => {
+      const acc = { ...row };
+      delete acc._comment;
+      return { ...acc, import_id: importRow.id };
+    });
 
     let upserted: { id: string; external_ref: string; name: string }[] = [];
     if (accountsPayload.length > 0) {
@@ -458,7 +466,7 @@ export async function POST(req: NextRequest) {
 
       const now = Date.now();
       for (const [accountId, agg] of byAccount) {
-        const silenceDays = Math.floor((now - new Date(agg.last).getTime()) / 86400000);
+        const silenceDays = daysSince(agg.last, new Date(now))!;
         await supabase
           .from("accounts")
           .update({

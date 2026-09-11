@@ -3,7 +3,7 @@
 :root {
   --background: #f8fafc;
   --surface: #ffffff;
-  --surface-muted: #f8fafc;
+  --surface-muted: #f1f5f9;
   --border: #e2e8f0;
   --foreground: #0f172a;
   --muted-foreground: #64748b;
@@ -43,4 +43,30 @@ body {
 
 * {
   border-color: var(--border);
+}
+
+/* Indicateur de focus par défaut. Beaucoup de contrôles posaient
+   `outline-none` sans rien mettre à la place : la navigation au clavier
+   devenait invisible. Un anneau cohérent est défini ici une fois pour
+   toutes, les primitives d'UI le reprennent explicitement. */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Ancres internes (Paramètres › #import) : sans ce décalage, la section
+   visée se retrouve masquée sous la barre de titre collante. */
+[id] {
+  scroll-margin-top: 5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

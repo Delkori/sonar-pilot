@@ -22,6 +22,7 @@ import { predictNextOrders } from "./sonarscore/prediction";
 import { predictSeasonalOrders } from "./sonarscore/seasonality";
 import { FILLER_BRANDS, brandCategory } from "./brands";
 import type { BrandCategory } from "./brands";
+import { monthIndex, monthIndexFromDateStr } from "@/lib/dates";
 
 export interface BacktestPurchaseLine extends PurchaseLine {
   value_eur: number;
@@ -46,15 +47,6 @@ export interface BacktestResult {
   targetMonths: { year: number; month: number }[];
   withProductSignal: BacktestVariantResult;
   withoutProductSignal: BacktestVariantResult;
-}
-
-function monthIndex(year: number, month: number): number {
-  return year * 12 + month;
-}
-
-function monthIndexFromDateStr(dateStr: string): number {
-  const d = new Date(dateStr);
-  return monthIndex(d.getFullYear(), d.getMonth() + 1);
 }
 
 function nextMonthsFrom(year: number, month: number, count: number): { year: number; month: number }[] {
