@@ -182,6 +182,9 @@ erreur, elle renvoie juste un nombre différent.
 - `lib/__tests__/forecast.test.ts` — fusion des trois signaux produit
   (rythme du compte / vélocité de marque / motif saisonnier), bornes du
   générateur, répartition par médecin
+- `lib/__tests__/probability.test.ts` — probabilités de commande : étiquetage
+  sans fuite du futur, niveaux de critères, ordre attendu entre profils,
+  Brier et AUC face au taux de base, table de fiabilité, facteurs
 - `lib/__tests__/forecast-topup.test.ts` — comblement de l'objectif secteur :
   plafond de potentiel, exclusion des comptes sans historique et des comptes
   perdus, plafond de concentration par client, unicité compte × mois
@@ -230,6 +233,42 @@ Tout passe donc par **`lib/revenue.ts`** :
 Les colonnes annuelles ne sont plus qu'un repli, et un test
 (`lib/__tests__/schema.test.ts`) échoue si un écran recommence à les lire
 directement.
+
+## Probabilités de commande
+
+Page **Probabilités** (menu Analyser) : la chance que chaque compte commande
+dans les 1, 3 ou 6 prochains mois, apprise sur l'historique réel du
+portefeuille — pas un barème à poids fixes.
+
+**Comment c'est appris.** Chaque (compte, mois passé) est une situation. On
+observe l'état du compte à ce mois-là en n'utilisant que ce qui était connu
+à l'époque, puis on regarde s'il a commandé dans les N mois suivants. Huit
+critères : cadence de commande, position dans le cycle (début, fin, due, en
+retard, décroché), commandes sur 12 mois, tendance sur 6 mois,
+saisonnalité (commandait-il aux mêmes mois l'an dernier), segment, tier, et
+référence attendue (d'après les vélocités produit). Les critères sont
+combinés par régression logistique régularisée — une combinaison naïve des
+taux surcompte les critères corrélés (cadence, retard et activité disent en
+partie la même chose) — puis recalibrés sur les mois les plus récents, tenus
+à l'écart de l'apprentissage.
+
+**Ce que la page montre.**
+- comptes attendus en commande (somme des probabilités) et CA attendu
+  (probabilité × commande type × commandes attendues sur l'horizon) ;
+- **la probabilité selon chaque critère** : pour chaque niveau, la fréquence
+  réelle de commande observée et le nombre de situations (`n`), face au taux
+  de base ;
+- la **fiabilité** : AUC, score de Brier contre le taux de base, et la table
+  « annoncé / réellement commandé » par tranche de probabilité — quand le
+  modèle dit 60 %, combien ont commandé ?
+- le tableau des comptes, triable, avec les facteurs les plus favorable et
+  défavorable de chacun.
+
+La fiche compte affiche la probabilité à 3 mois avec ses huit facteurs.
+Le CA attendu est une espérance, pas une prévision ligne à ligne : la
+planification reste dans Pilotage. Module : `lib/probability.ts`, tests
+dans `lib/__tests__/probability.test.ts` (dont l'absence de fuite du futur
+et la supériorité sur le taux de base).
 
 ## Pilotage — période affichée
 

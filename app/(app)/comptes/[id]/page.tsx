@@ -19,6 +19,9 @@ import { createClient } from "@/lib/supabase/server";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import { monthIndex } from "@/lib/dates";
 import { availableYears, revenueByAccountYear, revenueForYear } from "@/lib/revenue";
+import { buildProbabilityModel } from "@/lib/probability";
+import { getAccounts, getMonthlySales, getPurchaseLines } from "@/lib/data/queries";
+import { OrderProbabilityCard } from "@/components/comptes/OrderProbabilityCard";
 import type { Account, AccountAction, AccountForecast, AccountProduct, Hcp } from "@/types/database";
 
 export const dynamic = "force-dynamic";
@@ -29,14 +32,20 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
 
   // Six lectures indépendantes : en série elles cumulaient leurs latences
   // avant le premier octet de la fiche.
-  const [accountRes, actionsRes, productsRes, forecastsRes, hcpsRes, monthlyRes] = await Promise.all([
-    supabase.from("accounts").select("*").eq("id", id).maybeSingle(),
-    supabase.from("account_actions").select("*").eq("account_id", id).order("created_at", { ascending: false }),
-    supabase.from("account_products").select("*").eq("account_id", id),
-    supabase.from("account_forecasts").select("*").eq("account_id", id),
-    supabase.from("hcps").select("*").eq("account_id", id).order("name"),
-    supabase.from("account_monthly_sales").select("year, month, ca").eq("account_id", id),
-  ]);
+  const [accountRes, actionsRes, productsRes, forecastsRes, hcpsRes, monthlyRes, allAccounts, allSales, allLines] =
+    await Promise.all([
+      supabase.from("accounts").select("*").eq("id", id).maybeSingle(),
+      supabase.from("account_actions").select("*").eq("account_id", id).order("created_at", { ascending: false }),
+      supabase.from("account_products").select("*").eq("account_id", id),
+      supabase.from("account_forecasts").select("*").eq("account_id", id),
+      supabase.from("hcps").select("*").eq("account_id", id).order("name"),
+      supabase.from("account_monthly_sales").select("year, month, ca").eq("account_id", id),
+      // Le modèle de probabilité s'apprend sur tout le portefeuille : une
+      // probabilité n'a de sens que rapportée aux comptes comparables.
+      getAccounts(supabase),
+      getMonthlySales(supabase),
+      getPurchaseLines(supabase),
+    ]);
 
   if (!accountRes.data) notFound();
   const acc = accountRes.data as Account;
@@ -64,6 +73,14 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
     monthlySales.map((m) => ({ ...m, account_id: id })),
     [acc]
   );
+
+  const probabilityModel = buildProbabilityModel({
+    accounts: allAccounts,
+    monthlySales: allSales,
+    purchaseLines: allLines,
+    horizon: 3,
+  });
+  const probability = probabilityModel.accounts.find((r) => r.accountId === id) ?? null;
 
   const refsAcheteesCount = products.filter((p) => (p.qty_ordered_cy ?? 0) > 0 || (p.sales_value_cy ?? 0) > 0).length;
 
@@ -110,6 +127,8 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
       <>
         <div className="space-y-6 lg:col-span-1">
           <TargetingScoreCard account={acc} refsAcheteesCount={products.length > 0 ? refsAcheteesCount : undefined} />
+
+          {probability && <OrderProbabilityCard result={probability} model={probabilityModel} />}
 
           <Card>
             <CardHeader><CardTitle>Compte</CardTitle></CardHeader>
