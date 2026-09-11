@@ -1,5 +1,9 @@
 "use client";
 
+import { TableWrap } from "@/components/ui/Table";
+import { theadRowClass } from "@/components/ui/Table";
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useMemo, useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatEUR, formatNumber } from "@/lib/utils";
@@ -249,7 +253,7 @@ export function ForecastPanel({
         <select
           value={period}
           onChange={(e) => setPeriod(e.target.value as Period)}
-          className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+          className={cn(fieldClass, "px-2")}
         >
           <option value="mois">Vue : Mois</option>
           <option value="trimestre">Vue : Trimestre</option>
@@ -261,7 +265,7 @@ export function ForecastPanel({
             <select
               value={newMonth}
               onChange={(e) => setNewMonth(Number(e.target.value))}
-              className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+              className={cn(fieldClass, "px-2")}
             >
               {MONTHS_SHORT.map((m, i) => (
                 <option key={m} value={i + 1}>{m}</option>
@@ -271,7 +275,7 @@ export function ForecastPanel({
               type="number"
               value={newYear}
               onChange={(e) => setNewYear(Number(e.target.value))}
-              className="w-24 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+              className={cn(fieldClass, "w-24 px-2")}
             />
             <button
               onClick={addForecast}
@@ -305,7 +309,7 @@ export function ForecastPanel({
                   value={annualTotal}
                   onChange={(e) => setAnnualTotal(e.target.value)}
                   placeholder="Objectif annuel (boîtes)"
-                  className="w-40 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+                  className={cn(fieldClass, "w-40 px-2")}
                 />
                 <button
                   onClick={splitAnnualObjective}
@@ -344,83 +348,85 @@ export function ForecastPanel({
             : "Aucune prévision — cliquez \"Suggérer 3 mois\" pour une proposition basée sur ce compte, ou ajoutez un mois manuellement."}
         </p>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <SortableTh
-                label={period === "mois" ? "Mois" : period === "trimestre" ? "Trimestre" : period === "semestre" ? "Semestre" : "Année"}
-                sortKey="period"
-                activeKey={sortKey}
-                dir={dir}
-                onSort={toggle}
-                className="px-4"
-              />
-              <SortableTh label="Boîtes" sortKey="boites" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
-              <SortableTh label="CA" sortKey="ca" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
-              <th className="px-3 py-2 text-right font-medium">Cumul CA</th>
-              {period === "mois" && <th className="px-3 py-2 font-medium">Note</th>}
-              {period === "mois" && <th className="px-3 py-2 font-medium">Commentaire</th>}
-              {period === "mois" && <th className="w-8" />}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((r) => (
-              <tr key={r.key} className="border-b border-border last:border-0">
-                <td className="px-4 py-2 text-foreground">{r.label}</td>
-                {period === "mois" && r.forecast ? (
-                  <>
-                    <td className="px-3 py-2 text-right">
-                      <input
-                        type="number"
-                        defaultValue={r.forecast.boites_prevues ?? 0}
-                        onBlur={(e) => updateForecast(r.forecast!.id, { boites_prevues: Number(e.target.value) })}
-                        className="w-24 rounded border border-transparent bg-transparent px-1 py-0.5 text-right hover:border-border focus:border-primary focus:outline-none"
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <input
-                        type="number"
-                        defaultValue={r.forecast.ca_prevu ?? 0}
-                        onBlur={(e) => updateForecast(r.forecast!.id, { ca_prevu: Number(e.target.value) })}
-                        className="w-28 rounded border border-transparent bg-transparent px-1 py-0.5 text-right hover:border-border focus:border-primary focus:outline-none"
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-right text-muted-foreground">{formatEUR(cumulByKey.get(r.key) ?? 0)}</td>
-                    <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        defaultValue={r.forecast.note ?? ""}
-                        placeholder={kind === "objectif" ? "ex. objectif révisé..." : "ex. offre prévue, RDV programmé..."}
-                        onBlur={(e) => updateForecast(r.forecast!.id, { note: e.target.value || null })}
-                        className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-border focus:border-primary focus:outline-none"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        defaultValue={r.forecast.commentaire ?? ""}
-                        placeholder="ex. proposer RHA2, insister sur la gamme lèvres..."
-                        onBlur={(e) => updateCommentaire(r.forecast!.id, e.target.value)}
-                        className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-border focus:border-primary focus:outline-none"
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <button onClick={() => removeForecast(r.forecast!.id)} className="text-muted-foreground hover:text-danger">
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td className="px-3 py-2 text-right font-medium text-foreground">{formatNumber(r.boites)}</td>
-                    <td className="px-3 py-2 text-right font-medium text-foreground">{formatEUR(r.ca)}</td>
-                    <td className="px-3 py-2 text-right text-muted-foreground">{formatEUR(cumulByKey.get(r.key) ?? 0)}</td>
-                  </>
-                )}
+        <TableWrap>
+          <table className="w-full min-w-max text-sm">
+            <thead>
+              <tr className={theadRowClass}>
+                <SortableTh
+                  label={period === "mois" ? "Mois" : period === "trimestre" ? "Trimestre" : period === "semestre" ? "Semestre" : "Année"}
+                  sortKey="period"
+                  activeKey={sortKey}
+                  dir={dir}
+                  onSort={toggle}
+                  className="px-4"
+                />
+                <SortableTh label="Boîtes" sortKey="boites" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+                <SortableTh label="CA" sortKey="ca" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+                <th className="px-3 py-2 text-right font-medium">Cumul CA</th>
+                {period === "mois" && <th className="px-3 py-2 font-medium">Note</th>}
+                {period === "mois" && <th className="px-3 py-2 font-medium">Commentaire</th>}
+                {period === "mois" && <th className="w-8" />}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.key} className="border-b border-border last:border-0">
+                  <td className="px-4 py-2 text-foreground">{r.label}</td>
+                  {period === "mois" && r.forecast ? (
+                    <>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          type="number"
+                          defaultValue={r.forecast.boites_prevues ?? 0}
+                          onBlur={(e) => updateForecast(r.forecast!.id, { boites_prevues: Number(e.target.value) })}
+                          className="w-24 rounded border border-transparent bg-transparent px-1 py-0.5 text-right hover:border-border focus:border-primary focus:outline-none"
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          type="number"
+                          defaultValue={r.forecast.ca_prevu ?? 0}
+                          onBlur={(e) => updateForecast(r.forecast!.id, { ca_prevu: Number(e.target.value) })}
+                          className="w-28 rounded border border-transparent bg-transparent px-1 py-0.5 text-right hover:border-border focus:border-primary focus:outline-none"
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right text-muted-foreground">{formatEUR(cumulByKey.get(r.key) ?? 0)}</td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          defaultValue={r.forecast.note ?? ""}
+                          placeholder={kind === "objectif" ? "ex. objectif révisé..." : "ex. offre prévue, RDV programmé..."}
+                          onBlur={(e) => updateForecast(r.forecast!.id, { note: e.target.value || null })}
+                          className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-border focus:border-primary focus:outline-none"
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          defaultValue={r.forecast.commentaire ?? ""}
+                          placeholder="ex. proposer RHA2, insister sur la gamme lèvres..."
+                          onBlur={(e) => updateCommentaire(r.forecast!.id, e.target.value)}
+                          className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-border focus:border-primary focus:outline-none"
+                        />
+                      </td>
+                      <td className="px-2 py-2">
+                        <button onClick={() => removeForecast(r.forecast!.id)} className="text-muted-foreground hover:text-danger">
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-3 py-2 text-right font-medium text-foreground">{formatNumber(r.boites)}</td>
+                      <td className="px-3 py-2 text-right font-medium text-foreground">{formatEUR(r.ca)}</td>
+                      <td className="px-3 py-2 text-right text-muted-foreground">{formatEUR(cumulByKey.get(r.key) ?? 0)}</td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
       )}
     </div>
   );

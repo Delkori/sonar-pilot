@@ -1,5 +1,7 @@
 "use client";
 
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Account, NameMatchCandidate } from "@/types/database";
@@ -62,7 +64,7 @@ export function MatchReviewPanel({
             <select
               value={chosenId}
               onChange={(e) => setSelection((prev) => ({ ...prev, [c.id]: e.target.value }))}
-              className="min-w-56 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+              className={cn(fieldClass, "min-w-56 px-2")}
             >
               <option value="">— Choisir un compte —</option>
               {accounts.map((a) => (

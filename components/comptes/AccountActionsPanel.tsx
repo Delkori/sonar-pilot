@@ -1,5 +1,7 @@
 "use client";
 
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { AccountAction } from "@/types/database";
@@ -54,7 +56,7 @@ export function AccountActionsPanel({
         <select
           value={type}
           onChange={(e) => setType(e.target.value as "commentaire" | "action" | "relance" | "offre")}
-          className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+          className={cn(fieldClass, "px-2")}
         >
           <option value="commentaire">Commentaire</option>
           <option value="action">Action</option>
@@ -66,7 +68,7 @@ export function AccountActionsPanel({
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && addAction()}
           placeholder="Ajouter un commentaire, une action ou une relance..."
-          className="flex-1 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+          className={cn(fieldClass, "flex-1")}
         />
         {needsDate && (
           <input
@@ -74,7 +76,7 @@ export function AccountActionsPanel({
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
             title="Échéance (apparaît dans le Calendrier)"
-            className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+            className={cn(fieldClass, "px-2")}
           />
         )}
         <button

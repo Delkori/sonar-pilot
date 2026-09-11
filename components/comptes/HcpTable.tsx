@@ -1,5 +1,7 @@
 "use client";
 
+import { TableWrap } from "@/components/ui/Table";
+import { theadRowClass } from "@/components/ui/Table";
 import { SegmentBadge } from "@/components/ui/Badge";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
@@ -31,42 +33,46 @@ export function HcpTable({
   );
 
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-          <SortableTh label="Nom" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="px-0" />
-          <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} className="px-0" />
-          <SortableTh label="RPPS" sortKey="rpps" activeKey={sortKey} dir={dir} onSort={toggle} className="px-0" />
-          <SortableTh label="Potentiel (boîtes)" sortKey="potentiel" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-0" />
-          {showPrev && (
-            <SortableTh label="Prév. à venir" sortKey="prev" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-0" />
-          )}
-          <th className="py-2 font-medium">Contact</th>
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((h) => (
-          <tr key={h.id} className="border-b border-border last:border-0">
-            <td className="py-2 font-medium text-foreground">{h.name}</td>
-            <td className="py-2"><SegmentBadge segment={h.segment} /></td>
-            <td className="py-2 text-muted-foreground">{h.rpps ?? "—"}</td>
-            <td className="py-2 text-right">{formatNumber(h.potentiel_boites)}</td>
+    // `overflow-x-auto` : sans conteneur défilant, ces tableaux
+    // débordaient la page sur écran étroit au lieu de défiler seuls.
+    <TableWrap>
+      <table className="w-full min-w-max text-sm">
+        <thead>
+          <tr className={theadRowClass}>
+            <SortableTh label="Nom" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="px-0" />
+            <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} className="px-0" />
+            <SortableTh label="RPPS" sortKey="rpps" activeKey={sortKey} dir={dir} onSort={toggle} className="px-0" />
+            <SortableTh label="Potentiel (boîtes)" sortKey="potentiel" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-0" />
             {showPrev && (
-              <td className="py-2 text-right text-muted-foreground">
-                {(() => {
-                  const a = allocation?.get(h.id);
-                  return a && a.ca > 0 ? `${formatNumber(a.boites)} b · ${formatEUR(a.ca)}` : "—";
-                })()}
-              </td>
+              <SortableTh label="Prév. à venir" sortKey="prev" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-0" />
             )}
-            <td className="py-2 text-muted-foreground">
-              {h.email && <div>{h.email}</div>}
-              {h.telephone && <div>{h.telephone}</div>}
-              {!h.email && !h.telephone && "—"}
-            </td>
+            <th className="py-2 font-medium">Contact</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {sorted.map((h) => (
+            <tr key={h.id} className="border-b border-border last:border-0">
+              <td className="py-2 font-medium text-foreground">{h.name}</td>
+              <td className="py-2"><SegmentBadge segment={h.segment} /></td>
+              <td className="py-2 text-muted-foreground">{h.rpps ?? "—"}</td>
+              <td className="py-2 text-right">{formatNumber(h.potentiel_boites)}</td>
+              {showPrev && (
+                <td className="py-2 text-right text-muted-foreground">
+                  {(() => {
+                    const a = allocation?.get(h.id);
+                    return a && a.ca > 0 ? `${formatNumber(a.boites)} b · ${formatEUR(a.ca)}` : "—";
+                  })()}
+                </td>
+              )}
+              <td className="py-2 text-muted-foreground">
+                {h.email && <div>{h.email}</div>}
+                {h.telephone && <div>{h.telephone}</div>}
+                {!h.email && !h.telephone && "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableWrap>
   );
 }

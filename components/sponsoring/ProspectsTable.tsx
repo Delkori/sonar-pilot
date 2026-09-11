@@ -1,5 +1,8 @@
 "use client";
 
+import { theadRowClass } from "@/components/ui/Table";
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useMemo, useState } from "react";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
@@ -50,7 +53,7 @@ export function ProspectsTable({ rows }: { rows: ProspectRow[] }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Rechercher un médecin, une ville..."
-          className="min-w-56 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+          className={cn(fieldClass, "min-w-56")}
         />
         <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
           <input
@@ -66,7 +69,7 @@ export function ProspectsTable({ rows }: { rows: ProspectRow[] }) {
       <div className="max-h-[600px] overflow-auto">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-surface">
-            <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <tr className={theadRowClass}>
               <SortableTh label="Médecin" sortKey="medecin" activeKey={sortKey} dir={dir} onSort={toggle} className="px-5" />
               <SortableTh label="Spécialité" sortKey="specialite" activeKey={sortKey} dir={dir} onSort={toggle} />
               <SortableTh label="Ville" sortKey="ville" activeKey={sortKey} dir={dir} onSort={toggle} />

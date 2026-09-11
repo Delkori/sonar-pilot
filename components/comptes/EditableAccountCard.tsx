@@ -1,5 +1,7 @@
 "use client";
 
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
@@ -81,7 +83,7 @@ export function EditableAccountCard({ account }: { account: Account }) {
         <select
           value={acc.status}
           onChange={(e) => patch({ status: e.target.value as AccountStatus })}
-          className="w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+          className={cn(fieldClass, "w-full px-2")}
         >
           {STATUSES.map((s) => (
             <option key={s} value={s}>{s}</option>

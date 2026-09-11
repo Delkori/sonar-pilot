@@ -1,5 +1,9 @@
 "use client";
 
+import { TableWrap } from "@/components/ui/Table";
+import { theadRowClass } from "@/components/ui/Table";
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useMemo, useState } from "react";
 import * as d3geo from "d3-geo";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
@@ -461,7 +465,7 @@ export function AuraMap({
             <select
               value={metric}
               onChange={(e) => setMetric(e.target.value as MapMetric)}
-              className="mb-3 w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+              className={cn(fieldClass, "mb-3 w-full px-2")}
             >
               <option value="realise">CA réalisé</option>
               <option value="potentiel">Potentiel</option>
@@ -472,7 +476,7 @@ export function AuraMap({
             <select
               value={segment}
               onChange={(e) => setSegment(e.target.value as Segment | "all")}
-              className="mb-3 w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+              className={cn(fieldClass, "mb-3 w-full px-2")}
             >
               <option value="all">Tous</option>
               {(["A", "B", "C", "D", "E"] as const).map((s) => (
@@ -483,7 +487,7 @@ export function AuraMap({
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value as AccountStatus | "all")}
-              className="mb-3 w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+              className={cn(fieldClass, "mb-3 w-full px-2")}
             >
               <option value="all">Tous</option>
               <option value="actif">Actif</option>
@@ -507,7 +511,7 @@ export function AuraMap({
                 <select
                   value={sponsorFilter}
                   onChange={(e) => setSponsorFilter(e.target.value)}
-                  className="mb-3 w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+                  className={cn(fieldClass, "mb-3 w-full px-2")}
                 >
                   <option value="all">Tous</option>
                   {sponsoringLabs.map((s) => (
@@ -852,77 +856,81 @@ export function AuraMap({
           </span>
         </div>
         <div className="max-h-[36rem] overflow-y-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="px-4" />
-                <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
-                <SortableTh label="Ville" sortKey="city" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
-                <SortableTh label="Statut" sortKey="status" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
-                <SortableTh label="Score" sortKey="score" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-2" />
-                <th className="px-2 py-2 font-medium text-right">Médecins</th>
-                <th className="px-2 py-2 font-medium">Opportunité</th>
-                <SortableTh label="CA YTD" sortKey="ca_ytd" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-4" />
-              </tr>
-            </thead>
-            <tbody>
-              {sortedFiltered.map((a) => {
-                const opp = opportunityByAccount.get(a.id);
-                return (
-                  <tr
-                    key={a.id}
-                    className="cursor-pointer border-b border-border last:border-0 hover:bg-surface-muted"
-                    onClick={() => setSelectedAccount(a)}
-                  >
-                    <td className="px-4 py-2 font-medium text-foreground">
-                      <span className="flex items-center gap-2">
-                        {a.name}
-                        <ScoreBadge score={computeTargetingScore(a).total} />
-                      </span>
-                    </td>
-                    <td className="px-2 py-2"><SegmentBadge segment={a.segment} /></td>
-                    <td className="px-2 py-2 text-muted-foreground">{a.city ?? "—"}</td>
-                    <td className="px-2 py-2"><StatusBadge status={a.status} /></td>
-                    <td className="px-2 py-2 text-right">{computeTargetingScore(a).total}/100</td>
-                    <td className="px-2 py-2 text-right">
-                      {(() => {
-                        const list = hcpsByAccount.get(a.id) ?? [];
-                        if (list.length === 0) return <span className="text-muted-foreground">—</span>;
-                        return (
-                          <span
-                            className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700"
-                            title={list.map((h) => `${h.name}${h.rpps ? ` (RPPS ${h.rpps})` : ""}`).join("\n")}
-                          >
-                            {list.length}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-2 py-2">
-                      {opp ? (
-                        <span
-                          className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
-                          style={{ backgroundColor: OPPORTUNITY_META[opp.type].color }}
-                        >
-                          {opp.label}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-right text-muted-foreground">{formatEUR(a.ca_2026_ytd)}</td>
-                  </tr>
-                );
-              })}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground">
-                    Aucun compte ne correspond à ces filtres.
-                  </td>
+          {/* Conteneur défilant : sans lui, ce tableau débordait la page
+              sur écran étroit au lieu de défiler seul. */}
+          <TableWrap>
+            <table className="w-full min-w-max text-sm">
+              <thead>
+                <tr className={theadRowClass}>
+                  <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="px-4" />
+                  <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
+                  <SortableTh label="Ville" sortKey="city" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
+                  <SortableTh label="Statut" sortKey="status" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
+                  <SortableTh label="Score" sortKey="score" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-2" />
+                  <th className="px-2 py-2 font-medium text-right">Médecins</th>
+                  <th className="px-2 py-2 font-medium">Opportunité</th>
+                  <SortableTh label="CA YTD" sortKey="ca_ytd" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-4" />
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sortedFiltered.map((a) => {
+                  const opp = opportunityByAccount.get(a.id);
+                  return (
+                    <tr
+                      key={a.id}
+                      className="cursor-pointer border-b border-border last:border-0 hover:bg-surface-muted"
+                      onClick={() => setSelectedAccount(a)}
+                    >
+                      <td className="px-4 py-2 font-medium text-foreground">
+                        <span className="flex items-center gap-2">
+                          {a.name}
+                          <ScoreBadge score={computeTargetingScore(a).total} />
+                        </span>
+                      </td>
+                      <td className="px-2 py-2"><SegmentBadge segment={a.segment} /></td>
+                      <td className="px-2 py-2 text-muted-foreground">{a.city ?? "—"}</td>
+                      <td className="px-2 py-2"><StatusBadge status={a.status} /></td>
+                      <td className="px-2 py-2 text-right">{computeTargetingScore(a).total}/100</td>
+                      <td className="px-2 py-2 text-right">
+                        {(() => {
+                          const list = hcpsByAccount.get(a.id) ?? [];
+                          if (list.length === 0) return <span className="text-muted-foreground">—</span>;
+                          return (
+                            <span
+                              className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700"
+                              title={list.map((h) => `${h.name}${h.rpps ? ` (RPPS ${h.rpps})` : ""}`).join("\n")}
+                            >
+                              {list.length}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-2 py-2">
+                        {opp ? (
+                          <span
+                            className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
+                            style={{ backgroundColor: OPPORTUNITY_META[opp.type].color }}
+                          >
+                            {opp.label}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-right text-muted-foreground">{formatEUR(a.ca_2026_ytd)}</td>
+                    </tr>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                      Aucun compte ne correspond à ces filtres.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </TableWrap>
         </div>
       </div>
 

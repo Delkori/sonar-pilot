@@ -1,5 +1,9 @@
 "use client";
 
+import { TableWrap } from "@/components/ui/Table";
+import { theadRowClass } from "@/components/ui/Table";
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useMemo, useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatEUR, formatNumber } from "@/lib/utils";
@@ -76,14 +80,14 @@ export function SectorObjectivesEditor({ initial }: { initial: SectorObjective[]
           type="number"
           value={year}
           onChange={(e) => setYear(Number(e.target.value))}
-          className="w-24 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+          className={cn(fieldClass, "w-24 px-2")}
         />
         <input
           type="number"
           value={annualCa}
           onChange={(e) => setAnnualCa(e.target.value)}
           placeholder="Objectif CA annuel (€)"
-          className="w-44 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+          className={cn(fieldClass, "w-44 px-2")}
         />
         <button
           onClick={splitAnnual}
@@ -98,42 +102,46 @@ export function SectorObjectivesEditor({ initial }: { initial: SectorObjective[]
           Total {year} : {formatEUR(totalCa)} · {formatNumber(totalBoites)} boîtes
         </span>
       </div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <th className="px-4 py-2 font-medium">Mois</th>
-            <th className="px-3 py-2 font-medium text-right">Objectif CA (€)</th>
-            <th className="px-3 py-2 font-medium text-right">Objectif boîtes</th>
-          </tr>
-        </thead>
-        <tbody>
-          {MONTHS_LONG.map((label, i) => {
-            const m = i + 1;
-            const row = byMonth.get(m);
-            return (
-              <tr key={m} className="border-b border-border last:border-0">
-                <td className="px-4 py-2 text-foreground">{label}</td>
-                <td className="px-3 py-2 text-right">
-                  <input
-                    type="number"
-                    defaultValue={row?.objectif_ca ?? 0}
-                    onBlur={(e) => save(m, { objectif_ca: Number(e.target.value) })}
-                    className="w-32 rounded border border-transparent bg-transparent px-1 py-0.5 text-right hover:border-border focus:border-primary focus:outline-none"
-                  />
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <input
-                    type="number"
-                    defaultValue={row?.objectif_boites ?? 0}
-                    onBlur={(e) => save(m, { objectif_boites: Number(e.target.value) })}
-                    className="w-28 rounded border border-transparent bg-transparent px-1 py-0.5 text-right hover:border-border focus:border-primary focus:outline-none"
-                  />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      {/* Conteneur défilant : sans lui, ce tableau débordait la page
+          sur écran étroit au lieu de défiler seul. */}
+      <TableWrap>
+        <table className="w-full min-w-max text-sm">
+          <thead>
+            <tr className={theadRowClass}>
+              <th className="px-4 py-2 font-medium">Mois</th>
+              <th className="px-3 py-2 font-medium text-right">Objectif CA (€)</th>
+              <th className="px-3 py-2 font-medium text-right">Objectif boîtes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {MONTHS_LONG.map((label, i) => {
+              const m = i + 1;
+              const row = byMonth.get(m);
+              return (
+                <tr key={m} className="border-b border-border last:border-0">
+                  <td className="px-4 py-2 text-foreground">{label}</td>
+                  <td className="px-3 py-2 text-right">
+                    <input
+                      type="number"
+                      defaultValue={row?.objectif_ca ?? 0}
+                      onBlur={(e) => save(m, { objectif_ca: Number(e.target.value) })}
+                      className="w-32 rounded border border-transparent bg-transparent px-1 py-0.5 text-right hover:border-border focus:border-primary focus:outline-none"
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <input
+                      type="number"
+                      defaultValue={row?.objectif_boites ?? 0}
+                      onBlur={(e) => save(m, { objectif_boites: Number(e.target.value) })}
+                      className="w-28 rounded border border-transparent bg-transparent px-1 py-0.5 text-right hover:border-border focus:border-primary focus:outline-none"
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </TableWrap>
     </div>
   );
 }

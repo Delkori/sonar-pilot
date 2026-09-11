@@ -1,5 +1,6 @@
 "use client";
 
+import { theadRowClass } from "@/components/ui/Table";
 import Link from "next/link";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
@@ -79,7 +80,7 @@ export function PersonaClient({ models, rows }: { models: PersonaModel[]; rows: 
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr className={theadRowClass}>
                 <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="px-5" />
                 <SortableTh label="Persona" sortKey="persona" activeKey={sortKey} dir={dir} onSort={toggle} />
                 <SortableTh label="CA YTD" sortKey="ca" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />

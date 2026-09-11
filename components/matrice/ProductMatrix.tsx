@@ -1,5 +1,8 @@
 "use client";
 
+import { theadRowClass } from "@/components/ui/Table";
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { SegmentBadge } from "@/components/ui/Badge";
@@ -388,12 +391,12 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Rechercher un compte..."
-            className="min-w-56 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+            className={cn(fieldClass, "min-w-56")}
           />
           <select
             value={segment}
             onChange={(e) => setSegment(e.target.value as Segment | "all")}
-            className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+            className={fieldClass}
           >
             <option value="all">Tous segments</option>
             {(["A", "B", "C", "D", "E"] as const).map((s) => (
@@ -406,7 +409,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
             value={minBoites}
             onChange={(e) => setMinBoites(e.target.value)}
             placeholder="Min boîtes"
-            className="w-28 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+            className={cn(fieldClass, "w-28")}
           />
           <input
             type="number"
@@ -414,7 +417,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
             value={minCa}
             onChange={(e) => setMinCa(e.target.value)}
             placeholder="Min CA (€)"
-            className="w-28 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+            className={cn(fieldClass, "w-28")}
           />
           <label className="flex items-center gap-1.5 text-sm text-foreground">
             <input type="checkbox" checked={onlyRetard} onChange={(e) => setOnlyRetard(e.target.checked)} className="accent-primary" />
@@ -444,7 +447,7 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr className={theadRowClass}>
                 <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="sticky left-0 z-10 bg-surface px-4" />
                 <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} className="px-2" />
                 {brands.map((b) => (

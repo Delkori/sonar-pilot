@@ -1,5 +1,8 @@
 "use client";
 
+import { theadRowClass } from "@/components/ui/Table";
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
@@ -89,12 +92,12 @@ export function AccountsTable({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Rechercher un compte, une ville, un CP..."
-          className="min-w-64 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+          className={cn(fieldClass, "min-w-64")}
         />
         <select
           value={segment}
           onChange={(e) => setSegment(e.target.value as Segment | "all")}
-          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+          className={fieldClass}
         >
           <option value="all">Tous segments</option>
           {(["A", "B", "C", "D", "E"] as const).map((s) => (
@@ -104,7 +107,7 @@ export function AccountsTable({
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value as AccountStatus | "all")}
-          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+          className={fieldClass}
         >
           <option value="all">Tous statuts</option>
           <option value="actif">Actif</option>
@@ -117,7 +120,7 @@ export function AccountsTable({
         <select
           value={tier}
           onChange={(e) => setTier(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+          className={fieldClass}
         >
           <option value="all">Tous contrats</option>
           <option value="Premium">Premium</option>
@@ -127,7 +130,7 @@ export function AccountsTable({
         <select
           value={recu}
           onChange={(e) => setRecu(e.target.value)}
-          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+          className={fieldClass}
         >
           <option value="all">Toute récurrence</option>
           {RECURRENCE_BUCKETS.map((b) => (
@@ -140,7 +143,7 @@ export function AccountsTable({
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+            <tr className={theadRowClass}>
               <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="px-5" />
               <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} />
               <SortableTh label="Statut" sortKey="status" activeKey={sortKey} dir={dir} onSort={toggle} />

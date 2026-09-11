@@ -69,11 +69,11 @@ Puis sur [vercel.com](https://vercel.com) :
 
 ## Procédure d'import Excel
 
-1. Aller dans **Import** (icône upload dans la sidebar).
+1. Aller dans **Paramètres › Import / Admin** (dernière entrée de la navigation).
 2. Déposer le fichier **PAS Q3 2026 - RHONE ALPES.xlsx** (obligatoire — onglet `SUIVI COMPTES` lu automatiquement).
 3. Déposer en complément le fichier **KPI RHONE ALPES ...xlsx** (optionnel — apporte ville, code postal, statut, commercial).
 4. Lancer l'import : chaque ligne est validée avant écriture, les erreurs (CODE SAP manquant, doublon, segment invalide...) sont listées sans bloquer le reste de l'import.
-5. Lancer le **géocodage** pour convertir ville + code postal en latitude/longitude (API Adresse du gouvernement français, gratuite) — nécessaire pour afficher les comptes sur la carte Mapping. Les coordonnées sont stockées en base, jamais recalculées à chaque affichage.
+5. Lancer le **géocodage** pour convertir ville + code postal en latitude/longitude (API Adresse du gouvernement français, gratuite) — nécessaire pour afficher les comptes sur la carte Mapping. Les coordonnées sont stockées en base, jamais recalculées à chaque affichage. Le traitement est borné en durée pour ne pas dépasser la limite de la plateforme : si la réponse indique des comptes restants, relancez-le.
 
 ## Mapping Excel → Supabase
 
@@ -89,19 +89,114 @@ Si un champ manque pour une fonctionnalité demandée plus tard, ajoutez la colo
 ## Structure du projet
 
 ```
-app/(app)/          # Dashboard, Comptes, Fiche compte, Mapping, Import — toutes protégées par le même layout (sidebar)
-app/api/import/      # Route serveur : parse + valide + upsert Excel → Supabase
-app/api/geocode/     # Route serveur : géocodage ville/CP → lat/lng
-lib/import/          # parser.ts (lecture xlsx) / mapping.ts (colonnes → schéma) / validator.ts
-lib/supabase/         # client.ts (navigateur) / server.ts (SSR) / admin.ts (service role, serveur uniquement)
+app/(app)/            # Écrans applicatifs, tous sous le même layout (navigation latérale)
+app/api/              # Routes serveur : import, géocodage, flux calendrier, sync personas
+lib/data/queries.ts   # ← couche d'accès unique des pages serveur (voir ci-dessous)
+lib/supabase/         # client.ts (navigateur) / server.ts (SSR) / admin.ts (service role)
+lib/supabase/fetchAll.ts  # ← pagination obligatoire de toute lecture de liste
+lib/import/           # parser.ts (lecture xlsx) / mapping.ts (colonnes → schéma) / validator.ts
+lib/dates.ts          # libellés de mois + arithmétique de dates (source unique)
+lib/stats.ts          # median / mean / sum
+lib/geo.ts            # référentiel des départements du secteur
+lib/ui-classes.ts     # classes partagées des champs de formulaire (sans dépendance)
+components/layout/    # PageShell (gabarit de page), Sidebar, TopBar
+components/ui/        # Card, Button, Field, Table, Badge, ScoreBadge, SortableTh
 supabase/migrations/  # schéma SQL versionné
-types/database.ts     # types TypeScript du schéma (à régénérer avec `supabase gen types typescript` une fois le schéma appliqué)
-public/geo/            # GeoJSON des 12 départements Auvergne-Rhône-Alpes (carte Mapping)
+types/database.ts     # types TypeScript du schéma (`supabase gen types typescript`)
+public/geo/           # GeoJSON des départements Auvergne-Rhône-Alpes (carte Mapping)
+```
+
+## Conventions à respecter
+
+Ces quatre règles existent parce que leur absence a déjà produit des bugs
+silencieux. Les enfreindre ne casse pas le build — ça fausse les chiffres.
+
+### 1. Toute lecture de liste passe par `fetchAll`
+
+Supabase plafonne chaque réponse à `max-rows` (**1000 lignes par défaut**)
+et **ne le signale pas** : la requête réussit, il manque simplement des
+lignes. Un `select()` nu sur `account_product_purchases` (une ligne par
+compte × marque × facture) renvoyait ainsi un préfixe arbitraire de la
+table, et tous les agrégats construits dessus — CA mensuel, vélocités,
+RFM-S, prévisions, backtest — étaient calculés sur cet échantillon.
+
+```ts
+// ✗ tronqué en silence dès 1001 lignes
+const { data } = await supabase.from("account_product_purchases").select("*");
+
+// ✓
+const rows = await fetchAll(() => supabase.from("account_product_purchases").select("*"));
+```
+
+`maybeSingle()`, `limit(n)` explicite et les `count` en `head: true` sont
+évidemment exempts.
+
+### 2. Les pages serveur lisent via `lib/data/queries.ts`
+
+`getAccounts`, `getMonthlySales`, `getAccountProducts`, `getForecasts`,
+`getPurchaseLines`, `getHcps`, `getSectorObjectives`… Chaque page écrivait
+sa propre variante des mêmes requêtes, avec sa liste de colonnes et son
+cast : une correction appliquée à un endroit ne l'était nulle part
+ailleurs. Ajoutez une colonne dans le loader, pas dans la page.
+
+Les lectures indépendantes se lancent en `Promise.all` — en série, une
+page cumulait six allers-retours Supabase avant le premier octet.
+
+### 3. Un écran = un `PageShell`
+
+```tsx
+<PageShell title="Comptes" subtitle="…" actions={<Button …/>}>
+  …
+</PageShell>
+```
+
+Gouttières, rythme vertical et barre de titre collante sont définis une
+seule fois. `bare` pour les vues plein écran (calendrier, carte).
+
+### 4. Pas de classes Tailwind recopiées
+
+- Boutons → `<Button>` / `<SegmentedControl>` (`components/ui/Button`)
+- Champs → `<Input>` / `<Select>` / `<Textarea>`, ou `fieldClass` quand il
+  faut garder la balise native
+- Tableaux → `<TableWrap>` (défilement horizontal) + `theadRowClass`
+- Libellés de mois → `MONTHS_SHORT` / `MONTHS_LONG` / `MONTHS_INITIAL`
+  (`lib/dates`), jamais un tableau local
+- « jours depuis » → `daysSince` / `weeksSince` / `daysBetween`, jamais
+  `/ 86400000` à la main
+- Dates au format `YYYY-MM-DD` → `toDateStr`, **jamais**
+  `toISOString().slice(0, 10)` : en heure d'été, minuit local tombe la
+  veille en UTC (un lundi ressortait daté du dimanche)
+
+## Vérifications avant de pousser
+
+```bash
+npm run lint       # doit être silencieux
+npm run typecheck
+npm run build
 ```
 
 ## Module Mapping
 
 Carte choroplèthe SVG des 12 départements AURA (Ain, Allier, Ardèche, Cantal, Drôme, Isère, Loire, Haute-Loire, Puy-de-Dôme, Rhône, Savoie, Haute-Savoie), colorée selon l'écart objectif/réalisé, avec les comptes géocodés superposés en points cliquables (taille selon segment). Filtres segment/statut, clic sur un département pour isoler la zone, panneau latéral pour ouvrir la fiche compte.
+
+## Points ouverts connus
+
+- **Signal saisonnier non branché.** `lib/sonarscore/seasonality.ts` est
+  écrit et testable, mais aucun appelant ne l'utilise : le niveau de
+  confiance `"saisonnier"` déclaré dans `lib/sonarscore/prediction.ts`
+  n'est donc jamais produit. À câbler dans `predictNextOrders` ou à
+  retirer — en l'état, le type promet un cas qui n'arrive pas.
+- **Migration `0014` absente** de `supabase/migrations/` (la suite passe de
+  `0013` à `0015`). Sans conséquence si la base de production est à jour,
+  mais un `db push` sur une base neuve ne reproduira pas l'historique réel.
+- **`/api/cleanup-pas`** est une opération de maintenance ponctuelle qui
+  efface cinq colonnes sur **tous** les comptes. Elle exige désormais
+  `{ "confirm": "cleanup-pas" }` dans le corps de la requête ; une fois le
+  nettoyage fait une bonne fois, la route peut être supprimée.
+- **Aucun test automatisé.** Les modules de calcul (`scoring`, `forecast`,
+  `sonarscore/*`, `persona`) sont purs et sans dépendance : ce sont les
+  premiers candidats à couvrir, et ceux dont une régression passerait
+  aujourd'hui totalement inaperçue.
 
 ## Prochaines évolutions envisagées (non codées)
 

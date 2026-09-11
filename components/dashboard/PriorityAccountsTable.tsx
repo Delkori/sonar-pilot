@@ -1,5 +1,7 @@
 "use client";
 
+import { TableWrap } from "@/components/ui/Table";
+import { theadRowClass } from "@/components/ui/Table";
 import Link from "next/link";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
@@ -32,47 +34,51 @@ export function PriorityAccountsTable({ accounts }: { accounts: Account[] }) {
   }
 
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-          <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="px-5" />
-          <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} />
-          <SortableTh label="Statut" sortKey="status" activeKey={sortKey} dir={dir} onSort={toggle} />
-          <SortableTh label="Score" sortKey="score" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
-          <SortableTh label="CA non capté" sortKey="ca_non_capte" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
-          <th className="px-5 py-3 font-medium">Action recommandée</th>
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map(({ account: a, score }) => {
-          const meta = ACTION_META[score.action];
-          return (
-            <tr key={a.id} className="border-b border-border last:border-0 hover:bg-surface-muted">
-              <td className="px-5 py-3">
-                <div className="flex items-center gap-2">
-                  <Link href={`/comptes/${a.id}`} className="font-medium text-foreground hover:text-primary">
-                    {a.name}
-                  </Link>
-                  <ScoreBadge score={score.total} />
-                </div>
-                <p className="text-xs text-muted-foreground">{a.city ?? "Ville inconnue"}</p>
-              </td>
-              <td className="px-3 py-3"><SegmentBadge segment={a.segment} /></td>
-              <td className="px-3 py-3"><StatusBadge status={a.status} /></td>
-              <td className="px-3 py-3 text-right font-medium text-foreground">{score.total}/100</td>
-              <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(score.caNonCapte)}</td>
-              <td className="px-5 py-3">
-                <span
-                  className="rounded-full px-2 py-0.5 text-xs font-medium text-white"
-                  style={{ backgroundColor: meta.color }}
-                >
-                  {meta.label}
-                </span>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    // `overflow-x-auto` : sans conteneur défilant, ces tableaux
+    // débordaient la page sur écran étroit au lieu de défiler seuls.
+    <TableWrap>
+      <table className="w-full min-w-max text-sm">
+        <thead>
+          <tr className={theadRowClass}>
+            <SortableTh label="Compte" sortKey="name" activeKey={sortKey} dir={dir} onSort={toggle} className="px-5" />
+            <SortableTh label="Seg" sortKey="segment" activeKey={sortKey} dir={dir} onSort={toggle} />
+            <SortableTh label="Statut" sortKey="status" activeKey={sortKey} dir={dir} onSort={toggle} />
+            <SortableTh label="Score" sortKey="score" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+            <SortableTh label="CA non capté" sortKey="ca_non_capte" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+            <th className="px-5 py-3 font-medium">Action recommandée</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map(({ account: a, score }) => {
+            const meta = ACTION_META[score.action];
+            return (
+              <tr key={a.id} className="border-b border-border last:border-0 hover:bg-surface-muted">
+                <td className="px-5 py-3">
+                  <div className="flex items-center gap-2">
+                    <Link href={`/comptes/${a.id}`} className="font-medium text-foreground hover:text-primary">
+                      {a.name}
+                    </Link>
+                    <ScoreBadge score={score.total} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">{a.city ?? "Ville inconnue"}</p>
+                </td>
+                <td className="px-3 py-3"><SegmentBadge segment={a.segment} /></td>
+                <td className="px-3 py-3"><StatusBadge status={a.status} /></td>
+                <td className="px-3 py-3 text-right font-medium text-foreground">{score.total}/100</td>
+                <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(score.caNonCapte)}</td>
+                <td className="px-5 py-3">
+                  <span
+                    className="rounded-full px-2 py-0.5 text-xs font-medium text-white"
+                    style={{ backgroundColor: meta.color }}
+                  >
+                    {meta.label}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </TableWrap>
   );
 }

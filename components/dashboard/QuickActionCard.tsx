@@ -1,5 +1,7 @@
 "use client";
 
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useMemo, useState, useTransition } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { createClient } from "@/lib/supabase/client";
@@ -61,7 +63,7 @@ export function QuickActionCard({ accounts }: { accounts: Account[] }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Compte (tapez pour rechercher)..."
-          className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+          className={cn(fieldClass, "w-full")}
         />
         <datalist id="quick-action-accounts">
           {accounts.slice(0, 1000).map((a) => (
@@ -72,7 +74,7 @@ export function QuickActionCard({ accounts }: { accounts: Account[] }) {
           <select
             value={type}
             onChange={(e) => setType(e.target.value as ActionType)}
-            className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+            className={cn(fieldClass, "px-2")}
           >
             <option value="commentaire">Commentaire</option>
             <option value="action">Action</option>
@@ -85,7 +87,7 @@ export function QuickActionCard({ accounts }: { accounts: Account[] }) {
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
               title="Échéance (apparaît dans le Calendrier)"
-              className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-primary"
+              className={cn(fieldClass, "px-2")}
             />
           )}
         </div>
@@ -94,7 +96,7 @@ export function QuickActionCard({ accounts }: { accounts: Account[] }) {
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
           placeholder="Contenu..."
-          className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+          className={cn(fieldClass, "w-full")}
         />
         <div className="flex items-center gap-2">
           <button

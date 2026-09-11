@@ -1,5 +1,7 @@
 "use client";
 
+import { TableWrap } from "@/components/ui/Table";
+import { theadRowClass } from "@/components/ui/Table";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { formatEUR, formatPct } from "@/lib/utils";
@@ -20,25 +22,29 @@ export function ProductsTable({ products }: { products: AccountProduct[] }) {
   );
 
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-          <SortableTh label="Marque" sortKey="brand" activeKey={sortKey} dir={dir} onSort={toggle} className="px-0" />
-          <SortableTh label="CA N-1" sortKey="ly" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-0" />
-          <SortableTh label="CA N" sortKey="cy" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-0" />
-          <SortableTh label="Croissance" sortKey="growth" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-0" />
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((p) => (
-          <tr key={p.id} className="border-b border-border last:border-0">
-            <td className="py-2">{p.brand}</td>
-            <td className="py-2 text-right text-muted-foreground">{formatEUR(p.sales_value_ly)}</td>
-            <td className="py-2 text-right">{formatEUR(p.sales_value_cy)}</td>
-            <td className="py-2 text-right">{formatPct(p.growth_rate_pct)}</td>
+    // `overflow-x-auto` : sans conteneur défilant, ces tableaux
+    // débordaient la page sur écran étroit au lieu de défiler seuls.
+    <TableWrap>
+      <table className="w-full min-w-max text-sm">
+        <thead>
+          <tr className={theadRowClass}>
+            <SortableTh label="Marque" sortKey="brand" activeKey={sortKey} dir={dir} onSort={toggle} className="px-0" />
+            <SortableTh label="CA N-1" sortKey="ly" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-0" />
+            <SortableTh label="CA N" sortKey="cy" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-0" />
+            <SortableTh label="Croissance" sortKey="growth" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-0" />
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {sorted.map((p) => (
+            <tr key={p.id} className="border-b border-border last:border-0">
+              <td className="py-2">{p.brand}</td>
+              <td className="py-2 text-right text-muted-foreground">{formatEUR(p.sales_value_ly)}</td>
+              <td className="py-2 text-right">{formatEUR(p.sales_value_cy)}</td>
+              <td className="py-2 text-right">{formatPct(p.growth_rate_pct)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableWrap>
   );
 }

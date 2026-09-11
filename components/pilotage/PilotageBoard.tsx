@@ -1,5 +1,7 @@
 "use client";
 
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -854,7 +856,7 @@ export function PilotageBoard({
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filtrer..."
-            className="mt-3 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+            className={cn(fieldClass, "mt-3 w-full")}
           />
         </div>
         <div className="flex-1 space-y-2 overflow-y-auto p-3">
@@ -901,7 +903,7 @@ export function PilotageBoard({
           <select
             value={cardSort}
             onChange={(e) => setCardSort(e.target.value as CardSort)}
-            className="rounded-lg border border-border bg-surface px-2 py-1.5 text-xs outline-none focus:border-primary"
+            className={cn(fieldClass, "px-2 text-xs")}
           >
             <option value="ca">CA prévu</option>
             <option value="boites">Boîtes prévues</option>
@@ -1075,7 +1077,7 @@ export function PilotageBoard({
                         <div className="mt-1 flex items-center gap-1">
                           <select
                             defaultValue={`${year}-${month}`}
-                            className="flex-1 rounded border border-border bg-surface px-1 py-0.5 text-[10px] outline-none focus:border-primary"
+                            className={cn(fieldClass, "flex-1 rounded px-1 py-0.5 text-[10px]")}
                           >
                             {months.map((m) => (
                               <option key={`${m.year}-${m.month}`} value={`${m.year}-${m.month}`}>
@@ -1240,7 +1242,7 @@ function OpportunityCard({
         <select
           value={selected}
           onChange={(e) => setSelected(e.target.value)}
-          className="flex-1 rounded border border-border bg-surface px-1.5 py-1 text-[10px] outline-none focus:border-primary"
+          className={cn(fieldClass, "flex-1 rounded px-1.5 py-1 text-[10px]")}
         >
           {months.map((m) => (
             <option key={`${m.year}-${m.month}`} value={`${m.year}-${m.month}`}>

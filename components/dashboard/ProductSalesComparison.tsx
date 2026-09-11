@@ -1,5 +1,6 @@
 "use client";
 
+import { theadRowClass } from "@/components/ui/Table";
 import { useMemo, useState } from "react";
 import {
   ResponsiveContainer,
@@ -255,7 +256,7 @@ export function ProductSalesComparison({
         <div className="overflow-x-auto border-t border-border pt-4">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr className={theadRowClass}>
                 <SortableTh label="Marque" sortKey="brand" activeKey={sortKey} dir={dir} onSort={toggle} className="pb-2" />
                 <SortableTh label="CA N-1 (YTD)" sortKey="lyVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />
                 <SortableTh label="CA en cours (YTD)" sortKey="cyVal" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="pb-2" />

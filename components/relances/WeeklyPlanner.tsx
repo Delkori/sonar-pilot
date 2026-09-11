@@ -1,5 +1,7 @@
 "use client";
 
+import { fieldClass } from "@/lib/ui-classes";
+import { cn } from "@/lib/utils";
 import { useMemo, useState } from "react";
 import { Calendar, dateFnsLocalizer, type View } from "react-big-calendar";
 import withDragAndDrop, { type EventInteractionArgs, type DragFromOutsideItemArgs } from "react-big-calendar/lib/addons/dragAndDrop";
@@ -283,7 +285,7 @@ export function WeeklyPlanner({
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filtrer..."
-            className="mt-2 w-full rounded-lg border border-border bg-surface px-2 py-1 text-xs outline-none focus:border-primary"
+            className={cn(fieldClass, "mt-2 w-full px-2 py-1 text-xs")}
           />
         </div>
         <div className="flex-1 space-y-3 overflow-y-auto p-3">

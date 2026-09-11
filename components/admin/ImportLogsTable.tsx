@@ -1,5 +1,7 @@
 "use client";
 
+import { TableWrap } from "@/components/ui/Table";
+import { theadRowClass } from "@/components/ui/Table";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import type { Import } from "@/types/database";
@@ -25,41 +27,45 @@ export function ImportLogsTable({ imports }: { imports: Import[] }) {
   }
 
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-          <SortableTh label="Date" sortKey="date" activeKey={sortKey} dir={dir} onSort={toggle} className="px-5" />
-          <SortableTh label="Fichier" sortKey="filename" activeKey={sortKey} dir={dir} onSort={toggle} />
-          <SortableTh label="Statut" sortKey="status" activeKey={sortKey} dir={dir} onSort={toggle} />
-          <SortableTh label="Lignes" sortKey="rows_total" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
-          <SortableTh label="Succès" sortKey="rows_success" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
-          <SortableTh label="Erreurs" sortKey="rows_error" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-5" />
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((imp) => (
-          <tr key={imp.id} className="border-b border-border last:border-0">
-            <td className="px-5 py-3 text-muted-foreground">{new Date(imp.imported_at).toLocaleString("fr-FR")}</td>
-            <td className="px-3 py-3">{imp.filename}</td>
-            <td className="px-3 py-3">
-              <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                  imp.status === "success"
-                    ? "bg-green-50 text-green-700"
-                    : imp.status === "partial"
-                    ? "bg-amber-50 text-amber-700"
-                    : "bg-rose-50 text-rose-700"
-                }`}
-              >
-                {imp.status}
-              </span>
-            </td>
-            <td className="px-3 py-3 text-right text-muted-foreground">{imp.rows_total}</td>
-            <td className="px-3 py-3 text-right">{imp.rows_success}</td>
-            <td className="px-5 py-3 text-right text-danger">{imp.rows_error}</td>
+    // `overflow-x-auto` : sans conteneur défilant, ces tableaux
+    // débordaient la page sur écran étroit au lieu de défiler seuls.
+    <TableWrap>
+      <table className="w-full min-w-max text-sm">
+        <thead>
+          <tr className={theadRowClass}>
+            <SortableTh label="Date" sortKey="date" activeKey={sortKey} dir={dir} onSort={toggle} className="px-5" />
+            <SortableTh label="Fichier" sortKey="filename" activeKey={sortKey} dir={dir} onSort={toggle} />
+            <SortableTh label="Statut" sortKey="status" activeKey={sortKey} dir={dir} onSort={toggle} />
+            <SortableTh label="Lignes" sortKey="rows_total" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+            <SortableTh label="Succès" sortKey="rows_success" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+            <SortableTh label="Erreurs" sortKey="rows_error" activeKey={sortKey} dir={dir} onSort={toggle} align="right" className="px-5" />
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {sorted.map((imp) => (
+            <tr key={imp.id} className="border-b border-border last:border-0">
+              <td className="px-5 py-3 text-muted-foreground">{new Date(imp.imported_at).toLocaleString("fr-FR")}</td>
+              <td className="px-3 py-3">{imp.filename}</td>
+              <td className="px-3 py-3">
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                    imp.status === "success"
+                      ? "bg-green-50 text-green-700"
+                      : imp.status === "partial"
+                      ? "bg-amber-50 text-amber-700"
+                      : "bg-rose-50 text-rose-700"
+                  }`}
+                >
+                  {imp.status}
+                </span>
+              </td>
+              <td className="px-3 py-3 text-right text-muted-foreground">{imp.rows_total}</td>
+              <td className="px-3 py-3 text-right">{imp.rows_success}</td>
+              <td className="px-5 py-3 text-right text-danger">{imp.rows_error}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableWrap>
   );
 }

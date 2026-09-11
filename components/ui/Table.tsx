@@ -11,19 +11,22 @@ export function TableWrap({ className, children }: { className?: string; childre
   return <div className={cn("w-full overflow-x-auto", className)}>{children}</div>;
 }
 
+/**
+ * Classe de la ligne d'en-tête, exportée telle quelle : les tableaux
+ * existants gardent leur balisage (certains utilisent `SortableTh`, des
+ * en-têtes collants ou des colonnes figées) mais partagent enfin la même
+ * définition — elle était recopiée à l'identique dans 14 fichiers.
+ */
+export const theadRowClass =
+  "border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground";
+
 export function Table({ className, ...props }: React.TableHTMLAttributes<HTMLTableElement>) {
   return <table className={cn("w-full min-w-max text-sm", className)} {...props} />;
 }
 
 export function Thead({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
   return (
-    <thead
-      className={cn(
-        "border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground",
-        className
-      )}
-      {...props}
-    />
+    <thead className={cn(theadRowClass, className)} {...props} />
   );
 }
 
