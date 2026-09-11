@@ -162,6 +162,12 @@ interface MonthSignal {
    * mélange tout ce que le compte achète.
    */
   expectedQty?: number | null;
+  /**
+   * Marques dont l'attente est couverte par ce signal. Ne sont retirées de
+   * la compétition qu'une fois la ligne réellement émise — voir
+   * `productMonthSignal`.
+   */
+  brands?: string[];
 }
 
 function orderedMonthIndices(sales: MonthlySaleRow[]): number[] {
@@ -198,6 +204,12 @@ function confidenceRank(c: PredictionConfidence): number {
  * ne génère plusieurs lignes sur des mois consécutifs à cause de la
  * tolérance : une fois une marque utilisée pour un mois, elle est retirée
  * de la compétition pour les mois suivants de ce même compte.
+ *
+ * La consommation appartient à l'appelant, pas à cette fonction : un mois
+ * peut encore être abandonné en aval (commande trop petite pour justifier un
+ * passage, reste à répartir épuisé). Marquer les marques ici les retirait
+ * alors définitivement du prévisionnel alors qu'aucune ligne n'avait été
+ * produite — l'attente correspondante disparaissait purement et simplement.
  */
 function productMonthSignal(
   predictions: AccountBrandPrediction[],
@@ -214,7 +226,6 @@ function productMonthSignal(
 
   matches.sort((a, b) => confidenceRank(a.confidence) - confidenceRank(b.confidence));
   const best = matches[0];
-  for (const m of matches) consumedBrands.add(m.brand);
 
   const weight = best.confidence === "compte" ? 1 : best.confidence === "marque" ? 0.6 : 0.5;
   const confidenceLabel =
@@ -233,7 +244,7 @@ function productMonthSignal(
   // de fausser le total avec un 0 artificiel).
   const qtys = matches.map((m) => m.expectedQty).filter((q): q is number => q !== null && q !== undefined);
   const expectedQty = qtys.length > 0 ? qtys.reduce((s, q) => s + q, 0) : null;
-  return { weight, reason, expectedQty };
+  return { weight, reason, expectedQty, brands: matches.map((m) => m.brand) };
 }
 
 /**
@@ -544,6 +555,11 @@ export function predictMonthlyForecast(
       note: signal.reason,
       hcp: allocateToHcps(hcps, boites, ca),
     });
+
+    // La ligne est émise : les marques qu'elle couvre sortent maintenant de
+    // la compétition, pour que la tolérance ±1 du signal saisonnier ne les
+    // refasse pas apparaître le mois suivant.
+    signal.brands?.forEach((b) => consumedBrands.add(b));
 
     restantLeft -= boites;
     lastIdx = tmIdx;

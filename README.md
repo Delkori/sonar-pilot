@@ -179,6 +179,9 @@ erreur, elle renvoie juste un nombre différent.
 
 - `lib/__tests__/` — dates (dont le décalage d'heure d'été), statistiques,
   cadence et statut des comptes, score de ciblage, flux `.ics`, jours ouvrés
+- `lib/__tests__/forecast.test.ts` — fusion des trois signaux produit
+  (rythme du compte / vélocité de marque / motif saisonnier), bornes du
+  générateur, répartition par médecin
 - `lib/sonarscore/__tests__/` — vélocités, prédiction par intervalle, motifs
   saisonniers
 - `lib/supabase/__tests__/fetchAll.test.ts` — pagination : couvre
@@ -211,13 +214,13 @@ Carte choroplèthe SVG des 12 départements AURA (Ain, Allier, Ardèche, Cantal,
   efface cinq colonnes sur **tous** les comptes. Elle exige
   `{ "confirm": "cleanup-pas" }` dans le corps de la requête ; une fois le
   nettoyage fait une bonne fois, la route peut être supprimée.
-- **Le signal saisonnier n'est pas couvert de bout en bout.**
-  `lib/sonarscore/seasonality.ts` est bien branché (il alimente
-  `predictPortfolioForecast`, donc le prévisionnel du Pilotage) et ses
-  règles de détection sont testées, mais la fusion des trois signaux
-  produit — rythme compte, vélocité marque, motif saisonnier — dans
-  `productMonthSignal` ne l'est pas encore. C'est le prochain endroit à
-  couvrir : c'est là que les signaux se disputent un même mois.
+- **La passe de comblement d'objectif secteur n'est pas couverte.**
+  `predictMonthlyForecast` et la fusion des signaux produit le sont
+  désormais, mais pas la passe qui sollicite davantage les comptes quand la
+  somme des prévisions reste sous l'objectif du secteur. C'est le prochain
+  endroit à couvrir : elle assouplit plusieurs seuils de prudence à la fois,
+  ce qui est exactement le genre d'endroit où un plafond se contourne sans
+  qu'on s'en rende compte.
 - **`lib/forecast.ts` (906 lignes) et `PilotageBoard.tsx` (1263 lignes)**
   restent les deux plus gros fichiers du projet et n'ont pas été découpés.
   Le premier mériterait d'être scindé par signal, le second par panneau.
