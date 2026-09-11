@@ -18,6 +18,7 @@ import { getLabsByRpps } from "@/lib/nexora/queries";
 import { createClient } from "@/lib/supabase/server";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import { monthIndex } from "@/lib/dates";
+import { availableYears, revenueByAccountYear, revenueForYear } from "@/lib/revenue";
 import type { Account, AccountAction, AccountForecast, AccountProduct, Hcp } from "@/types/database";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,13 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
     laboratoire: l.nom_labo,
     montant: l.montant,
   }));
+
+  const anneeEnCours = new Date().getFullYear();
+  const caParAnnee = revenueByAccountYear(monthlySales.map((m) => ({ ...m, account_id: id })));
+  const anneesCA = availableYears(
+    monthlySales.map((m) => ({ ...m, account_id: id })),
+    [acc]
+  );
 
   const refsAcheteesCount = products.filter((p) => (p.qty_ordered_cy ?? 0) > 0 || (p.sales_value_cy ?? 0) > 0).length;
 
@@ -133,9 +141,16 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
           <Card>
             <CardHeader><CardTitle>Historique CA</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <Row label="CA 2024" value={formatEUR(acc.ca_2024)} />
-              <Row label="CA 2025" value={formatEUR(acc.ca_2025)} />
-              <Row label="CA 2026 YTD" value={formatEUR(acc.ca_2026_ytd)} />
+              {/* Années déduites des données, plus jamais écrites en dur :
+                  trois lignes figées auraient cessé d'afficher l'exercice en
+                  cours au 1er janvier 2027. */}
+              {anneesCA.map((annee) => (
+                <Row
+                  key={annee}
+                  label={annee === anneeEnCours ? `CA ${annee} YTD` : `CA ${annee}`}
+                  value={formatEUR(revenueForYear(acc, annee, caParAnnee))}
+                />
+              ))}
             </CardContent>
           </Card>
         </div>

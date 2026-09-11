@@ -3,7 +3,7 @@
 import { theadRowClass } from "@/components/ui/Table";
 import { fieldClass } from "@/lib/ui-classes";
 import { cn } from "@/lib/utils";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
@@ -13,6 +13,8 @@ import { formatEUR, formatNumber } from "@/lib/utils";
 import { ACTION_META, computeTargetingScore } from "@/lib/scoring";
 import { RECURRENCE_BUCKETS } from "@/lib/accounts";
 import type { RecurrenceBucket } from "@/lib/accounts";
+import { referenceYears, revenueByAccountYear, revenueForYear } from "@/lib/revenue";
+import type { YearlySaleRow } from "@/lib/revenue";
 import type { Account, AccountStatus, Segment } from "@/types/database";
 
 type ScoredAccount = { account: Account; score: ReturnType<typeof computeTargetingScore> };
@@ -23,7 +25,7 @@ type SortKey =
   | "city"
   | "tier"
   | "recurrence"
-  | "ca_2025"
+  | "ca_n1"
   | "ca_ytd"
   | "potentiel"
   | "score"
@@ -35,21 +37,36 @@ const RECU_ORDER: Record<string, number> = { Mensuelle: 5, Bimestrielle: 4, Trim
 export function AccountsTable({
   accounts,
   recurrence = {},
+  monthlySales = [],
   initialTier = "all",
   initialRecurrence = "all",
 }: {
   accounts: Account[];
   recurrence?: Record<string, RecurrenceBucket>;
+  /** Ventes mensuelles réelles — source du CA par exercice (lib/revenue.ts). */
+  monthlySales?: YearlySaleRow[];
   initialTier?: string;
   initialRecurrence?: string;
 }) {
+  // Les colonnes CA suivent l'exercice : « CA 2025 » / « CA 2026 YTD » en dur
+  // auraient affiché des exercices clos indéfiniment.
+  const anneeEnCours = new Date().getFullYear();
+  const { derniereAnnee } = referenceYears();
+  const caParAnnee = useMemo(() => revenueByAccountYear(monthlySales), [monthlySales]);
+  const caPourAnnee = useCallback(
+    (account: Account, annee: number) => revenueForYear(account, annee, caParAnnee),
+    [caParAnnee]
+  );
   const [segment, setSegment] = useState<Segment | "all">("all");
   const [status, setStatus] = useState<AccountStatus | "all">("all");
   const [tier, setTier] = useState<string>(initialTier);
   const [recu, setRecu] = useState<string>(initialRecurrence);
   const [search, setSearch] = useState("");
 
-  const scored = useMemo(() => accounts.map((a) => ({ account: a, score: computeTargetingScore(a) })), [accounts]);
+  const scored = useMemo(
+    () => accounts.map((a) => ({ account: a, score: computeTargetingScore(a, { caByAccountYear: caParAnnee }) })),
+    [accounts, caParAnnee]
+  );
 
   const filtered = useMemo(() => {
     return scored.filter(({ account: a }) => {
@@ -76,8 +93,8 @@ export function AccountsTable({
       city: (r) => r.account.city,
       tier: (r) => (r.account.price_list ? TIER_ORDER[r.account.price_list] ?? 0 : null),
       recurrence: (r) => RECU_ORDER[recurrence[r.account.id]] ?? null,
-      ca_2025: (r) => r.account.ca_2025,
-      ca_ytd: (r) => r.account.ca_2026_ytd,
+      ca_n1: (r) => caPourAnnee(r.account, derniereAnnee),
+      ca_ytd: (r) => caPourAnnee(r.account, anneeEnCours),
       potentiel: (r) => r.account.potentiel_boites,
       score: (r) => r.score.total,
       ca_non_capte: (r) => r.score.caNonCapte,
@@ -150,8 +167,8 @@ export function AccountsTable({
               <SortableTh label="Ville" sortKey="city" activeKey={sortKey} dir={dir} onSort={toggle} />
               <SortableTh label="Contrat" sortKey="tier" activeKey={sortKey} dir={dir} onSort={toggle} />
               <SortableTh label="Récurrence" sortKey="recurrence" activeKey={sortKey} dir={dir} onSort={toggle} />
-              <SortableTh label="CA 2025" sortKey="ca_2025" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
-              <SortableTh label="CA 2026 YTD" sortKey="ca_ytd" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+              <SortableTh label={`CA ${derniereAnnee}`} sortKey="ca_n1" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
+              <SortableTh label={`CA ${anneeEnCours} YTD`} sortKey="ca_ytd" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
               <SortableTh label="Potentiel" sortKey="potentiel" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
               <SortableTh label="Score" sortKey="score" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
               <SortableTh label="CA non capté" sortKey="ca_non_capte" activeKey={sortKey} dir={dir} onSort={toggle} align="right" />
@@ -189,8 +206,8 @@ export function AccountsTable({
                       <span className="text-xs text-muted-foreground">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(a.ca_2025 ?? 0)}</td>
-                  <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(a.ca_2026_ytd ?? 0)}</td>
+                  <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(caPourAnnee(a, derniereAnnee))}</td>
+                  <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(caPourAnnee(a, anneeEnCours))}</td>
                   <td className="px-3 py-3 text-right text-muted-foreground">{formatNumber(a.potentiel_boites ?? 0)}</td>
                   <td className="px-3 py-3 text-right font-medium text-foreground">{score.total}/100</td>
                   <td className="px-3 py-3 text-right text-muted-foreground">{formatEUR(score.caNonCapte)}</td>

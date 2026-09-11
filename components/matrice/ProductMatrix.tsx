@@ -3,8 +3,10 @@
 import { theadRowClass } from "@/components/ui/Table";
 import { fieldClass } from "@/lib/ui-classes";
 import { cn } from "@/lib/utils";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
+import { revenueByAccountYear, revenueForYear } from "@/lib/revenue";
+import type { YearlySaleRow } from "@/lib/revenue";
 import { SegmentBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { SortableTh } from "@/components/ui/SortableTh";
@@ -36,7 +38,23 @@ const DISCONTINUED_BRANDS = new Set(["Global Action", "Ultimate", "Kiss", "Deep 
 // classée Dermo (gamme cosmétique/dermo-cosmétique, ex. lignes de soin).
 type ProductCategory = "all" | "filler" | "dermo";
 
-export function ProductMatrix({ accounts, products }: { accounts: Account[]; products: ProductRow[] }) {
+export function ProductMatrix({
+  accounts,
+  products,
+  monthlySales = [],
+}: {
+  accounts: Account[];
+  products: ProductRow[];
+  /** Ventes mensuelles réelles — CA de l'exercice en cours (lib/revenue.ts). */
+  monthlySales?: YearlySaleRow[];
+}) {
+  // Auparavant lu dans `ca_2026_ytd`, figé sur 2026.
+  const caParAnnee = useMemo(() => revenueByAccountYear(monthlySales), [monthlySales]);
+  const anneeEnCours = new Date().getFullYear();
+  const caCourant = useCallback(
+    (a: Account) => revenueForYear(a, anneeEnCours, caParAnnee),
+    [caParAnnee, anneeEnCours]
+  );
   const [segment, setSegment] = useState<Segment | "all">("all");
   const [search, setSearch] = useState("");
   const [minBoites, setMinBoites] = useState("");
@@ -114,13 +132,14 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
     let totalCa = 0;
     let totalBoites = 0;
     for (const a of accounts) {
-      if (a.realise_boites && a.realise_boites > 0 && a.ca_2026_ytd) {
-        totalCa += a.ca_2026_ytd;
+      const caAnnee = caCourant(a);
+      if (a.realise_boites && a.realise_boites > 0 && caAnnee) {
+        totalCa += caAnnee;
         totalBoites += a.realise_boites;
       }
     }
     return totalBoites > 0 ? totalCa / totalBoites : 0;
-  }, [accounts]);
+  }, [accounts, caCourant]);
 
   // ── Par compte : boîtes totales (toutes marques), "retard cumulé" (boîtes
   // en dessous du rythme N-1) et "croissance cumulée" (boîtes au-dessus du
@@ -192,20 +211,20 @@ export function ProductMatrix({ accounts, products }: { accounts: Account[]; pro
       .map((a) => {
         const bought = productsByAccount.get(a.id) ?? new Map();
         const missing = brands.filter((b) => !bought.has(b) || (bought.get(b)?.qtyCy ?? 0) === 0).length;
-        const caNonCapte = Math.max((a.potentiel_boites ?? 0) * avgPricePerBox - (a.ca_2026_ytd ?? 0), 0);
+        const caNonCapte = Math.max((a.potentiel_boites ?? 0) * avgPricePerBox - caCourant(a), 0);
         const score = computeTargetingScore(a).total;
         const stats = perAccountStats.get(a.id) ?? { boites: 0, retard: 0, croissance: 0 };
         return { account: a, bought, missing, caNonCapte, score, boites: stats.boites, retard: stats.retard, croissance: stats.croissance };
       })
       .filter((r) => (min !== null ? r.boites >= min : true))
-      .filter((r) => (minCaNum !== null ? (r.account.ca_2026_ytd ?? 0) >= minCaNum : true))
+      .filter((r) => (minCaNum !== null ? caCourant(r.account) >= minCaNum : true))
       .filter((r) => (onlyRetard ? r.retard > 0 : true))
       .filter((r) =>
         selectedBrands.size === 0
           ? true
           : Array.from(selectedBrands).some((b) => (r.bought.get(b)?.qtyCy ?? 0) > 0)
       );
-  }, [accounts, productsByAccount, brands, segment, search, avgPricePerBox, perAccountStats, minBoites, minCa, onlyRetard, selectedBrands]);
+  }, [accounts, productsByAccount, brands, segment, search, avgPricePerBox, perAccountStats, minBoites, minCa, onlyRetard, selectedBrands, caCourant]);
 
   const { sorted: rows, sortKey, dir, toggle } = useSortableTable<(typeof filteredRows)[number], SortKey>(
     filteredRows,

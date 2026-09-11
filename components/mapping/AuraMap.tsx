@@ -4,13 +4,15 @@ import { TableWrap } from "@/components/ui/Table";
 import { theadRowClass } from "@/components/ui/Table";
 import { fieldClass } from "@/lib/ui-classes";
 import { cn } from "@/lib/utils";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import * as d3geo from "d3-geo";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
+import { revenueByAccountYear, revenueForYear } from "@/lib/revenue";
+import type { YearlySaleRow } from "@/lib/revenue";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
 import { computeTargetingScore, prixBoiteHT } from "@/lib/scoring";
 import { suggestMonthlyForecast } from "@/lib/forecast";
@@ -101,15 +103,27 @@ export function AuraMap({
   geo,
   accounts,
   products = [],
+  monthlySales = [],
   hcps = [],
   sponsoringLabs = [],
 }: {
   geo: { type: "FeatureCollection"; features: DeptFeature[] };
   accounts: Account[];
   products?: ProductRow[];
+  /** Ventes mensuelles réelles — CA de l'exercice en cours (lib/revenue.ts). */
+  monthlySales?: YearlySaleRow[];
   hcps?: { account_id: string | null; name: string; rpps: string | null }[];
   sponsoringLabs?: { lab: string; accountIds: string[] }[];
 }) {
+  // Le CA « année en cours » venait de `ca_2026_ytd` : une colonne qui cesse
+  // d'être l'année en cours au 1er janvier 2027.
+  const caParAnnee = useMemo(() => revenueByAccountYear(monthlySales), [monthlySales]);
+  const anneeEnCours = new Date().getFullYear();
+  const caCourant = useCallback(
+    (a: Account) => revenueForYear(a, anneeEnCours, caParAnnee),
+    [caParAnnee, anneeEnCours]
+  );
+
   const sponsoredAccountIdsByLab = useMemo(
     () => new Map(sponsoringLabs.map((s) => [s.lab, new Set(s.accountIds)] as const)),
     [sponsoringLabs]
@@ -224,7 +238,7 @@ export function AuraMap({
       };
       cur.objectif += a.objectif_boites ?? 0;
       cur.realise += a.realise_boites ?? 0;
-      cur.ca += a.ca_2026_ytd ?? 0;
+      cur.ca += caCourant(a);
       cur.potentiel += (a.potentiel_boites ?? 0) * prixBoiteHT(a.price_list);
       cur.count += 1;
       if (a.status === "actif") cur.activeCount += 1;
@@ -240,7 +254,7 @@ export function AuraMap({
       }
     }
     return map;
-  }, [accounts, geo, pathGen]);
+  }, [accounts, geo, pathGen, caCourant]);
 
   // ── Ventes produits par département (account_id → dept_code)
   const accountDeptMap = useMemo(() => {
@@ -344,13 +358,13 @@ export function AuraMap({
       city: (a) => a.city,
       status: (a) => a.status,
       score: (a) => computeTargetingScore(a).total,
-      ca_ytd: (a) => a.ca_2026_ytd,
+      ca_ytd: (a) => caCourant(a),
     },
     "score"
   );
 
   // ── KPI sectoriaux globaux
-  const totalCa = useMemo(() => accounts.reduce((s, a) => s + (a.ca_2026_ytd ?? 0), 0), [accounts]);
+  const totalCa = useMemo(() => accounts.reduce((s, a) => s + caCourant(a), 0), [accounts, caCourant]);
   const totalActifs = accounts.filter((a) => a.status === "actif").length;
   const totalLost = accounts.filter((a) => a.status === "lost").length;
   const totalHcps = hcps.length;
@@ -917,7 +931,7 @@ export function AuraMap({
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-2 text-right text-muted-foreground">{formatEUR(a.ca_2026_ytd)}</td>
+                      <td className="px-4 py-2 text-right text-muted-foreground">{formatEUR(caCourant(a))}</td>
                     </tr>
                   );
                 })}
@@ -953,7 +967,7 @@ export function AuraMap({
           </p>
           <Row label="Objectif" value={formatNumber(selectedAccount.objectif_boites)} />
           <Row label="Réalisé" value={formatNumber(selectedAccount.realise_boites)} />
-          <Row label="CA YTD" value={formatEUR(selectedAccount.ca_2026_ytd)} />
+          <Row label={`CA ${anneeEnCours} YTD`} value={formatEUR(caCourant(selectedAccount))} />
           <Row
             label="% Atteinte"
             value={formatPct(selectedAccount.objectif_boites

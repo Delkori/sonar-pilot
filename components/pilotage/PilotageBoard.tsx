@@ -2,7 +2,7 @@
 
 import { fieldClass } from "@/lib/ui-classes";
 import { cn } from "@/lib/utils";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { predictPortfolioForecast, suggestMonthlyForecast, allocateToHcps } from "@/lib/forecast";
@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { currentMonthIndex, fromMonthIndex, monthIndex, monthsFrom, MONTHS_LONG } from "@/lib/dates";
+import { revenueByAccountYear, revenueForYear } from "@/lib/revenue";
 
 type HcpRow = Pick<Hcp, "id" | "account_id" | "name" | "potentiel_boites">;
 type ProductRow = {
@@ -161,7 +162,18 @@ export function PilotageBoard({
     }
     return map;
   }, [accounts]);
-  const caByAccount = useMemo(() => new Map(accounts.map((a) => [a.id, a.ca_2026_ytd ?? 0] as const)), [accounts]);
+  // CA de l'exercice en cours, mesuré sur les ventes mensuelles réelles —
+  // `ca_2026_ytd` cesse de désigner l'année en cours au 1er janvier 2027.
+  const caParAnnee = useMemo(() => revenueByAccountYear(monthlySales), [monthlySales]);
+  const anneeEnCours = new Date().getFullYear();
+  const caCourant = useCallback(
+    (a: Account) => revenueForYear(a, anneeEnCours, caParAnnee),
+    [caParAnnee, anneeEnCours]
+  );
+  const caByAccount = useMemo(
+    () => new Map(accounts.map((a) => [a.id, caCourant(a)] as const)),
+    [accounts, caCourant]
+  );
   const brandsByAccount = useMemo(() => {
     const map = new Map<string, Set<string>>();
     for (const p of products) {
@@ -331,12 +343,12 @@ export function PilotageBoard({
       const list = accounts.filter((a) => a.price_list === tier);
       const objectifBoites = list.reduce((s, a) => s + (a.objectif_boites ?? 0), 0);
       const realiseBoites = list.reduce(
-        (s, a) => s + (a.realise_boites ?? (a.ca_2026_ytd ? a.ca_2026_ytd / prixBoiteHT(tier) : 0)),
+        (s, a) => s + (a.realise_boites ?? (caCourant(a) ? caCourant(a) / prixBoiteHT(tier) : 0)),
         0
       );
       return { tier, count: list.length, objectifBoites, realiseBoites };
     });
-  }, [accounts]);
+  }, [accounts, caCourant]);
 
   // Prévu vs Réalisé mois par mois (année en cours) — courbe d'atterrissage.
   const currentYear = new Date().getFullYear();

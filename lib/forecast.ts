@@ -8,6 +8,7 @@ import { predictNextOrders } from "./sonarscore/prediction";
 import type { AccountBrandPrediction, PredictionConfidence } from "./sonarscore/prediction";
 import { predictSeasonalOrders } from "./sonarscore/seasonality";
 import { monthIndex, monthIndexFromDateStr } from "@/lib/dates";
+import { caParBoiteObserve, referenceYears, revenueByAccountYear, revenueForYear } from "@/lib/revenue";
 
 export interface SuggestedForecast {
   year: number;
@@ -23,8 +24,9 @@ export interface SuggestedForecast {
  * - poids par mois ajusté selon le score (plus le score est mauvais, plus la
  *   relance est priorisée tôt) et le silence (compte silencieux = démarrage
  *   plus lent, effort concentré en fin de période)
- * - CA prévu dérivé du CA réel par boîte déjà observé (ca_2026_ytd /
- *   realise_boites), ou à défaut du CA 2025 rapporté à l'objectif
+ * - CA prévu dérivé du CA réel par boîte déjà observé (CA de l'exercice en
+ *   cours / realise_boites), ou à défaut du CA du dernier exercice clos
+ *   rapporté à l'objectif
  *
  * C'est une proposition de départ, pas une vérité — chaque valeur reste
  * éditable ou supprimable une fois insérée.
@@ -41,12 +43,16 @@ export function suggestMonthlyForecast(
   const rawWeights = targetMonths.map((_, i) => (silence > 60 ? i + 1 : 1));
   const weightSum = rawWeights.reduce((s, w) => s + w, 0) || 1;
 
+  // Sans historique mensuel en paramètre, la résolution se replie sur les
+  // colonnes annuelles héritées — exact tant que l'exercice en possède une.
+  const sansHistorique = new Map<string, number>();
+  const { derniereAnnee } = referenceYears();
+  const caDerniereAnnee = revenueForYear(account, derniereAnnee, sansHistorique);
   const caParBoite =
-    account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
-      ? account.ca_2026_ytd / account.realise_boites
-      : account.objectif_boites && account.objectif_boites > 0 && account.ca_2025
-      ? account.ca_2025 / account.objectif_boites
-      : 0;
+    caParBoiteObserve(account, sansHistorique) ??
+    (account.objectif_boites && account.objectif_boites > 0 && caDerniereAnnee
+      ? caDerniereAnnee / account.objectif_boites
+      : 0);
 
   return targetMonths.map((tm, i) => {
     const boites = Math.round((restant * rawWeights[i]) / weightSum);
@@ -455,11 +461,12 @@ export function predictMonthlyForecast(
 ): PredictedForecast[] {
   const orderedMonths = orderedMonthIndices(sales);
 
+  // CA par année mesuré sur l'historique réel du compte : le prix à la boîte
+  // suit ainsi l'exercice en cours, au lieu de rester adossé à `ca_2026_ytd`.
+  const caParAnnee = revenueByAccountYear(sales.map((s) => ({ ...s, account_id: account.id })));
+
   const objectifBoites = account.objectif_boites ?? 0;
-  const caParBoiteForTarget =
-    account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
-      ? account.ca_2026_ytd / account.realise_boites
-      : prixBoiteHT(account.price_list);
+  const caParBoiteForTarget = caParBoiteObserve(account, caParAnnee) ?? prixBoiteHT(account.price_list);
   const now = new Date();
   const nowIdx = monthIndex(now.getFullYear(), now.getMonth() + 1);
   const cibleBoites =
@@ -477,10 +484,7 @@ export function predictMonthlyForecast(
   let restantLeft = Math.max(cibleBoites - (account.realise_boites ?? 0) - manuelBoitesSum, 0);
   if (restantLeft <= 0) return [];
 
-  const caParBoite =
-    account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
-      ? account.ca_2026_ytd / account.realise_boites
-      : prixBoiteHT(account.price_list);
+  const caParBoite = caParBoiteObserve(account, caParAnnee) ?? prixBoiteHT(account.price_list);
 
   const tierAdj = TIER_FACTOR[account.price_list ?? ""] ?? 1;
   const trendAdj = trendFactor(orderedMonths, nowIdx);
@@ -677,11 +681,10 @@ function applySectorObjectiveTopUp(
     const candidates = accounts
       .filter((a) => a.status !== "lost")
       .map((account) => {
-        const orderedForAccount = orderedMonthIndices(salesByAccount.get(account.id) ?? []);
+        const salesForAccount = salesByAccount.get(account.id) ?? [];
+        const orderedForAccount = orderedMonthIndices(salesForAccount);
         const caParBoite =
-          account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
-            ? account.ca_2026_ytd / account.realise_boites
-            : prixBoiteHT(account.price_list);
+          caParBoiteObserve(account, revenueByAccountYear(salesForAccount)) ?? prixBoiteHT(account.price_list);
         const potentiel = account.potentiel_boites ?? 0;
         const alreadyPlanned = plannedBoitesByAccountTotal.get(account.id) ?? 0;
         // Le seul plafond dur : ce qu'il reste réellement de potentiel de
@@ -905,16 +908,15 @@ export function autoFillPortfolioForecast(
     for (const h of history) monthlyTotals[h.month - 1] += h.ca;
     const historyPoints = history.filter((h) => h.ca > 0).length;
 
+    const caParAnneeCompte = revenueByAccountYear(history.map((h) => ({ ...h, account_id: account.id })));
+    const caDerniereAnnee = revenueForYear(account, referenceYears().derniereAnnee, caParAnneeCompte);
     const objectifCa =
-      restant > 0 && (account.objectif_boites ?? 0) > 0 && account.ca_2025
-        ? (account.ca_2025 / account.objectif_boites!) * restant
+      restant > 0 && (account.objectif_boites ?? 0) > 0 && caDerniereAnnee
+        ? (caDerniereAnnee / account.objectif_boites!) * restant
         : potentielRestant * prixBoiteHT(account.price_list);
 
     if (historyPoints >= 3 && objectifCa > 0) {
-      const caParBoite =
-        account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
-          ? account.ca_2026_ytd / account.realise_boites
-          : prixBoiteHT(account.price_list);
+      const caParBoite = caParBoiteObserve(account, caParAnneeCompte) ?? prixBoiteHT(account.price_list);
       const sum = monthlyTotals.reduce((s, v) => s + v, 0) || 1;
       for (const tm of remainingTargets) {
         const weight = monthlyTotals[tm.month - 1] / sum;

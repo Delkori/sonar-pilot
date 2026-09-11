@@ -3,7 +3,7 @@ import path from "path";
 import { PageShell } from "@/components/layout/PageShell";
 import { AuraMap } from "@/components/mapping/AuraMap";
 import { createClient } from "@/lib/supabase/server";
-import { getAccountProducts, getAccounts, getHcps } from "@/lib/data/queries";
+import { getAccountProducts, getAccounts, getHcps, getMonthlySales } from "@/lib/data/queries";
 import { getLabsByRpps } from "@/lib/nexora/queries";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +11,11 @@ export const dynamic = "force-dynamic";
 export default async function MappingPage() {
   const supabase = await createClient();
 
-  const [accounts, products, hcps, geoRaw] = await Promise.all([
+  const [accounts, products, hcps, monthlySales, geoRaw] = await Promise.all([
     getAccounts(supabase),
     getAccountProducts(supabase),
     getHcps(supabase),
+    getMonthlySales(supabase),
     readFile(path.join(process.cwd(), "public/geo/aura-departements.json"), "utf-8"),
   ]);
   const geo = JSON.parse(geoRaw);
@@ -50,7 +51,14 @@ export default async function MappingPage() {
       title="Mapping Auvergne-Rhône-Alpes"
       subtitle="Lecture géographique du secteur — préparation de tournée terrain"
     >
-      <AuraMap geo={geo} accounts={accounts} products={products} hcps={hcps} sponsoringLabs={sponsoringLabs} />
+      <AuraMap
+        geo={geo}
+        accounts={accounts}
+        products={products}
+        hcps={hcps}
+        monthlySales={monthlySales}
+        sponsoringLabs={sponsoringLabs}
+      />
     </PageShell>
   );
 }

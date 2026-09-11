@@ -2,7 +2,7 @@ import { PageShell } from "@/components/layout/PageShell";
 import { PersonaClient } from "@/components/personas/PersonaClient";
 import type { PersonaAccountRow } from "@/components/personas/PersonaClient";
 import { createClient } from "@/lib/supabase/server";
-import { getAccountProducts, getAccounts } from "@/lib/data/queries";
+import { getAccountProducts, getAccounts, getMonthlySales } from "@/lib/data/queries";
 import {
   computePersonaModels,
   personaRecommendations,
@@ -12,6 +12,7 @@ import {
   type Persona,
 } from "@/lib/persona";
 import { isFillerBrand } from "@/lib/brands";
+import { revenueByAccountYear, revenueForYear } from "@/lib/revenue";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,17 @@ function isPersona(v: string | null): v is Persona {
 export default async function PersonasPage() {
   const supabase = await createClient();
 
-  const [accounts, allProducts] = await Promise.all([getAccounts(supabase), getAccountProducts(supabase)]);
+  const [accounts, allProducts, monthlySales] = await Promise.all([
+    getAccounts(supabase),
+    getAccountProducts(supabase),
+    getMonthlySales(supabase),
+  ]);
+
+  // CA de l'exercice en cours, mesuré : `ca_2026_ytd` aurait cessé de
+  // désigner l'année en cours au 1er janvier 2027.
+  const anneeEnCours = new Date().getFullYear();
+  const caParAnnee = revenueByAccountYear(monthlySales);
+  const caCourant = (a: (typeof accounts)[number]) => revenueForYear(a, anneeEnCours, caParAnnee);
 
   // Filtré aux seules références filler : les imports "Croissance par
   // marque" contiennent aussi des lignes non commerciales (bandeaux, cartes
@@ -37,7 +48,7 @@ export default async function PersonasPage() {
     if (isPersona(a.persona)) personaByAccount.set(a.id, a.persona);
   }
 
-  const caByAccount = new Map(accounts.map((a) => [a.id, a.ca_2026_ytd ?? 0] as const));
+  const caByAccount = new Map(accounts.map((a) => [a.id, caCourant(a)] as const));
   const models = computePersonaModels(personaByAccount, products, caByAccount);
   const modelByPersona = new Map(models.map((m) => [m.persona, m] as const));
 
@@ -68,7 +79,7 @@ export default async function PersonasPage() {
         id: a.id,
         name: a.name,
         persona,
-        ca: a.ca_2026_ytd ?? 0,
+        ca: caCourant(a),
         recos: personaRecommendations(modelByPersona.get(persona), accountBrands).map((b) => b.brand),
         crossSell: crossSellRecommendations(rulesByPersona.get(persona), accountBrands).map((r) => ({
           brand: r.to,

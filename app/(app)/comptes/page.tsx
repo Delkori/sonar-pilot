@@ -24,6 +24,7 @@ export default async function ComptesPage({
         <AccountsTable
           accounts={accounts}
           recurrence={recurrence}
+          monthlySales={monthlySales}
           initialTier={tier ?? "all"}
           initialRecurrence={recuParam ?? "all"}
         />

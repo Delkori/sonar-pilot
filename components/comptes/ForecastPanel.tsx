@@ -9,6 +9,9 @@ import { createClient } from "@/lib/supabase/client";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import { suggestMonthlyForecast } from "@/lib/forecast";
 import { prixBoiteHT } from "@/lib/scoring";
+import { revenueForYear } from "@/lib/revenue";
+
+const EMPTY_REVENUE = new Map<string, number>();
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import type { Account, AccountForecast, ForecastKind } from "@/types/database";
@@ -139,9 +142,15 @@ export function ForecastPanel({
   }
 
   function fillFromOrders() {
+    // CA de l'exercice en cours mesuré sur les ventes mensuelles du compte —
+    // `ca_2026_ytd` cesse de désigner l'année en cours au 1er janvier 2027.
+    const anneeEnCours = new Date().getFullYear();
+    const caAnneeEnCours =
+      monthlySales.filter((s) => s.year === anneeEnCours).reduce((sum, s) => sum + s.ca, 0) ||
+      revenueForYear(account, anneeEnCours, EMPTY_REVENUE);
     const caParBoite =
-      account.realise_boites && account.realise_boites > 0 && account.ca_2026_ytd
-        ? account.ca_2026_ytd / account.realise_boites
+      account.realise_boites && account.realise_boites > 0 && caAnneeEnCours
+        ? caAnneeEnCours / account.realise_boites
         : prixBoiteHT(account.price_list);
     const rows = monthlySales
       .filter((s) => s.ca > 0 && !forecasts.some((f) => f.year === s.year && f.month === s.month))

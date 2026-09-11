@@ -1,5 +1,6 @@
 import type { Account, AccountStatus } from "@/types/database";
 import { daysSince, monthIndex } from "@/lib/dates";
+import { hasKnownRevenue } from "@/lib/revenue";
 
 /**
  * Statut dérivé de l'activité réelle (dernière commande facturée), pas d'un
@@ -63,6 +64,8 @@ export function isProspect(a: Account): boolean {
   if (a.status === "lost" || a.status === "new") return true;
   const days = daysSince(a.last_order_date);
   if (days !== null) return days > 365;
-  // aucune date de commande connue → jamais commandé
-  return (a.ca_2024 ?? 0) === 0 && (a.ca_2025 ?? 0) === 0 && (a.ca_2026_ytd ?? 0) === 0;
+  // Aucune date de commande connue → le compte n'a jamais commandé, sauf si
+  // un exercice historisé porte du CA. (Énumérer 2024/2025/2026 à la main
+  // aurait cessé d'être juste dès qu'un exercice s'ajoute.)
+  return !hasKnownRevenue(a);
 }

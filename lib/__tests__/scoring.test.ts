@@ -100,3 +100,49 @@ describe("computeTargetingScore", () => {
     assert.ok(ACTION_META[score.action]);
   });
 });
+
+describe("années de référence", () => {
+  test("suit le changement d'année sans intervention", () => {
+    // Le barème comparait 2024 à 2025 en dur : en 2027, il aurait encore
+    // jugé les comptes sur des exercices vieux de trois ans.
+    const en2026 = computeTargetingScore(compte(), { now: new Date(2026, 5, 1) });
+    const en2028 = computeTargetingScore(compte(), { now: new Date(2028, 5, 1) });
+    assert.equal(en2026.criteria.find((c) => c.key === "evolution")!.label, "Évolution 24→25");
+    assert.equal(en2028.criteria.find((c) => c.key === "evolution")!.label, "Évolution 26→27");
+  });
+
+  test("nomme l'exercice dans le détail du CA non capté", () => {
+    const score = computeTargetingScore(compte({ potentiel_boites: 100 }), { now: new Date(2029, 0, 1) });
+    assert.match(score.criteria.find((c) => c.key === "ca_non_capte")!.detail, /CA 2028/);
+  });
+
+  test("lit le CA des ventes mensuelles pour une année sans colonne dédiée", () => {
+    // 2027 n'a pas de colonne `ca_2027` et n'en aura jamais : le chiffre doit
+    // venir des ventes mensuelles réelles.
+    const caParAnnee = new Map([["x|2027", 50000]]);
+    const score = computeTargetingScore(compte({ potentiel_boites: 1000, ca_2025: 0 }), {
+      now: new Date(2028, 5, 1),
+      caByAccountYear: caParAnnee,
+    });
+    assert.ok(score.penetration !== null && score.penetration > 0, "le CA 2027 doit être pris en compte");
+  });
+
+  test("détecte une reconquête sur les exercices courants, pas sur 2024/2025", () => {
+    const caParAnnee = new Map([["x|2027", 30000]]); // actif en N-2, rien en N-1
+    const score = computeTargetingScore(
+      compte({ segment: "D", potentiel_boites: 20, last_order_date: ilYA(30) }),
+      { now: new Date(2029, 5, 1), caByAccountYear: caParAnnee }
+    );
+    assert.equal(score.action, "reconquete");
+    assert.match(score.criteria.find((c) => c.key === "evolution")!.detail, /Actif en 2027, aucun CA 2028/);
+  });
+
+  test("sans ventes mensuelles, se replie sur les colonnes héritées", () => {
+    // Comportement inchangé pour les exercices qui possèdent une colonne :
+    // c'est ce qui garantit qu'aucun score ne bouge aujourd'hui.
+    const avecColonnes = computeTargetingScore(compte({ ca_2024: 30000, ca_2025: 0, potentiel_boites: 50 }), {
+      now: new Date(2026, 5, 1),
+    });
+    assert.match(avecColonnes.criteria.find((c) => c.key === "evolution")!.detail, /Actif en 2024, aucun CA 2025/);
+  });
+});

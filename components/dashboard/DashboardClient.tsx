@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { PriorityAccountsTable } from "@/components/dashboard/PriorityAccountsTable";
@@ -16,6 +16,7 @@ import { CompetitorShareCard } from "@/components/dashboard/CompetitorShareCard"
 import type { CompetitorAmount } from "@/lib/nexora/queries";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { DEPT_NAMES, departmentCodeOf } from "@/lib/geo";
+import { availableYears, referenceYears, revenueByAccountYear, revenueForYear } from "@/lib/revenue";
 import { MONTHS_SHORT } from "@/lib/dates";
 import { suggestMonthlyForecast } from "@/lib/forecast";
 import { computeTargetingScore, ACTION_META } from "@/lib/scoring";
@@ -38,12 +39,6 @@ import {
 import type { Account } from "@/types/database";
 import Link from "next/link";
 
-const YEAR_FIELDS: Record<number, keyof Account> = {
-  2024: "ca_2024",
-  2025: "ca_2025",
-  2026: "ca_2026_ytd",
-};
-const YEARS = [2024, 2025, 2026];
 
 interface MonthlySale {
   account_id: string;
@@ -78,7 +73,20 @@ export function DashboardClient({
   competitorAmounts?: CompetitorAmount[];
   lastImportLabel: string;
 }) {
-  const [year, setYear] = useState(2026);
+  // Années proposées et année par défaut déduites des données, plus jamais
+  // écrites en dur : une liste figée à [2024, 2025, 2026] cessait d'afficher
+  // l'année en cours au 1er janvier 2027.
+  const years = useMemo(() => availableYears(monthlySales, accounts), [monthlySales, accounts]);
+  const [year, setYear] = useState(() => years[years.length - 1] ?? new Date().getFullYear());
+
+  // CA par compte et par année, mesuré sur les ventes mensuelles réelles
+  // (repli sur les colonnes annuelles héritées pour les exercices antérieurs
+  // à l'historique mensuel importé) — voir lib/revenue.ts.
+  const caByAccountYear = useMemo(() => revenueByAccountYear(monthlySales), [monthlySales]);
+  const caForYear = useCallback(
+    (account: Account) => revenueForYear(account, year, caByAccountYear),
+    [year, caByAccountYear]
+  );
   const [month, setMonth] = useState<number | null>(null); // null = vue annuelle
   const [selectedDept, setSelectedDept] = useState<string | null>(null);
 
@@ -102,8 +110,12 @@ export function DashboardClient({
 
   // ── Score de ciblage calculé pour chaque compte du périmètre
   const scored = useMemo(
-    () => filteredAccounts.map((a) => ({ account: a, score: computeTargetingScore(a) })),
-    [filteredAccounts]
+    () =>
+      filteredAccounts.map((a) => ({
+        account: a,
+        score: computeTargetingScore(a, { caByAccountYear: caByAccountYear }),
+      })),
+    [filteredAccounts, caByAccountYear]
   );
   const caPotentielTotal = useMemo(() => scored.reduce((s, r) => s + r.score.caNonCapte, 0), [scored]);
 
@@ -121,8 +133,8 @@ export function DashboardClient({
   }, [scored]);
 
   const caYear = useMemo(
-    () => filteredAccounts.reduce((sum, a) => sum + ((a[YEAR_FIELDS[year]] as number | null) ?? 0), 0),
-    [filteredAccounts, year]
+    () => filteredAccounts.reduce((sum, a) => sum + caForYear(a), 0),
+    [filteredAccounts, caForYear]
   );
   const filteredAccountIds = useMemo(() => new Set(filteredAccounts.map((a) => a.id)), [filteredAccounts]);
 
@@ -208,56 +220,68 @@ export function DashboardClient({
 
   const tierStats = useMemo(() => {
     const tiers = ["Premium", "Pro", "Pro+"] as const;
-    const caField = YEAR_FIELDS[year];
     return tiers.map((tier) => {
       const list = filteredAccounts.filter((a) => a.price_list === tier);
-      const ca = list.reduce((s, a) => s + ((a[caField] as number | null) ?? 0), 0);
+      const ca = list.reduce((s, a) => s + caForYear(a), 0);
       const objectif = list.reduce((s, a) => s + (a.objectif_boites ?? 0), 0);
       const potentiel = list.reduce((s, a) => s + ((a.potentiel_boites ?? 0) * 133.66), 0);
       return { tier, count: list.length, ca, objectif, potentiel };
     });
-  }, [filteredAccounts, year]);
+  }, [filteredAccounts, caForYear]);
   const hasTierData = tierStats.some((t) => t.count > 0);
 
   const caParSegment = useMemo(() => {
     const totals: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
     for (const a of filteredAccounts) {
-      if (a.segment) totals[a.segment] += (a[YEAR_FIELDS[year]] as number | null) ?? 0;
+      if (a.segment) totals[a.segment] += caForYear(a);
     }
     return totals;
-  }, [filteredAccounts, year]);
+  }, [filteredAccounts, caForYear]);
   const concentrationSegmentA = caYear > 0 ? caParSegment.A / caYear : 0;
+
+  // Exercices de référence relatifs à la date, et non 2024/2025 en dur.
+  const { derniereAnnee, anneePrecedente } = referenceYears();
+  const caAnnee = useCallback(
+    (a: Account, annee: number) => revenueForYear(a, annee, caByAccountYear),
+    [caByAccountYear]
+  );
 
   const withEvolution = useMemo(
     () =>
       filteredAccounts
-        .filter((a) => (a.ca_2024 ?? 0) > 0)
-        .map((a) => ({ account: a, evolution: ((a.ca_2025 ?? 0) - (a.ca_2024 ?? 0)) / (a.ca_2024 ?? 1) })),
-    [filteredAccounts]
+        .map((a) => ({ account: a, base: caAnnee(a, anneePrecedente), fin: caAnnee(a, derniereAnnee) }))
+        .filter((r) => r.base > 0)
+        .map((r) => ({ account: r.account, evolution: (r.fin - r.base) / r.base })),
+    [filteredAccounts, caAnnee, anneePrecedente, derniereAnnee]
   );
   const topCroissance = [...withEvolution].sort((a, b) => b.evolution - a.evolution).slice(0, 5);
   const topDeclin = [...withEvolution].sort((a, b) => a.evolution - b.evolution).slice(0, 5);
 
-  // ── Top 10 / Flop 10 clients : CA 2026 (YTD) vs CA 2025
-  const withEvolution2026 = useMemo(
+  // ── Top 10 / Flop 10 clients : exercice en cours (YTD) vs exercice clos
+  const anneeEnCours = new Date().getFullYear();
+  const withEvolutionCourante = useMemo(
     () =>
-      filteredAccounts.map((a) => ({
-        account: a,
-        ca2026: a.ca_2026_ytd ?? 0,
-        ca2025: a.ca_2025 ?? 0,
-        evolution: (a.ca_2025 ?? 0) > 0 ? ((a.ca_2026_ytd ?? 0) - (a.ca_2025 ?? 0)) / (a.ca_2025 ?? 1) : null,
-      })),
-    [filteredAccounts]
+      filteredAccounts.map((a) => {
+        const caCourant = caAnnee(a, anneeEnCours);
+        const caPrecedent = caAnnee(a, derniereAnnee);
+        return {
+          account: a,
+          caCourant,
+          caPrecedent,
+          evolution: caPrecedent > 0 ? (caCourant - caPrecedent) / caPrecedent : null,
+        };
+      }),
+    [filteredAccounts, caAnnee, anneeEnCours, derniereAnnee]
   );
-  const top10Clients2026 = [...withEvolution2026].sort((a, b) => b.ca2026 - a.ca2026).slice(0, 10);
-  const flop10Clients2026 = withEvolution2026
-    .filter((r) => r.ca2025 > 0)
+  const top10Clients2026 = [...withEvolutionCourante].sort((a, b) => b.caCourant - a.caCourant).slice(0, 10);
+  const flop10Clients2026 = withEvolutionCourante
+    .filter((r) => r.caPrecedent > 0)
     .sort((a, b) => (a.evolution ?? 0) - (b.evolution ?? 0))
     .slice(0, 10);
 
   const lostAccounts = [...filteredAccounts]
     .filter((a) => a.status === "lost")
-    .sort((a, b) => (b.ca_2025 ?? 0) - (a.ca_2025 ?? 0))
+    .sort((a, b) => caAnnee(b, derniereAnnee) - caAnnee(a, derniereAnnee))
     .slice(0, 10);
 
   const overdueCallAccounts = [...filteredAccounts]
@@ -334,7 +358,7 @@ export function DashboardClient({
         <div className="flex flex-wrap items-center gap-4">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Période</span>
           <div className="flex gap-1">
-            {YEARS.map((y) => (
+            {years.map((y) => (
               <button
                 key={y}
                 onClick={() => {
@@ -508,7 +532,7 @@ export function DashboardClient({
               node: (
                 <DepartmentBreakdown
                   accounts={accounts}
-                  yearField={YEAR_FIELDS[year]}
+                  caForAccount={caForYear}
                   selectedDept={selectedDept}
                   onSelectDept={setSelectedDept}
                 />
@@ -657,11 +681,23 @@ export function DashboardClient({
             },
             {
               id: "top-flop-2026",
-              label: "Top 10 / Flop 10 clients — CA 2026 vs 2025",
+              label: `Top 10 / Flop 10 clients — CA ${anneeEnCours} vs ${derniereAnnee}`,
               node: (
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <TopFlopClientsCard title="Top 10 clients (CA 2026 YTD)" rows={top10Clients2026} tone="positive" />
-                  <TopFlopClientsCard title="Flop 10 clients (CA 2026 YTD vs 2025)" rows={flop10Clients2026} tone="negative" />
+                  <TopFlopClientsCard
+                    title={`Top 10 clients (CA ${anneeEnCours} YTD)`}
+                    rows={top10Clients2026}
+                    tone="positive"
+                    anneeCourante={anneeEnCours}
+                    anneePrecedente={derniereAnnee}
+                  />
+                  <TopFlopClientsCard
+                    title={`Flop 10 clients (CA ${anneeEnCours} YTD vs ${derniereAnnee})`}
+                    rows={flop10Clients2026}
+                    tone="negative"
+                    anneeCourante={anneeEnCours}
+                    anneePrecedente={derniereAnnee}
+                  />
                 </div>
               ),
             },
@@ -692,7 +728,7 @@ export function DashboardClient({
                               </span>
                             )}
                           </div>
-                          <span className="text-muted-foreground">{formatEUR(a.ca_2025)}</span>
+                          <span className="text-muted-foreground">{formatEUR(caAnnee(a, derniereAnnee))}</span>
                         </div>
                       ))}
                     </CardContent>

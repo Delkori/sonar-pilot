@@ -1,5 +1,6 @@
 import type { Account } from "@/types/database";
 import { weeksSince } from "@/lib/dates";
+import { referenceYears, revenueForYear } from "@/lib/revenue";
 
 /**
  * Score de ciblage /100 — reproduction exacte du barème du PAS :
@@ -8,7 +9,7 @@ import { weeksSince } from "@/lib/dates";
  *   3. CA non capté         20 pts
  *   4. Références manquantes 15 pts
  *   5. Pénétration          10 pts
- *   6. Évolution 24→25      10 pts
+ *   6. Évolution N-2 → N-1  10 pts
  * Recalculé à la volée à chaque affichage : il évolue automatiquement
  * quand le silence s'allonge ou qu'un nouvel import actualise les CA.
  */
@@ -36,6 +37,9 @@ export function prixBoiteHT(tier: string | null | undefined): number {
 // Repli générique (tier inconnu) — gardé pour les rares appels sans compte
 // en contexte. Préférer `prixBoiteHT(account.price_list)` partout ailleurs.
 export const PRIX_MOYEN_BOITE = prixBoiteHT(null);
+
+/** Repli quand l'appelant n'a pas les ventes mensuelles sous la main. */
+const EMPTY_REVENUE = new Map<string, number>();
 export const NB_REFS_FILLERS = 10;
 
 export type ActionCode =
@@ -101,9 +105,29 @@ function refsManquantesCount(account: Account, refsAcheteesCount?: number): numb
 
 export function computeTargetingScore(
   account: Account,
-  options?: { refsAcheteesCount?: number }
+  options?: {
+    refsAcheteesCount?: number;
+    /**
+     * CA par compte et par année (clé `id|année`), issu des ventes mensuelles
+     * réelles — voir `revenueByAccountYear`. Facultatif : sans lui, le calcul
+     * se replie sur les colonnes annuelles héritées, ce qui reste exact tant
+     * que l'exercice de référence en possède une.
+     */
+    caByAccountYear?: Map<string, number>;
+    /** Date de référence — injectable pour les tests. */
+    now?: Date;
+  }
 ): TargetingScore {
   const criteria: CriterionScore[] = [];
+
+  // Les exercices de référence suivent la date du jour. Ils étaient écrits en
+  // dur (2025 pour « l'an dernier », 2024 pour l'année d'avant) : le score
+  // aurait comparé 2024 à 2025 indéfiniment, et le « CA non capté » serait
+  // resté adossé à un exercice de plus en plus ancien.
+  const { derniereAnnee, anneePrecedente } = referenceYears(options?.now);
+  const caParAnnee = options?.caByAccountYear ?? EMPTY_REVENUE;
+  const caN1 = revenueForYear(account, derniereAnnee, caParAnnee);
+  const caN2 = revenueForYear(account, anneePrecedente, caParAnnee);
 
   // 1. Segment — 25 pts
   const segPts = { A: 25, B: 20, C: 15, D: 8, E: 3 }[account.segment ?? "E"] ?? 3;
@@ -129,14 +153,14 @@ export function computeTargetingScore(
   // 3. CA non capté — 20 pts
   const prixBoite = prixBoiteHT(account.price_list);
   const potentielEUR = (account.potentiel_boites ?? 0) * prixBoite;
-  const caNonCapte = Math.max(potentielEUR - (account.ca_2025 ?? 0), 0);
+  const caNonCapte = Math.max(potentielEUR - caN1, 0);
   const cncPts = caNonCapte >= 50000 ? 20 : caNonCapte >= 20000 ? 14 : caNonCapte > 5000 ? 8 : 2;
   criteria.push({
     key: "ca_non_capte",
     label: "CA non capté",
     points: cncPts,
     max: 20,
-    detail: `${Math.round(caNonCapte).toLocaleString("fr-FR")} € (potentiel × ${prixBoite.toFixed(2)} € HT − CA 2025)`,
+    detail: `${Math.round(caNonCapte).toLocaleString("fr-FR")} € (potentiel × ${prixBoite.toFixed(2)} € HT − CA ${derniereAnnee})`,
   });
 
   // 4. Références manquantes — 15 pts
@@ -151,11 +175,11 @@ export function computeTargetingScore(
     detail:
       refsManquantes === null
         ? "Données produit non importées"
-        : `${refsManquantes}/${NB_REFS_FILLERS} références non achetées en 2025`,
+        : `${refsManquantes}/${NB_REFS_FILLERS} références non achetées en ${derniereAnnee}`,
   });
 
   // 5. Pénétration — 10 pts
-  const penetration = potentielEUR > 0 ? (account.ca_2025 ?? 0) / potentielEUR : null;
+  const penetration = potentielEUR > 0 ? caN1 / potentielEUR : null;
   const penPts = penetration === null ? 0 : penetration < 0.1 ? 10 : penetration < 0.25 ? 6 : penetration < 0.5 ? 3 : 0;
   criteria.push({
     key: "penetration",
@@ -165,25 +189,29 @@ export function computeTargetingScore(
     detail: penetration === null ? "Potentiel non renseigné" : `${Math.round(penetration * 100)}% du potentiel capté`,
   });
 
-  // 6. Évolution 24→25 — 10 pts
-  const ca24 = account.ca_2024 ?? 0;
-  const ca25 = account.ca_2025 ?? 0;
+  // 6. Évolution N-2 → N-1 — 10 pts
   let evolPts = 0;
   let evolDetail = "Stable ou en hausse";
-  if (ca24 > 0 && ca25 === 0) {
+  if (caN2 > 0 && caN1 === 0) {
     evolPts = 10;
-    evolDetail = "Actif en 2024, aucun CA 2025 — client perdu";
-  } else if (ca24 > 0) {
-    const drop = (ca25 - ca24) / ca24;
+    evolDetail = `Actif en ${anneePrecedente}, aucun CA ${derniereAnnee} — client perdu`;
+  } else if (caN2 > 0) {
+    const drop = (caN1 - caN2) / caN2;
     if (drop < -0.3) {
       evolPts = 8;
-      evolDetail = `Baisse de ${Math.round(Math.abs(drop) * 100)}% vs 2024`;
+      evolDetail = `Baisse de ${Math.round(Math.abs(drop) * 100)}% vs ${anneePrecedente}`;
     } else if (drop < 0) {
       evolPts = 4;
-      evolDetail = `Baisse de ${Math.round(Math.abs(drop) * 100)}% vs 2024`;
+      evolDetail = `Baisse de ${Math.round(Math.abs(drop) * 100)}% vs ${anneePrecedente}`;
     }
   }
-  criteria.push({ key: "evolution", label: "Évolution 24→25", points: evolPts, max: 10, detail: evolDetail });
+  criteria.push({
+    key: "evolution",
+    label: `Évolution ${String(anneePrecedente).slice(2)}→${String(derniereAnnee).slice(2)}`,
+    points: evolPts,
+    max: 10,
+    detail: evolDetail,
+  });
 
   const total = criteria.reduce((s, c) => s + c.points, 0);
 
@@ -191,7 +219,7 @@ export function computeTargetingScore(
   let action: ActionCode;
   if (total >= 70) action = "visite_urgente";
   else if (caNonCapte > 30000 && penetration !== null && penetration < 0.15) action = "developper_pdm";
-  else if (ca25 === 0 && ca24 > 0) action = "reconquete";
+  else if (caN1 === 0 && caN2 > 0) action = "reconquete";
   else if (penetration !== null && penetration < 0.15) action = "cross_sell";
   else if (total >= 45) action = "relance";
   else action = "fideliser";

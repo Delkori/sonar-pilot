@@ -48,6 +48,32 @@ export const runtime = "nodejs";
  *   sont optionnels et alimentent CA réel, silence, ventes mensuelles et
  *   données produit — matching par nom de client normalisé
  */
+/**
+ * Colonnes `ca_<année>` existantes, remplies depuis le CA agrégé par année.
+ * Écrire `ca_2024 / ca_2025 / ca_2026_ytd` en dur revenait à cesser
+ * d'alimenter l'exercice en cours dès le 1ᵉʳ janvier 2027.
+ */
+const LEGACY_CA_COLUMNS: Record<number, string> = {
+  2022: "ca_2022",
+  2023: "ca_2023",
+  2024: "ca_2024",
+  2025: "ca_2025",
+  2026: "ca_2026_ytd",
+};
+
+function legacyYearColumns(caByYear: Record<number, number>): Record<string, number> {
+  const patch: Record<string, number> = {};
+  for (const [annee, colonne] of Object.entries(LEGACY_CA_COLUMNS)) {
+    const ca = caByYear[Number(annee)];
+    // Seuls les exercices présents dans le fichier sont écrits. Mettre les
+    // autres à `null` effacerait l'historique dès qu'un import ne couvre
+    // qu'une année — ce que fait, par construction, tout import d'un exercice
+    // récent.
+    if (ca !== undefined) patch[colonne] = ca;
+  }
+  return patch;
+}
+
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const pasFile = formData.get("pas") as File | null;
@@ -328,7 +354,7 @@ export async function POST(req: NextRequest) {
       const monthlyBuffer = await monthlyFile.arrayBuffer();
       const monthlyRows = parseMonthlySalesWorkbook(monthlyBuffer);
       rowsTotal += monthlyRows.length;
-      const monthlyPayload = [];
+      const monthlyPayload = new Map<string, number>();
       let monthlyMatched = 0;
       for (const row of monthlyRows) {
         const accountId = idByName.get(normalizeName(row.customerName));
@@ -337,12 +363,21 @@ export async function POST(req: NextRequest) {
           continue;
         }
         monthlyMatched++;
-        monthlyPayload.push({ account_id: accountId, year: row.year, month: row.month, ca: row.ca });
+        const key = `${accountId}|${row.year}|${row.month}`;
+        monthlyPayload.set(key, (monthlyPayload.get(key) ?? 0) + row.ca);
       }
-      if (monthlyPayload.length > 0) {
+      if (monthlyPayload.size > 0) {
+        // Fusion des doublons de clé avant écriture : deux lignes du fichier
+        // portant le même (compte, année, mois) feraient échouer TOUT le lot
+        // avec « ON CONFLICT DO UPDATE command cannot affect row a second
+        // time » — silencieusement, aucune ligne ne passant.
+        const payload = Array.from(monthlyPayload, ([key, ca]) => {
+          const [account_id, year, month] = key.split("|");
+          return { account_id, year: Number(year), month: Number(month), ca };
+        });
         const { error } = await supabase
           .from("account_monthly_sales")
-          .upsert(monthlyPayload, { onConflict: "account_id,year,month" });
+          .upsert(payload, { onConflict: "account_id,year,month" });
         if (error) allErrors.push({ row: 0, message: `Ventes mensuelles : ${error.message}` });
       }
       rowsSuccess += monthlyMatched;
@@ -437,6 +472,7 @@ export async function POST(req: NextRequest) {
         { ca: Record<number, number>; first: string; last: string; matched: boolean }
       >();
       let invoiceMatched = 0;
+      const monthlyFromInvoices = new Map<string, number>();
       for (const inv of invoices) {
         const accountId = await resolveAccountId(inv.customerName);
         if (!accountId) {
@@ -455,14 +491,28 @@ export async function POST(req: NextRequest) {
         if (inv.date > cur.last) cur.last = inv.date;
         byAccount.set(accountId, cur);
 
-        // ventes mensuelles réelles à partir des factures
+        // Ventes mensuelles réelles : on ACCUMULE par (compte, année, mois).
+        // Un upsert par facture, comme auparavant, écrasait la ligne du mois
+        // à chaque nouvelle facture : un compte facturé trois fois en mars ne
+        // gardait que la dernière facture comme « CA de mars ». Le total
+        // annuel, lui, était juste — d'où des mensuels incohérents avec leur
+        // propre somme annuelle, et une cadence de commande sous-estimée.
         const month = Number(inv.date.slice(5, 7));
-        await supabase.from("account_monthly_sales").upsert(
-          { account_id: accountId, year, month, ca: inv.totalExclTax },
-          { onConflict: "account_id,year,month" }
-        );
+        const monthKey = `${accountId}|${year}|${month}`;
+        monthlyFromInvoices.set(monthKey, (monthlyFromInvoices.get(monthKey) ?? 0) + inv.totalExclTax);
       }
       rowsSuccess += invoiceMatched;
+
+      if (monthlyFromInvoices.size > 0) {
+        const payload = Array.from(monthlyFromInvoices, ([key, ca]) => {
+          const [account_id, year, month] = key.split("|");
+          return { account_id, year: Number(year), month: Number(month), ca };
+        });
+        const { error } = await supabase
+          .from("account_monthly_sales")
+          .upsert(payload, { onConflict: "account_id,year,month" });
+        if (error) allErrors.push({ row: 0, message: `Ventes mensuelles (factures) : ${error.message}` });
+      }
 
       const now = Date.now();
       for (const [accountId, agg] of byAccount) {
@@ -470,9 +520,11 @@ export async function POST(req: NextRequest) {
         await supabase
           .from("accounts")
           .update({
-            ca_2024: agg.ca[2024] ?? null,
-            ca_2025: agg.ca[2025] ?? null,
-            ca_2026_ytd: agg.ca[2026] ?? null,
+            // Colonnes annuelles héritées, alimentées pour les seuls exercices
+            // qui en possèdent une. Elles ne servent plus que de repli : la
+            // source de vérité est `account_monthly_sales`, qui couvre
+            // n'importe quelle année sans migration (voir lib/revenue.ts).
+            ...legacyYearColumns(agg.ca),
             first_order_date: agg.first,
             last_order_date: agg.last,
             jours_silence: silenceDays,

@@ -89,3 +89,40 @@ describe("cohérence code ↔ migrations", () => {
     assert.deepEqual(sansRls, [], "tables sans RLS : lisibles par n'importe quel porteur de la clé anon");
   });
 });
+
+describe("indépendance aux exercices", () => {
+  /**
+   * Le schéma porte une colonne par exercice (`ca_2022` … `ca_2026_ytd`).
+   * Les lire directement condamne l'écran concerné à devenir faux au
+   * 1ᵉʳ janvier suivant — c'est ce qui aurait figé le dashboard sur 2026.
+   * Tout passe désormais par `lib/revenue.ts`, qui s'appuie sur
+   * `account_monthly_sales` et ne se replie sur ces colonnes que pour les
+   * exercices sans historique mensuel.
+   */
+  const AUTORISES = [
+    "lib/revenue.ts", // la couche elle-même
+    "lib/import/mapping.ts", // noms de colonnes du fichier PAS source
+    "app/api/import/route.ts", // alimentation des colonnes de repli
+    "app/api/cleanup-pas/route.ts", // purge ponctuelle des colonnes obsolètes
+    "lib/forecast-backtest.ts", // reconstruction d'un état passé
+  ];
+
+  test("aucun écran ne lit une colonne annuelle en dur", () => {
+    const coupables: string[] = [];
+    for (const dossier of ["app", "lib", "components"]) {
+      for (const fichier of fichiersSource(path.join(RACINE, dossier))) {
+        const relatif = path.relative(RACINE, fichier);
+        if (AUTORISES.includes(relatif)) continue;
+        const source = readFileSync(fichier, "utf8");
+        for (const m of source.matchAll(/\.(ca_\d{4}(?:_ytd)?)\b/g)) {
+          coupables.push(`${relatif} → ${m[1]}`);
+        }
+      }
+    }
+    assert.deepEqual(
+      coupables,
+      [],
+      "ces lectures deviendront fausses au prochain 1er janvier — passer par lib/revenue.ts"
+    );
+  });
+});

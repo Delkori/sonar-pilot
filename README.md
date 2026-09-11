@@ -207,6 +207,30 @@ npm run typecheck
 npm run build
 ```
 
+## Exercices : aucune année n'est écrite en dur
+
+Le schéma porte une colonne par exercice (`ca_2022` … `ca_2026_ytd`). Lire
+ces colonnes directement condamne l'écran concerné à devenir faux au
+1ᵉʳ janvier suivant : le dashboard n'aurait plus proposé l'année en cours en
+2027, et le score de ciblage aurait comparé 2024 à 2025 indéfiniment.
+
+Tout passe donc par **`lib/revenue.ts`** :
+
+- `revenueByAccountYear(ventes)` — CA par compte et par année, agrégé depuis
+  `account_monthly_sales`, qui couvre n'importe quel exercice sans migration ;
+- `revenueForYear(compte, année, map)` — la donnée mesurée d'abord, repli sur
+  la colonne annuelle héritée pour les exercices antérieurs à l'historique
+  mensuel importé (les CA repris de l'ancien PAS) ;
+- `availableYears(...)` — les années réellement documentées, plus l'année en
+  cours, qui doit rester sélectionnable dès le 1ᵉʳ janvier ;
+- `referenceYears()` — le dernier exercice clos et le précédent, relatifs à
+  la date du jour : c'est sur eux que raisonnent le score de ciblage et le
+  prévisionnel.
+
+Les colonnes annuelles ne sont plus qu'un repli, et un test
+(`lib/__tests__/schema.test.ts`) échoue si un écran recommence à les lire
+directement.
+
 ## Pilotage — période affichée
 
 Le tableau des prévisions part par défaut du mois en cours, sur l'horizon

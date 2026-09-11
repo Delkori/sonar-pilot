@@ -10,14 +10,18 @@ import { MapPin } from "lucide-react";
 
 interface DepartmentBreakdownProps {
   accounts: Account[];
-  yearField: keyof Account;
+  /**
+   * CA de l'année affichée, par compte. Remplace l'ancien `yearField`
+   * (nom de colonne annuelle) : il n'existe pas de colonne pour 2027.
+   */
+  caForAccount: (account: Account) => number;
   selectedDept: string | null;
   onSelectDept: (dept: string | null) => void;
 }
 
 export function DepartmentBreakdown({
   accounts,
-  yearField,
+  caForAccount,
   selectedDept,
   onSelectDept,
 }: DepartmentBreakdownProps) {
@@ -38,7 +42,7 @@ export function DepartmentBreakdown({
       const code = departmentCodeOf(account) || "NC"; // NC = non classé
       const deptName = departmentLabel(code);
       const score = computeTargetingScore(account);
-      const caVal = (account[yearField] as number | null) ?? 0;
+      const caVal = caForAccount(account);
 
       const existing = map.get(code) ?? {
         code,
@@ -65,7 +69,7 @@ export function DepartmentBreakdown({
         caShare: d.ca / totalSectorCa,
       }))
       .sort((a, b) => b.ca - a.ca);
-  }, [accounts, yearField]);
+  }, [accounts, caForAccount]);
 
   const maxCa = Math.max(...deptStats.map((d) => d.ca), 1);
 
