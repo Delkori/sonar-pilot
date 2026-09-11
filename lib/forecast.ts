@@ -644,10 +644,17 @@ function applySectorObjectiveTopUp(
     addPlanned(f.account_id, f.year, f.month, f.boites_prevues, f.ca_prevu);
     noteLastIdx(f.account_id, monthIndex(f.year, f.month));
   }
+  // Mois saisis à la main : comptés dans le planifié, mais interdits au
+  // comblement. La fusion plus bas ne cherche que dans `out` (les lignes
+  // générées) : y ajouter du volume créerait une seconde ligne sur la même
+  // clé (compte, année, mois), dont l'upsert ne garderait qu'une au hasard —
+  // et écraserait potentiellement la décision de l'utilisateur.
+  const manuelAccountMonths = new Set<string>();
   for (const e of existing) {
     if (e.source !== "manuel") continue;
     addPlanned(e.account_id, e.year, e.month, e.boites_prevues ?? 0, e.ca_prevu ?? 0);
     noteLastIdx(e.account_id, monthIndex(e.year, e.month));
+    manuelAccountMonths.add(accountMonthKey(e.account_id, e.year, e.month));
   }
   for (const [accId, salesArr] of salesByAccount) {
     const ordered = orderedMonthIndices(salesArr);
@@ -707,10 +714,22 @@ function applySectorObjectiveTopUp(
       const bucket = recurrenceBucket(ordered);
       const normalGap = RECURRENCE_GAP_MONTHS[bucket] ?? GAP_MOIS_PAR_DEFAUT;
       const relaxedGap = Math.max(1, Math.floor(normalGap / TOP_UP_GAP_DIVISOR));
+      if (manuelAccountMonths.has(accountMonthKey(account.id, tm.year, tm.month))) continue;
+
       const lastIdx = lastPlannedIdxByAccount.get(account.id);
       // Assoupli, pas supprimé : un compte a quand même besoin d'un minimum
       // de temps pour écouler ce qui vient de lui être prévu.
-      if (lastIdx !== undefined && tmIdx - lastIdx < relaxedGap) continue;
+      //
+      // `lastIdx !== tmIdx` est essentiel : la génération de base vient
+      // d'inscrire ce mois-ci comme dernier point planifié du compte, donc
+      // l'écart valait 0 et TOUT compte déjà retenu ce mois-ci était rejeté —
+      // exactement ceux que le tri ci-dessus place en tête, et exactement le
+      // cas que la branche de fusion plus bas est censée traiter. La priorité
+      // « renforcer un signal déjà jugé plausible » ne s'appliquait donc
+      // jamais, et cette branche de fusion était du code mort. Renforcer le
+      // mois courant n'est pas re-solliciter trop tôt : c'est la même
+      // commande, en plus gros.
+      if (lastIdx !== undefined && lastIdx !== tmIdx && tmIdx - lastIdx < relaxedGap) continue;
 
       // Plafond de concentration : ce que ce compte a déjà (base + top-up
       // précédent) ce mois-ci ne doit pas dépasser sa part maximale de
@@ -737,6 +756,13 @@ function applySectorObjectiveTopUp(
         existingLine.boites_prevues += boites;
         existingLine.ca_prevu += ca;
         existingLine.note = `${existingLine.note} · Complément pour l'objectif secteur`;
+        // Répartition recalculée sur le nouveau total : conservée telle
+        // quelle, elle ne totalisait plus le montant de la ligne.
+        existingLine.hcp = allocateToHcps(
+          hcpsByAccount.get(account.id) ?? [],
+          existingLine.boites_prevues,
+          existingLine.ca_prevu
+        );
       } else {
         out.push({
           account_id: account.id,
