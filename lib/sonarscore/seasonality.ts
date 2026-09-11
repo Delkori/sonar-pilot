@@ -35,15 +35,19 @@ export function computeSeasonalAnniversaries(
   lines: PurchaseLine[],
   toleranceMonths = 1
 ): Map<string, SeasonalAnniversary[]> {
-  const groups = new Map<string, Map<number, { month: number; qty: number }[]>>(); // key -> année -> achats de l'année
+  // key -> année -> achats de l'année
+  const groups = new Map<string, Map<number, { day: string; month: number; qty: number }[]>>();
 
   for (const l of lines) {
-    const d = new Date(l.purchase_date);
+    // Année et mois lus directement dans la chaîne ISO. `new Date("2024-03-01")`
+    // donne minuit UTC, que `getFullYear()`/`getMonth()` relisent en heure
+    // locale : sous un fuseau à décalage négatif, le 1er mars devenait le
+    // 29 février — donc une autre année, et un autre mois anniversaire.
+    const [year, month] = l.purchase_date.split("-").map(Number);
     const key = `${l.account_id}|${l.brand}`;
-    const year = d.getFullYear();
-    const byYear = groups.get(key) ?? new Map<number, { month: number; qty: number }[]>();
+    const byYear = groups.get(key) ?? new Map<number, { day: string; month: number; qty: number }[]>();
     const arr = byYear.get(year) ?? [];
-    arr.push({ month: d.getMonth() + 1, qty: l.qty });
+    arr.push({ day: l.purchase_date, month, qty: l.qty });
     byYear.set(year, arr);
     groups.set(key, byYear);
   }
@@ -54,7 +58,15 @@ export function computeSeasonalAnniversaries(
     if (byYear.size < 2) continue; // besoin d'au moins 2 années distinctes pour parler de motif
 
     const anchors = Array.from(byYear.entries())
-      .map(([year, purchases]) => ({ year, month: purchases[0].month, qty: purchases[0].qty }))
+      .map(([year, purchases]) => {
+        // « Le premier achat de l'année » suppose un tri : les lignes
+        // arrivent dans l'ordre de la base (par id), pas par date. Sans ce
+        // tri, un compte achetant en mars ET en novembre se voyait attribuer
+        // l'un ou l'autre mois selon l'ordre de lecture — soit un motif
+        // saisonnier différent à chaque import.
+        const first = [...purchases].sort((a, b) => a.day.localeCompare(b.day))[0];
+        return { year, month: first.month, qty: first.qty };
+      })
       .sort((a, b) => a.year - b.year);
 
     const used = new Array(anchors.length).fill(false);
@@ -83,7 +95,15 @@ export function computeSeasonalAnniversaries(
         });
       }
     }
-    if (signals.length > 0) result.set(accountId, signals);
+    // Cumul, jamais remplacement : la boucle parcourt des clés
+    // `compte|marque`, donc un compte ayant un motif saisonnier sur deux
+    // marques passait deux fois ici — le second `set` écrasait le premier et
+    // le signal de toutes ses marques sauf une disparaissait du prévisionnel.
+    if (signals.length > 0) {
+      const existing = result.get(accountId);
+      if (existing) existing.push(...signals);
+      else result.set(accountId, signals);
+    }
   }
   return result;
 }

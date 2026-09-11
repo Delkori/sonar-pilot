@@ -167,9 +167,35 @@ seule fois. `bare` pour les vues plein écran (calendrier, carte).
   `toISOString().slice(0, 10)` : en heure d'été, minuit local tombe la
   veille en UTC (un lundi ressortait daté du dimanche)
 
+## Tests
+
+```bash
+npm test
+```
+
+Les modules de calcul sont purs et sans dépendance : ce sont eux qui portent
+les tests, parce qu'une régression y est invisible — elle ne lève aucune
+erreur, elle renvoie juste un nombre différent.
+
+- `lib/__tests__/` — dates (dont le décalage d'heure d'été), statistiques,
+  cadence et statut des comptes, score de ciblage, flux `.ics`, jours ouvrés
+- `lib/sonarscore/__tests__/` — vélocités, prédiction par intervalle, motifs
+  saisonniers
+- `lib/supabase/__tests__/fetchAll.test.ts` — pagination : couvre
+  explicitement le cas « plus de 1000 lignes »
+- `lib/__tests__/schema.test.ts` — garde-fou de schéma : vérifie que toute
+  table interrogée par le code est bien créée par une migration, que la
+  numérotation des migrations est continue et que chacune active RLS
+
+La suite est épinglée sur `TZ=Europe/Paris` (voir le script `test`) : c'est
+le fuseau du secteur, et celui sous lequel les bugs de date se manifestent.
+Sous un autre fuseau les tests passent toujours, mais certains vérifient
+alors moins de choses.
+
 ## Vérifications avant de pousser
 
 ```bash
+npm test
 npm run lint       # doit être silencieux
 npm run typecheck
 npm run build
@@ -181,22 +207,20 @@ Carte choroplèthe SVG des 12 départements AURA (Ain, Allier, Ardèche, Cantal,
 
 ## Points ouverts connus
 
-- **Signal saisonnier non branché.** `lib/sonarscore/seasonality.ts` est
-  écrit et testable, mais aucun appelant ne l'utilise : le niveau de
-  confiance `"saisonnier"` déclaré dans `lib/sonarscore/prediction.ts`
-  n'est donc jamais produit. À câbler dans `predictNextOrders` ou à
-  retirer — en l'état, le type promet un cas qui n'arrive pas.
-- **Migration `0014` absente** de `supabase/migrations/` (la suite passe de
-  `0013` à `0015`). Sans conséquence si la base de production est à jour,
-  mais un `db push` sur une base neuve ne reproduira pas l'historique réel.
 - **`/api/cleanup-pas`** est une opération de maintenance ponctuelle qui
-  efface cinq colonnes sur **tous** les comptes. Elle exige désormais
+  efface cinq colonnes sur **tous** les comptes. Elle exige
   `{ "confirm": "cleanup-pas" }` dans le corps de la requête ; une fois le
   nettoyage fait une bonne fois, la route peut être supprimée.
-- **Aucun test automatisé.** Les modules de calcul (`scoring`, `forecast`,
-  `sonarscore/*`, `persona`) sont purs et sans dépendance : ce sont les
-  premiers candidats à couvrir, et ceux dont une régression passerait
-  aujourd'hui totalement inaperçue.
+- **Le signal saisonnier n'est pas couvert de bout en bout.**
+  `lib/sonarscore/seasonality.ts` est bien branché (il alimente
+  `predictPortfolioForecast`, donc le prévisionnel du Pilotage) et ses
+  règles de détection sont testées, mais la fusion des trois signaux
+  produit — rythme compte, vélocité marque, motif saisonnier — dans
+  `productMonthSignal` ne l'est pas encore. C'est le prochain endroit à
+  couvrir : c'est là que les signaux se disputent un même mois.
+- **`lib/forecast.ts` (906 lignes) et `PilotageBoard.tsx` (1263 lignes)**
+  restent les deux plus gros fichiers du projet et n'ont pas été découpés.
+  Le premier mériterait d'être scindé par signal, le second par panneau.
 
 ## Prochaines évolutions envisagées (non codées)
 

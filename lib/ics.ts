@@ -22,6 +22,37 @@ function dateTimeToIcsUtc(iso: string): string {
   return new Date(iso).toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
 }
 
+/**
+ * Pliage des lignes à 75 octets (RFC 5545 §3.1) : une ligne plus longue doit
+ * être coupée et la suite préfixée d'une espace. La description d'un
+ * événement de planning concatène note, prévisionnel et dernière commande —
+ * elle dépasse donc régulièrement la limite. Les parseurs tolérants s'en
+ * accommodent, les stricts rejettent le flux entier, pas seulement la ligne.
+ *
+ * Le découpage compte des OCTETS, pas des caractères : couper au milieu
+ * d'une séquence UTF-8 (un « é », une puce) produirait un flux invalide.
+ */
+function foldLine(line: string): string {
+  const bytes = Buffer.from(line, "utf8");
+  if (bytes.length <= 75) return line;
+
+  const chunks: string[] = [];
+  let start = 0;
+  // 75 octets pour la première ligne, 74 pour les suivantes (l'espace de
+  // continuation compte dans la limite).
+  let limit = 75;
+  while (start < bytes.length) {
+    let end = Math.min(start + limit, bytes.length);
+    // Recule jusqu'au début d'un caractère complet (un octet de continuation
+    // UTF-8 vaut 10xxxxxx).
+    while (end > start && end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
+    chunks.push(bytes.subarray(start, end).toString("utf8"));
+    start = end;
+    limit = 74;
+  }
+  return chunks.join("\r\n ");
+}
+
 /** Construit un flux .ics minimal, compatible Apple Calendar (abonnement). */
 export function buildIcsCalendar(events: IcsEvent[], calendarName: string): string {
   const now = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
@@ -51,5 +82,5 @@ export function buildIcsCalendar(events: IcsEvent[], calendarName: string): stri
   }
 
   lines.push("END:VCALENDAR");
-  return lines.join("\r\n");
+  return lines.map(foldLine).join("\r\n");
 }
