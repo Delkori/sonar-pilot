@@ -11,6 +11,7 @@ import { SegmentBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
+import { useUrlFilter } from "@/lib/hooks/useUrlFilter";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { computeTargetingScore } from "@/lib/scoring";
 import { brandCategory } from "@/lib/brands";
@@ -55,8 +56,10 @@ export function ProductMatrix({
     (a: Account) => revenueForYear(a, anneeEnCours, caParAnnee),
     [caParAnnee, anneeEnCours]
   );
-  const [segment, setSegment] = useState<Segment | "all">("all");
-  const [search, setSearch] = useState("");
+  // Filtres partagés avec la liste et la carte, portés par l'URL.
+  const [segmentParam, setSegment] = useUrlFilter("segment");
+  const segment = segmentParam as Segment | "all";
+  const [search, setSearch] = useUrlFilter("q", "");
   const [minBoites, setMinBoites] = useState("");
   const [minCa, setMinCa] = useState("");
   const [onlyRetard, setOnlyRetard] = useState(false);

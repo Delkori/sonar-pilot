@@ -1,4 +1,5 @@
 import { PageShell } from "@/components/layout/PageShell";
+import { Suspense } from "react";
 import { HubTabs } from "@/components/layout/HubTabs";
 
 /**
@@ -11,6 +12,7 @@ export default function AnalyseLayout({ children }: { children: React.ReactNode 
       title="Analyse"
       subtitle="Ce que les données disent du portefeuille : chances de commande, scoring, profils, concurrence"
       tabs={
+        <Suspense>
         <HubTabs
           items={[
             { href: "/analyse", label: "Probabilités", exact: true, hint: "Chances de commande par compte et par critère" },
@@ -19,6 +21,7 @@ export default function AnalyseLayout({ children }: { children: React.ReactNode 
             { href: "/analyse/concurrence", label: "Concurrence", hint: "Sponsoring et Transparence Santé" },
           ]}
         />
+        </Suspense>
       }
     >
       {children}

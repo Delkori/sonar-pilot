@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { PageShell } from "@/components/layout/PageShell";
+import { Suspense } from "react";
 import { HubTabs } from "@/components/layout/HubTabs";
 import { CalendarSyncPanel } from "@/components/relances/CalendarSyncPanel";
 import { createClient } from "@/lib/supabase/server";
@@ -24,12 +25,14 @@ export default async function PlanningLayout({ children }: { children: React.Rea
       title="Planning"
       subtitle="Le mois à planifier, la semaine à tenir"
       tabs={
+        <Suspense>
         <HubTabs
           items={[
             { href: "/planning", label: "Mois", exact: true, hint: "Prévisionnel et opportunités à répartir sur les mois" },
             { href: "/planning/semaine", label: "Semaine", hint: "Visites, appels et temps administratif" },
           ]}
         />
+        </Suspense>
       }
       actions={feedUrl ? <CalendarSyncPanel feedUrl={feedUrl} /> : undefined}
       bare

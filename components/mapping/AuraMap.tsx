@@ -10,6 +10,7 @@ import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
+import { useUrlFilter } from "@/lib/hooks/useUrlFilter";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { revenueByAccountYear, revenueForYear } from "@/lib/revenue";
 import type { YearlySaleRow } from "@/lib/revenue";
@@ -147,8 +148,11 @@ export function AuraMap({
     }
     return m;
   }, [hcps]);
-  const [segment, setSegment] = useState<Segment | "all">("all");
-  const [status, setStatus] = useState<AccountStatus | "all">("all");
+  // Filtres partagés avec la liste et la matrice, portés par l'URL.
+  const [segmentParam, setSegment] = useUrlFilter("segment");
+  const segment = segmentParam as Segment | "all";
+  const [statusParam, setStatus] = useUrlFilter("statut");
+  const status = statusParam as AccountStatus | "all";
   const [selectedDept, setSelectedDept] = useState<string | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
   const [showOnlyOpportunities, setShowOnlyOpportunities] = useState(false);

@@ -242,11 +242,17 @@ portefeuille — pas un barème à poids fixes.
 
 **Comment c'est appris.** Chaque (compte, mois passé) est une situation. On
 observe l'état du compte à ce mois-là en n'utilisant que ce qui était connu
-à l'époque, puis on regarde s'il a commandé dans les N mois suivants. Huit
+à l'époque, puis on regarde s'il a commandé dans les N mois suivants. Neuf
 critères : cadence de commande, position dans le cycle (début, fin, due, en
 retard, décroché), commandes sur 12 mois, tendance sur 6 mois,
-saisonnalité (commandait-il aux mêmes mois l'an dernier), segment, tier, et
-référence attendue (d'après les vélocités produit). Les critères sont
+saisonnalité (commandait-il aux mêmes mois l'an dernier), segment, tier,
+référence attendue (d'après les vélocités produit) et **prévision saisie**
+(vous aviez vous-même prévu une commande sur la période, dans Planning ›
+Mois — seules les lignes manuelles comptent, et seulement si elles
+existaient déjà au mois de référence, sinon le modèle tricherait). Le poids
+de ce dernier critère est appris comme les autres : il mesure à quel point
+vos prévisions se réalisent, et vaut zéro tant qu'il n'y a pas
+d'historique de prévisions. Les critères sont
 combinés par régression logistique régularisée — une combinaison naïve des
 taux surcompte les critères corrélés (cadence, retard et activité disent en
 partie la même chose) — puis recalibrés sur les mois les plus récents, tenus
@@ -264,11 +270,15 @@ partie la même chose) — puis recalibrés sur les mois les plus récents, tenu
 - le tableau des comptes, triable, avec les facteurs les plus favorable et
   défavorable de chacun.
 
-La fiche compte affiche la probabilité à 3 mois avec ses huit facteurs.
+La fiche compte affiche la probabilité à 3 mois avec ses neuf facteurs.
 Le CA attendu est une espérance, pas une prévision ligne à ligne : la
-planification reste dans Pilotage. Module : `lib/probability.ts`, tests
-dans `lib/__tests__/probability.test.ts` (dont l'absence de fuite du futur
-et la supériorité sur le taux de base).
+planification reste dans Planning › Mois, qui réutilise le même modèle à
+horizon 1 mois (voir plus bas). Module : `lib/probability.ts` — les poids
+appris (`weights`, `platt`) sont sérialisables, `createFeatureContext` +
+`probabilityForMonth` projettent un mois futur sans réapprendre. Tests
+dans `lib/__tests__/probability.test.ts` (dont l'absence de fuite du futur,
+la supériorité sur le taux de base et la projection avec commandes
+anticipées).
 
 ## Navigation : cinq entrées
 
@@ -290,10 +300,11 @@ fiche — ↑ ↓ pour choisir, Entrée pour ouvrir. C'est le geste le plus
 fréquent de la journée ; il ne demandait auparavant pas moins de trois
 écrans.
 
-## Planning › Mois — période affichée
+## Planning › Mois — mois affiché, chances de commande, rendez-vous
 
-Le tableau des prévisions part par défaut du mois en cours, sur l'horizon
-choisi (1 / 3 / 6 / 12 / 24 mois). Le mois de départ se règle librement, y
+Le choix du mois est le premier réglage du tableau, avant l'horizon et le
+tri. Le tableau part par défaut du mois en cours, sur l'horizon choisi
+(1 / 3 / 6 / 12 / 24 mois). Le mois de départ se règle librement, y
 compris sur un mois passé : c'est ainsi qu'on confronte le prévisionnel d'un
 trimestre écoulé à son réalisé, mois par mois.
 
@@ -309,6 +320,42 @@ désactivé : il y créerait des prévisions pour des mois déjà facturés. La
 saisie reste possible (glisser une opportunité dans le mois, ou passer par la
 fiche compte, qui accepte n'importe quel mois).
 
+**Une prévision saisie nourrit le modèle.** Chaque carte d'un mois à venir
+affiche la **chance de commande** du compte ce mois-là (modèle à 1 mois,
+appris côté serveur sur tout le portefeuille). Les prévisions que vous
+posez à la main (glisser-déposer, CA modifié, ligne déplacée — tout ce qui
+est marqué `manuel`) sont prises en compte de deux façons :
+- comme critère « vous l'aviez prévu » pour le mois concerné ;
+- comme **commande anticipée** pour les mois qui suivent : une prévision
+  posée en octobre remet le cycle du compte à zéro, et sa chance de
+  commander en novembre en tient compte (un compte trimestriel retombe en
+  « début de cycle »). Seules comptent les prévisions à partir du mois en
+  cours ; une prévision passée non réalisée n'est pas une commande, et une
+  ligne générée par le modèle ne se nourrit pas elle-même.
+L'en-tête de chaque mois à venir donne le prévu **pondéré par les
+chances** : la somme des CA prévus multipliés par la probabilité de chaque
+compte — ce sur quoi on peut raisonnablement compter.
+
+**Prévision sans rendez-vous.** Si aucune visite ni aucun appel n'est posé
+dans Planning › Semaine pour ce compte ce mois-là, la carte le signale
+(« Aucun rendez-vous ce mois-ci ») et l'en-tête du mois compte ces cartes.
+La commande peut très bien se prendre autrement : on renseigne alors le
+mode de contact — **Appel**, **Mail** ou **Visite à caler** — et l'alerte
+s'éteint (colonne `contact_mode`, migration `0020`). Le lien calendrier
+ouvre la semaine pour caler le rendez-vous. Rien n'est signalé sur un mois
+clos ni sur une ligne déjà commandée. L'export Excel reprend la chance de
+commande et l'état du rendez-vous.
+
+## Comptes — filtres partagés entre les onglets
+
+Les filtres de la liste (segment, statut, tier, récurrence, recherche)
+vivent dans l'URL (`/comptes?segment=A&tier=Premium`) et suivent d'un
+onglet à l'autre : la Carte et les Produits s'ouvrent sur le même segment
+et la même recherche, et un lien vers `/comptes?tier=Pro` depuis le
+Planning arrive directement filtré. Hook : `lib/hooks/useUrlFilter.ts`
+(écrit l'URL sans rechargement) ; les onglets de hub reportent la chaîne de
+requête.
+
 ## Comptes › Carte
 
 Carte choroplèthe SVG des 12 départements AURA (Ain, Allier, Ardèche, Cantal, Drôme, Isère, Loire, Haute-Loire, Puy-de-Dôme, Rhône, Savoie, Haute-Savoie), colorée selon l'écart objectif/réalisé, avec les comptes géocodés superposés en points cliquables (taille selon segment). Filtres segment/statut, clic sur un département pour isoler la zone, panneau latéral pour ouvrir la fiche compte.
@@ -319,7 +366,7 @@ Carte choroplèthe SVG des 12 départements AURA (Ain, Allier, Ardèche, Cantal,
   efface cinq colonnes sur **tous** les comptes. Elle exige
   `{ "confirm": "cleanup-pas" }` dans le corps de la requête ; une fois le
   nettoyage fait une bonne fois, la route peut être supprimée.
-- **`lib/forecast.ts` (910 lignes) et `PilotageBoard.tsx` (1263 lignes)**
+- **`lib/forecast.ts` (910 lignes) et `PilotageBoard.tsx` (1622 lignes)**
   restent les deux plus gros fichiers du projet. Le premier est maintenant
   couvert par des tests, donc découpable sans risque — par signal, plutôt
   que par ordre d'écriture. Le second gagnerait à être scindé par panneau.

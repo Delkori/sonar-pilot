@@ -1,4 +1,5 @@
 import { PageShell } from "@/components/layout/PageShell";
+import { Suspense } from "react";
 import { HubTabs } from "@/components/layout/HubTabs";
 
 /**
@@ -12,6 +13,7 @@ export default function ComptesHubLayout({ children }: { children: React.ReactNo
       title="Comptes"
       subtitle="Le référentiel du secteur — en liste, sur la carte, par produit"
       tabs={
+        <Suspense>
         <HubTabs
           items={[
             { href: "/comptes", label: "Liste", exact: true, hint: "Tous les comptes, filtres et score de ciblage" },
@@ -19,6 +21,7 @@ export default function ComptesHubLayout({ children }: { children: React.ReactNo
             { href: "/comptes/produits", label: "Produits", hint: "Qui a acheté quoi — cross-sell" },
           ]}
         />
+        </Suspense>
       }
     >
       {children}

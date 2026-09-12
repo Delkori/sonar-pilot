@@ -3,12 +3,13 @@
 import { theadRowClass } from "@/components/ui/Table";
 import { fieldClass } from "@/lib/ui-classes";
 import { cn } from "@/lib/utils";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import Link from "next/link";
 import { SegmentBadge, StatusBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
+import { useUrlFilter } from "@/lib/hooks/useUrlFilter";
 import { formatEUR, formatNumber } from "@/lib/utils";
 import { ACTION_META, computeTargetingScore } from "@/lib/scoring";
 import { RECURRENCE_BUCKETS } from "@/lib/accounts";
@@ -38,15 +39,11 @@ export function AccountsTable({
   accounts,
   recurrence = {},
   monthlySales = [],
-  initialTier = "all",
-  initialRecurrence = "all",
 }: {
   accounts: Account[];
   recurrence?: Record<string, RecurrenceBucket>;
   /** Ventes mensuelles réelles — source du CA par exercice (lib/revenue.ts). */
   monthlySales?: YearlySaleRow[];
-  initialTier?: string;
-  initialRecurrence?: string;
 }) {
   // Les colonnes CA suivent l'exercice : « CA 2025 » / « CA 2026 YTD » en dur
   // auraient affiché des exercices clos indéfiniment.
@@ -57,11 +54,15 @@ export function AccountsTable({
     (account: Account, annee: number) => revenueForYear(account, annee, caParAnnee),
     [caParAnnee]
   );
-  const [segment, setSegment] = useState<Segment | "all">("all");
-  const [status, setStatus] = useState<AccountStatus | "all">("all");
-  const [tier, setTier] = useState<string>(initialTier);
-  const [recu, setRecu] = useState<string>(initialRecurrence);
-  const [search, setSearch] = useState("");
+  // Filtres portés par l'URL : ils suivent d'un onglet à l'autre (liste,
+  // carte, produits) et se partagent d'un lien — voir lib/hooks/useUrlFilter.
+  const [segmentParam, setSegment] = useUrlFilter("segment");
+  const segment = segmentParam as Segment | "all";
+  const [statusParam, setStatus] = useUrlFilter("statut");
+  const status = statusParam as AccountStatus | "all";
+  const [tier, setTier] = useUrlFilter("tier");
+  const [recu, setRecu] = useUrlFilter("recurrence");
+  const [search, setSearch] = useUrlFilter("q", "");
 
   const scored = useMemo(
     () => accounts.map((a) => ({ account: a, score: computeTargetingScore(a, { caByAccountYear: caParAnnee }) })),

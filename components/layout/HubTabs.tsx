@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 export interface HubTab {
@@ -19,6 +19,10 @@ export interface HubTab {
  */
 export function HubTabs({ items }: { items: HubTab[] }) {
   const pathname = usePathname();
+  // Les filtres partagés (segment, tier, recherche…) vivent dans l'URL :
+  // ils suivent d'un onglet à l'autre.
+  const params = useSearchParams();
+  const query = params.toString();
   return (
     <nav aria-label="Sections" className="-mx-1 -mb-px flex gap-1 overflow-x-auto">
       {items.map((item) => {
@@ -26,7 +30,7 @@ export function HubTabs({ items }: { items: HubTab[] }) {
         return (
           <Link
             key={item.href}
-            href={item.href}
+            href={query ? `${item.href}?${query}` : item.href}
             title={item.hint}
             aria-current={active ? "page" : undefined}
             className={cn(
