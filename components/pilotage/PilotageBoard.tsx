@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { predictPortfolioForecast, suggestMonthlyForecast, allocateToHcps } from "@/lib/forecast";
-import type { HcpLite } from "@/lib/forecast";
+import type { ForecastProbabilityGate, HcpLite } from "@/lib/forecast";
 import type { PurchaseLine } from "@/lib/sonarscore/velocity";
 import { generateMonthlyPlan } from "@/lib/planning";
 import { detectOpportunities, OPPORTUNITY_META } from "@/lib/opportunities";
@@ -108,6 +108,10 @@ export function PilotageBoard({
   const [filter, setFilter] = useState("");
   const [horizon, setHorizon] = useState<1 | 3 | 6 | 12 | 24>(3);
   const [cardSort, setCardSort] = useState<CardSort>("ca");
+  // Seuil de chance de commande sous lequel le générateur ne pose pas de
+  // ligne. 20 % par défaut : mesuré sur le portefeuille, les lignes générées
+  // sans ce filtre se réalisaient à 2,5 %.
+  const [seuilChance, setSeuilChance] = useState(0.2);
 
   // Mois de départ de la période affichée. Le pilotage partait toujours du
   // mois en cours, ce qui interdisait de revenir sur un trimestre écoulé
@@ -219,6 +223,20 @@ export function PilotageBoard({
       return probabilityForMonth(probabilityModel, featureCtx, f.account_id, mIdx, anticipated);
     },
     [probabilityModel, featureCtx, manualForecastsByAccount, nowIdx]
+  );
+
+  // Le générateur interroge le modèle mois par mois, avec les lignes déjà
+  // posées sur les mois d'avant comme commandes anticipées.
+  const probabilityGate = useMemo<ForecastProbabilityGate | undefined>(
+    () =>
+      probabilityModel
+        ? {
+            probabilityOf: (accountId, monthIdx, anticipated) =>
+              probabilityForMonth(probabilityModel, featureCtx, accountId, monthIdx, anticipated).probability,
+            minProbability: seuilChance,
+          }
+        : undefined,
+    [probabilityModel, featureCtx, seuilChance]
   );
 
   // Rendez-vous (visites, appels) posés dans Planning › Semaine, par compte
@@ -580,7 +598,8 @@ export function PilotageBoard({
       existingEntries,
       months,
       sectorObjectives,
-      purchaseLines
+      purchaseLines,
+      probabilityGate
     );
     const supabase = createClient();
 
@@ -623,13 +642,18 @@ export function PilotageBoard({
         predictions.map((p) => {
           const account = accountById.get(p.account_id);
           const mission = account ? missionForAccount(account) : "";
+          // La chance au moment de la génération reste dans la note : la
+          // carte affiche la chance du jour, la note dit pourquoi la ligne
+          // a été posée.
+          const chance = p.probabilite !== null && p.probabilite !== undefined ? `${Math.round(p.probabilite * 100)} % de chances` : "";
+          const note = [p.note, mission, chance].filter(Boolean).join(" · ");
           return {
             account_id: p.account_id,
             year: p.year,
             month: p.month,
             boites_prevues: p.boites_prevues,
             ca_prevu: p.ca_prevu,
-            note: mission ? `${p.note} · ${mission}` : p.note,
+            note,
             kind: "prevision" as const,
             source: "auto" as const,
           };
@@ -1135,13 +1159,34 @@ export function PilotageBoard({
             title={
               periodePassee
                 ? "Période entièrement écoulée : générer y créerait des prévisions pour des mois déjà facturés. Revenez sur le mois courant pour planifier."
-                : "Remplit automatiquement le prévisionnel de tout le portefeuille sur la période affichée, à partir de la saisonnalité des commandes passées (ou du score/silence à défaut d'historique) — n'écrase jamais un mois déjà renseigné"
+                : "Remplit automatiquement le prévisionnel de tout le portefeuille sur la période affichée, à partir de la cadence, de la saisonnalité et des achats produit — seulement pour les comptes dont la chance de commander ce mois-là dépasse le seuil choisi. N'écrase jamais un mois saisi à la main."
             }
-            className="mr-auto flex items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-60"
+            className="flex items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-60"
           >
             {autoFilling ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
             Générer le prévisionnel du portefeuille
           </button>
+          {probabilityModel && (
+            <label
+              className="mr-auto flex items-center gap-1.5 text-xs text-muted-foreground"
+              title="Le générateur ne pose une ligne que si le modèle donne au compte au moins cette chance de commander ce mois-là. Sans filtre, les lignes générées se réalisaient à 2,5 % sur le portefeuille ; à 30 % ou plus, une sur quatre."
+            >
+              <Activity size={12} />
+              Chance minimale :
+              <select
+                value={String(seuilChance)}
+                onChange={(e) => setSeuilChance(Number(e.target.value))}
+                className={cn(fieldClass, "px-2 text-xs")}
+                aria-label="Chance de commande minimale pour générer une ligne"
+              >
+                <option value="0">Sans filtre</option>
+                <option value="0.1">10 %</option>
+                <option value="0.2">20 %</option>
+                <option value="0.3">30 %</option>
+                <option value="0.5">50 %</option>
+              </select>
+            </label>
+          )}
           <button
             onClick={exportToExcel}
             title="Exporte le prévisionnel affiché (période et tri en cours) au format Excel"

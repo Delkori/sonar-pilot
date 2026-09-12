@@ -100,6 +100,30 @@ export interface PredictedForecast {
   note: string;
   /** Répartition de la prévision du mois sur les médecins du compte. */
   hcp: HcpShare[];
+  /** Chance de commande ce mois-là selon le modèle de probabilité, si fournie. */
+  probabilite?: number | null;
+}
+
+/**
+ * Branchement du générateur sur le modèle de probabilité (lib/probability).
+ *
+ * Mesuré sur le portefeuille réel (septembre 2026) : les lignes générées se
+ * réalisaient à 2,5 %, alors que le modèle donnait à ces comptes 7 % de
+ * chances en moyenne — et que ses comptes à 30 % ou plus commandaient à un
+ * sur quatre. Le générateur sait *quand* un compte pourrait recommander
+ * (cadence, saisonnalité, produit) ; le modèle sait *si* c'est plausible.
+ * Sous le seuil, on ne pose pas de ligne : mieux vaut un prévisionnel plus
+ * court qu'un prévisionnel qu'on ne prend pas au sérieux.
+ */
+export interface ForecastProbabilityGate {
+  /**
+   * Chance que le compte commande le mois `monthIdx` (index absolu), sachant
+   * les commandes anticipées — lignes déjà émises pour ce compte sur les
+   * mois d'avant. `null` quand le modèle ne sait pas.
+   */
+  probabilityOf: (accountId: string, monthIdx: number, anticipated: { month: number; ca: number }[]) => number | null;
+  /** En dessous, aucune ligne n'est générée ni complétée (0 = tout passe). */
+  minProbability: number;
 }
 
 /**
@@ -457,7 +481,8 @@ export function predictMonthlyForecast(
   sales: MonthlySaleRow[],
   targetMonths: { year: number; month: number }[],
   existingForAccount: ExistingForecastEntry[] = [],
-  brandPredictions: AccountBrandPrediction[] = []
+  brandPredictions: AccountBrandPrediction[] = [],
+  gate?: ForecastProbabilityGate
 ): PredictedForecast[] {
   const orderedMonths = orderedMonthIndices(sales);
 
@@ -509,6 +534,9 @@ export function predictMonthlyForecast(
   const manuelSorted = [...manuelMonthKeys].sort((a, b) => a - b);
   let manuelPtr = 0;
   let lastIdx = orderedMonths.length > 0 ? orderedMonths[orderedMonths.length - 1] : null;
+  const manuelAnticipated = existingForAccount
+    .filter((e) => e.source === "manuel")
+    .map((e) => ({ month: monthIndex(e.year, e.month), ca: e.ca_prevu ?? 0 }));
 
   const sortedTargets = [...targetMonths].sort(
     (a, b) => monthIndex(a.year, a.month) - monthIndex(b.year, b.month)
@@ -535,6 +563,21 @@ export function predictMonthlyForecast(
     const signal = evaluateMonthSignal(account, orderedMonths, tmIdx, brandPredictions, consumedBrands);
     if (!signal) continue;
 
+    // Le modèle de probabilité a le dernier mot : un signal de cadence ou de
+    // produit sur un compte qui n'a presque aucune chance de commander ne
+    // vaut pas une ligne. Les lignes déjà émises (et les saisies manuelles)
+    // sur les mois d'avant comptent comme des commandes anticipées — le
+    // cycle repart d'elles, comme `lastIdx` ci-dessus.
+    let probabilite: number | null = null;
+    if (gate) {
+      const anticipated = [
+        ...results.map((r) => ({ month: monthIndex(r.year, r.month), ca: r.ca_prevu })),
+        ...manuelAnticipated,
+      ].filter((a) => a.month < tmIdx);
+      probabilite = gate.probabilityOf(account.id, tmIdx, anticipated);
+      if (probabilite !== null && probabilite < gate.minProbability) continue;
+    }
+
     // La quantité de la marque précise détectée (`expectedQty`, médiane
     // mesurée sur cette référence) est préférée à `typicalOrder` (moyenne
     // lissée toutes marques du compte) quand disponible — sinon le "quand"
@@ -558,6 +601,7 @@ export function predictMonthlyForecast(
       boites_prevues: boites,
       note: signal.reason,
       hcp: allocateToHcps(hcps, boites, ca),
+      probabilite,
     });
 
     // La ligne est émise : les marques qu'elle couvre sortent maintenant de
@@ -618,7 +662,8 @@ function applySectorObjectiveTopUp(
   salesByAccount: Map<string, MonthlySaleRow[]>,
   existing: ExistingForecastEntry[],
   sectorObjectives: SectorObjective[],
-  targetMonths: { year: number; month: number }[]
+  targetMonths: { year: number; month: number }[],
+  gate?: ForecastProbabilityGate
 ): void {
   if (sectorObjectives.length === 0) return;
 
@@ -694,7 +739,21 @@ function applySectorObjectiveTopUp(
         const hasBaselineThisMonth = out.some(
           (f) => f.account_id === account.id && f.year === tm.year && f.month === tm.month
         );
-        return { account, caParBoite, headroomTotal, orderedForAccount, hasBaselineThisMonth };
+        // Chance de commande ce mois-ci, sachant tout ce qui est déjà prévu
+        // pour ce compte sur les mois d'avant (base, manuel, top-up).
+        const probabilite = gate
+          ? gate.probabilityOf(
+              account.id,
+              tmIdx,
+              [
+                ...out.filter((f) => f.account_id === account.id).map((f) => ({ month: monthIndex(f.year, f.month), ca: f.ca_prevu })),
+                ...existing
+                  .filter((e) => e.account_id === account.id && e.source === "manuel")
+                  .map((e) => ({ month: monthIndex(e.year, e.month), ca: e.ca_prevu ?? 0 })),
+              ].filter((a) => a.month < tmIdx)
+            )
+          : null;
+        return { account, caParBoite, headroomTotal, orderedForAccount, hasBaselineThisMonth, probabilite };
       })
       // Un prospect sans aucun historique d'achat réel n'a pas sa place dans
       // le comblement : combler un écart d'objectif avec une commande jamais
@@ -702,17 +761,23 @@ function applySectorObjectiveTopUp(
       // ne risque pas de prendre" — le top-up ne fait que solliciter DAVANTAGE
       // des comptes déjà éprouvés, jamais en inventer sur des comptes vierges.
       .filter((c) => c.headroomTotal > 0 && c.caParBoite > 0 && c.orderedForAccount.length > 0)
+      // Même règle que la génération de base : sous le seuil de chance, un
+      // compte ne sert pas à combler l'objectif.
+      .filter((c) => !gate || c.probabilite === null || c.probabilite >= gate.minProbability)
       .sort((a, b) => {
         // Priorité 1 : renforcer un compte déjà retenu par la génération de
         // base ce mois-ci (déjà jugé plausible) plutôt que d'ouvrir une
         // nouvelle ligne sur un compte que le modèle n'avait pas sélectionné.
         if (a.hasBaselineThisMonth !== b.hasBaselineThisMonth) return a.hasBaselineThisMonth ? -1 : 1;
+        // Priorité 2 : les comptes les plus susceptibles de commander — c'est
+        // là que le CA de comblement a le plus de chances d'exister.
+        if (a.probabilite !== null && b.probabilite !== null && a.probabilite !== b.probabilite) return b.probabilite - a.probabilite;
         return b.headroomTotal - a.headroomTotal;
       });
 
     for (const cand of candidates) {
       if (gapCa <= 0) break;
-      const { account, caParBoite, headroomTotal, orderedForAccount: ordered } = cand;
+      const { account, caParBoite, headroomTotal, orderedForAccount: ordered, probabilite } = cand;
 
       const bucket = recurrenceBucket(ordered);
       const normalGap = RECURRENCE_GAP_MONTHS[bucket] ?? GAP_MOIS_PAR_DEFAUT;
@@ -775,6 +840,7 @@ function applySectorObjectiveTopUp(
           ca_prevu: ca,
           note: "Complément auto — pour atteindre l'objectif secteur",
           hcp: allocateToHcps(hcpsByAccount.get(account.id) ?? [], boites, ca),
+          probabilite,
         });
       }
 
@@ -804,7 +870,8 @@ export function predictPortfolioForecast(
   existing: ExistingForecastEntry[],
   targetMonths: { year: number; month: number }[],
   sectorObjectives: SectorObjective[] = [],
-  purchaseLines: PurchaseLine[] = []
+  purchaseLines: PurchaseLine[] = [],
+  gate?: ForecastProbabilityGate
 ): PredictedForecast[] {
   const salesByAccount = new Map<string, MonthlySaleRow[]>();
   for (const s of sales) {
@@ -853,14 +920,15 @@ export function predictPortfolioForecast(
       salesByAccount.get(account.id) ?? [],
       targetMonths,
       existingByAccount.get(account.id) ?? [],
-      brandPredictionsByAccount.get(account.id) ?? []
+      brandPredictionsByAccount.get(account.id) ?? [],
+      gate
     );
     out.push(...preds);
   }
 
   // Écart résiduel vs objectif secteur : comble ce que la génération de base,
   // volontairement prudente, laisse de côté — voir applySectorObjectiveTopUp.
-  applySectorObjectiveTopUp(out, accounts, hcpsByAccount, salesByAccount, existing, sectorObjectives, targetMonths);
+  applySectorObjectiveTopUp(out, accounts, hcpsByAccount, salesByAccount, existing, sectorObjectives, targetMonths, gate);
 
   return out;
 }
