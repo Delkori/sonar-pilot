@@ -264,6 +264,13 @@ export interface ProbabilityModel {
   trainingSize: number;
   criteria: CriterionStat[];
   evaluation: Evaluation;
+  /**
+   * Même évaluation, restreinte aux situations où le compte avait déjà
+   * commandé au moins une fois : c'est là que la question se pose vraiment,
+   * et c'est bien plus dur — un compte sans aucune vente est facile à
+   * écarter, et gonfle l'AUC de l'évaluation globale.
+   */
+  evaluationClients: Evaluation;
   accounts: AccountProbability[];
   /** Somme des probabilités = nombre de comptes attendus en commande. */
   expectedOrderingAccounts: number;
@@ -840,18 +847,29 @@ export function buildProbabilityModel(opts: BuildOptions): ProbabilityModel {
 
   const baseRateTrain =
     trainCounts.pos + trainCounts.neg > 0 ? trainCounts.pos / (trainCounts.pos + trainCounts.neg) : 0;
-  const evalPoints = validationPoints.map(({ z, y }) => ({ p: clamp(sigmoid(platt.a * z + platt.b)), y }));
-  const rawPoints = validationPoints.map(({ z, y }) => ({ p: clamp(sigmoid(z)), y }));
-  const evaluation: Evaluation = {
-    n: validation.length,
-    window: validation.length > 0 ? { from: fromMonthIndex(cutoff), to: fromMonthIndex(maxT) } : null,
-    brier: brierScore(evalPoints),
-    brierRaw: brierScore(rawPoints),
-    brierBase: brierScore(validation.map((e) => ({ p: baseRateTrain, y: e.ordered }))),
-    auc: auc(evalPoints),
-    reliability: reliabilityBins(evalPoints),
-    calibrated: enoughToCalibrate,
+  const evaluate = (subset: Example[], baseRate: number): Evaluation => {
+    const zs = subset.map((e) => ({ z: dot(weights, activeColumns(e.features)), y: e.ordered }));
+    const evalPoints = zs.map(({ z, y }) => ({ p: clamp(sigmoid(platt.a * z + platt.b)), y }));
+    const rawPoints = zs.map(({ z, y }) => ({ p: clamp(sigmoid(z)), y }));
+    return {
+      n: subset.length,
+      window: subset.length > 0 ? { from: fromMonthIndex(cutoff), to: fromMonthIndex(maxT) } : null,
+      brier: brierScore(evalPoints),
+      brierRaw: brierScore(rawPoints),
+      brierBase: brierScore(subset.map((e) => ({ p: baseRate, y: e.ordered }))),
+      auc: auc(evalPoints),
+      reliability: reliabilityBins(evalPoints),
+      calibrated: enoughToCalibrate,
+    };
   };
+  const evaluation = evaluate(validation, baseRateTrain);
+  // Comptes ayant déjà commandé au mois de référence : leur taux de base est
+  // bien plus haut, donc l'étalon « taux de base » est recalculé sur eux.
+  const isClient = (e: Example) => e.features.cadence !== "Jamais";
+  const trainClients = train.filter(isClient);
+  const baseRateTrainClients =
+    trainClients.length > 0 ? trainClients.filter((e) => e.ordered).length / trainClients.length : baseRateTrain;
+  const evaluationClients = evaluate(validation.filter(isClient), baseRateTrainClients);
 
   // Taux observés par critère, sur tous les exemples (descriptif).
   const baseRate = all.pos + all.neg > 0 ? all.pos / (all.pos + all.neg) : 0;
@@ -925,6 +943,7 @@ export function buildProbabilityModel(opts: BuildOptions): ProbabilityModel {
     trainingSize: train.length,
     criteria,
     evaluation,
+    evaluationClients,
     accounts,
     expectedOrderingAccounts: accounts.reduce((s, a) => s + a.probability, 0),
     expectedCa: accounts.reduce((s, a) => s + a.expectedCa, 0),

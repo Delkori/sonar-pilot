@@ -303,6 +303,11 @@ touche pas à la base. Il donne :
 3. les poids appris par niveau de critère ;
 4. le taux de réalisation des lignes du prévisionnel (saisies / générées).
 
+L'onglet Analyse affiche la fiabilité mesurée **sur les comptes ayant déjà
+commandé** (`evaluationClients`) dès que la fenêtre en compte au moins 30 :
+l'évaluation globale, qui inclut les comptes sans aucune vente que le modèle
+écarte sans mérite, flatte l'AUC (0,94 contre 0,8).
+
 Mesuré le 12 septembre 2026 (550 comptes, 104 ayant commandé, ventes de
 janvier 2024 à août 2026), en aveugle, sur les comptes ayant déjà
 commandé : AUC 0,78 / 0,81 / 0,83 à 1 / 3 / 6 mois ; les 10 % de comptes
@@ -370,6 +375,19 @@ L'en-tête de chaque mois à venir donne le prévu **pondéré par les
 chances** : la somme des CA prévus multipliés par la probabilité de chaque
 compte — ce sur quoi on peut raisonnablement compter.
 
+**Le générateur est branché sur le modèle.** « Générer le prévisionnel du
+portefeuille » ne pose une ligne que si le modèle donne au compte au moins
+la **chance minimale** choisie à côté du bouton (20 % par défaut, « sans
+filtre » pour retrouver l'ancien comportement). Le générateur sait *quand*
+un compte pourrait recommander (cadence, saisonnalité, achats produit) ; le
+modèle sait *si* c'est plausible. Les lignes déjà posées sur les mois
+d'avant comptent comme commandes anticipées quand on interroge le modèle
+pour le mois suivant, et le comblement de l'objectif secteur préfère les
+comptes les plus probables. La chance au moment de la génération est
+inscrite dans la note de la ligne. Mesuré avant ce filtre sur juillet et
+août 2026 : 81 lignes générées réalisées à 2,5 % ; les comptes à 30 % ou
+plus selon le modèle commandaient à 25–27 %.
+
 **Prévision sans rendez-vous.** Si aucune visite ni aucun appel n'est posé
 dans Planning › Semaine pour ce compte ce mois-là, la carte le signale
 (« Aucun rendez-vous ce mois-ci ») et l'en-tête du mois compte ces cartes.
@@ -400,13 +418,11 @@ Carte choroplèthe SVG des 12 départements AURA (Ain, Allier, Ardèche, Cantal,
   efface cinq colonnes sur **tous** les comptes. Elle exige
   `{ "confirm": "cleanup-pas" }` dans le corps de la requête ; une fois le
   nettoyage fait une bonne fois, la route peut être supprimée.
-- **Le générateur de prévisionnel ne filtre pas par chance de commande.**
-  Sur juillet et août 2026, 81 lignes générées se sont réalisées à 2,5 %
-  (4,9 % à ± 1 mois) ; le modèle de probabilité donnait à ces comptes 7 %
-  de chances en moyenne, et ses propres comptes à 30 % ou plus ont commandé
-  à 25–27 %. Brancher `predictMonthlyForecast` sur la probabilité (ne pas
-  générer sous un seuil, ou pondérer le CA) est la prochaine amélioration
-  la plus rentable — voir `npm run eval:probability`.
+- **Le filtre par chance de commande du générateur n'a pas encore été
+  mesuré en conditions réelles** : il date de septembre 2026, les premières
+  lignes générées avec lui arriveront à échéance en octobre. Rejouer
+  `npm run eval:probability` après deux ou trois mois dira si le taux de
+  réalisation des lignes générées a quitté les 2,5 % d'avant.
 - **`lib/forecast.ts` (910 lignes) et `PilotageBoard.tsx` (1622 lignes)**
   restent les deux plus gros fichiers du projet. Le premier est maintenant
   couvert par des tests, donc découpable sans risque — par signal, plutôt

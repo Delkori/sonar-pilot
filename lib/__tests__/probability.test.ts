@@ -400,3 +400,21 @@ describe("projection d'un mois futur", () => {
     }
   });
 });
+
+describe("évaluation sur les comptes ayant déjà commandé", () => {
+  test("écarte les situations sans aucune commande passée, avec leur propre taux de base", () => {
+    const { accounts, sales } = portefeuille();
+    const model = buildProbabilityModel({ accounts, monthlySales: sales, horizon: 3, asOf: AS_OF });
+    const { evaluation, evaluationClients } = model;
+    assert.ok(evaluationClients.n > 0);
+    assert.ok(evaluationClients.n < evaluation.n, "les prospects sont écartés");
+    // 10 prospects sans vente sur les 42 comptes : toutes leurs situations de
+    // la fenêtre sortent, et seulement elles.
+    const moisEvalues = evaluation.n / accounts.length;
+    assert.equal(evaluationClients.n, evaluation.n - 10 * moisEvalues);
+    // L'étalon « taux de base » est recalculé sur eux, pas repris du global.
+    assert.ok(evaluationClients.brierBase !== null && evaluation.brierBase !== null);
+    assert.notEqual(evaluationClients.brierBase, evaluation.brierBase);
+    assert.equal(evaluationClients.calibrated, evaluation.calibrated);
+  });
+});

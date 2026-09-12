@@ -21,9 +21,18 @@ type SortKey = "probability" | "expectedCa" | "name" | "lastOrder" | "segment";
 
 const HORIZON_LABEL: Record<Horizon, string> = { 1: "1 mois", 3: "3 mois", 6: "6 mois" };
 
+/**
+ * Évaluation à afficher : celle des comptes ayant déjà commandé, dès qu'elle
+ * est assez fournie. L'évaluation globale compte les prospects sans aucune
+ * vente, que le modèle écarte sans mérite — elle flatte l'AUC.
+ */
+function evaluationAffichee(model: ProbabilityModel) {
+  return model.evaluationClients.n >= 30 ? model.evaluationClients : model.evaluation;
+}
+
 /** Verdict lisible à partir du gain de Brier par rapport au taux de base. */
 function fiabilite(model: ProbabilityModel): { label: string; tone: "good" | "ok" | "weak" | "none"; skill: number | null } {
-  const { brier, brierBase, n } = model.evaluation;
+  const { brier, brierBase, n } = evaluationAffichee(model);
   if (brier === null || brierBase === null || brierBase === 0 || n < 30) return { label: "Non évaluée", tone: "none", skill: null };
   const skill = 1 - brier / brierBase;
   if (skill >= 0.3) return { label: "Bonne", tone: "good", skill };
@@ -103,6 +112,8 @@ export function ProbabilityClient({
 
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a] as const)), [accounts]);
   const verdict = fiabilite(model);
+  const evaluation = evaluationAffichee(model);
+  const surClients = evaluation === model.evaluationClients;
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -179,10 +190,10 @@ export function ProbabilityClient({
           />
           <Tile
             label={`Fiabilité — ${verdict.label}`}
-            value={model.evaluation.auc !== null ? `AUC ${model.evaluation.auc.toFixed(2)}` : "—"}
+            value={evaluation.auc !== null ? `AUC ${evaluation.auc.toFixed(2)}` : "—"}
             hint={
               verdict.skill !== null
-                ? `Brier ${model.evaluation.brier!.toFixed(3)} contre ${model.evaluation.brierBase!.toFixed(3)} au taux de base (gain ${formatPct(verdict.skill)})`
+                ? `${surClients ? "sur les comptes ayant déjà commandé — " : ""}Brier ${evaluation.brier!.toFixed(3)} contre ${evaluation.brierBase!.toFixed(3)} au taux de base (gain ${formatPct(verdict.skill)})`
                 : "pas assez d'historique pour évaluer"
             }
           />
@@ -232,13 +243,16 @@ export function ProbabilityClient({
         <CardHeader>
           <CardTitle>Fiabilité des probabilités</CardTitle>
           <CardDescription>
-            Sur les {formatNumber(model.evaluation.n)} situations les plus récentes, que le modèle n&apos;a pas vues pendant
+            Sur les {formatNumber(evaluation.n)} situations les plus récentes
+            {surClients ? " de comptes ayant déjà commandé" : ""}, que le modèle n&apos;a pas vues pendant
             l&apos;apprentissage : quand il annonce « 60 % », combien ont réellement commandé ?
-            {!model.evaluation.calibrated && " Fenêtre trop courte pour recalibrer : probabilités brutes."}
+            {surClients &&
+              ` Les ${formatNumber(model.evaluation.n - model.evaluationClients.n)} situations de comptes sans aucune vente sont écartées : le modèle les classe sans mérite, elles flatteraient la mesure.`}
+            {!evaluation.calibrated && " Fenêtre trop courte pour recalibrer : probabilités brutes."}
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
-          {model.evaluation.n === 0 ? (
+          {evaluation.n === 0 ? (
             <p className="text-sm text-muted-foreground">Pas encore assez d&apos;historique pour évaluer le modèle.</p>
           ) : (
             <TableWrap>
@@ -253,7 +267,7 @@ export function ProbabilityClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {model.evaluation.reliability
+                  {evaluation.reliability
                     .filter((b) => b.n > 0)
                     .map((b) => {
                       const ecart = b.observed - b.predicted;

@@ -110,10 +110,11 @@ for (const horizon of [1, 3, 6] as Horizon[]) {
   console.log(`\nHorizon ${horizon} mois — ${m.sampleSize} situations, ${m.trainingSize} apprises, ${e.n} évaluées${e.window ? ` (${label(monthIndex(e.window.from.year, e.window.from.month))} → ${label(monthIndex(e.window.to.year, e.window.to.month))})` : ""}, taux de base ${pct(m.baseRate)}`);
   console.log(`  AUC ${num(e.auc, 2)}   Brier ${num(e.brier)} (brut ${num(e.brierRaw)}) contre ${num(e.brierBase)} au taux de base → gain ${pct(skill)}   recalibré : ${e.calibrated ? "oui" : "non"}`);
   console.log(`  Comptes attendus en commande : ${m.expectedOrderingAccounts.toFixed(1)}   CA attendu : ${Math.round(m.expectedCa)} €`);
-  const evalPts = e.reliability.flatMap((r) => r); // non exploitable directement : on réaffiche les tranches internes
-  void evalPts;
+  const c = m.evaluationClients;
+  const skillC = c.brier !== null && c.brierBase ? 1 - c.brier / c.brierBase : null;
+  console.log(`  Comptes ayant déjà commandé (ce que la page affiche) : ${c.n} évaluées — AUC ${num(c.auc, 2)}   Brier ${num(c.brier)} contre ${num(c.brierBase)} → gain ${pct(skillC)}`);
   console.log("    tranche   n     annoncé   observé");
-  for (const r of e.reliability) if (r.n > 0) console.log(`    ${`${Math.round(r.from * 100)}–${Math.round(r.to * 100)} %`.padEnd(9)} ${String(r.n).padStart(5)}   ${pct(r.predicted).padStart(7)}   ${pct(r.observed).padStart(7)}`);
+  for (const r of c.reliability) if (r.n > 0) console.log(`    ${`${Math.round(r.from * 100)}–${Math.round(r.to * 100)} %`.padEnd(9)} ${String(r.n).padStart(5)}   ${pct(r.predicted).padStart(7)}   ${pct(r.observed).padStart(7)}`);
 }
 
 // ── 2. Test en aveugle ───────────────────────────────────────────────────
