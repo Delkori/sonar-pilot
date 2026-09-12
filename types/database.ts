@@ -115,6 +115,8 @@ export type AccountMonthlySale = {
 
 export type ForecastKind = "objectif" | "prevision" | "realise";
 export type ForecastSource = "auto" | "manuel";
+/** Comment une prévision sans rendez-vous sera traitée. */
+export type ForecastContactMode = "visite" | "appel" | "mail";
 
 export type AccountForecast = {
   id: string;
@@ -127,6 +129,7 @@ export type AccountForecast = {
   note: string | null;
   commentaire: string | null;
   source: ForecastSource;
+  contact_mode: ForecastContactMode | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

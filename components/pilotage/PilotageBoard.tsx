@@ -18,23 +18,37 @@ import type { Persona } from "@/lib/persona";
 import { SegmentBadge } from "@/components/ui/Badge";
 import { ScoreBadge } from "@/components/ui/ScoreBadge";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
-import type { Account, AccountForecast, Hcp, SectorObjective } from "@/types/database";
+import type { Account, AccountForecast, ForecastContactMode, Hcp, PlanningEvent, SectorObjective } from "@/types/database";
 import {
+  Activity,
+  CalendarCheck,
   CalendarClock,
+  CalendarPlus,
   ChevronLeft,
   ChevronRight,
   FileDown,
   GripVertical,
   History,
   Loader2,
+  Mail,
+  Phone,
   Stethoscope,
   Target,
   Trash2,
+  TriangleAlert,
   Wand2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { currentMonthIndex, fromMonthIndex, monthIndex, monthsFrom, MONTHS_LONG } from "@/lib/dates";
 import { revenueByAccountYear, revenueForYear } from "@/lib/revenue";
+import { createFeatureContext, CRITERIA, probabilityForMonth } from "@/lib/probability";
+import type { AnticipatedOrder, Features, ProbabilityModel } from "@/lib/probability";
+import {
+  APPOINTMENT_LABEL,
+  appointmentKey,
+  appointmentsByAccountMonth,
+  CONTACT_MODE_LABEL,
+} from "@/lib/appointments";
 
 type HcpRow = Pick<Hcp, "id" | "account_id" | "name" | "potentiel_boites">;
 type ProductRow = {
@@ -46,6 +60,17 @@ type ProductRow = {
 };
 type CardSort = "ca" | "boites" | "score" | "nom" | "silence";
 const SEGMENTS = ["A", "B", "C", "D", "E"] as const;
+type PlanningEventLite = Pick<PlanningEvent, "account_id" | "type" | "start_at" | "confirmed">;
+/** Poids appris du modèle à horizon 1 mois — calculés côté serveur, sérialisables. */
+export type MonthProbabilityModel = Pick<ProbabilityModel, "weights" | "platt">;
+
+const CONTACT_MODE_ICON: Record<ForecastContactMode, typeof Phone> = { visite: CalendarPlus, appel: Phone, mail: Mail };
+
+/** Libellé lisible d'un niveau de critère (« Fin de cycle (commande imminente) »). */
+function levelLabel(key: keyof Features, value: string): string {
+  const meta = CRITERIA.find((c) => c.key === key);
+  return meta?.levels.find((l) => l.value === value)?.label ?? value;
+}
 
 
 interface MonthlySale {
@@ -63,6 +88,8 @@ export function PilotageBoard({
   products,
   sectorObjectives,
   purchaseLines = [],
+  planningEvents = [],
+  probabilityModel = null,
 }: {
   accounts: Account[];
   initialForecasts: AccountForecast[];
@@ -71,6 +98,8 @@ export function PilotageBoard({
   products: ProductRow[];
   sectorObjectives: SectorObjective[];
   purchaseLines?: PurchaseLine[];
+  planningEvents?: PlanningEventLite[];
+  probabilityModel?: MonthProbabilityModel | null;
 }) {
   const [forecasts, setForecasts] = useState(initialForecasts);
   const [isSaving, setIsSaving] = useState(false);
@@ -150,6 +179,55 @@ export function PilotageBoard({
     }
     return map;
   }, [hcps]);
+
+  // ── Chances de commande, mois par mois ────────────────────────────────
+  // Le modèle (poids appris sur l'historique du portefeuille, horizon 1 mois)
+  // vient du serveur ; ici on ne recalcule que les critères, avec l'état
+  // courant des prévisions : une prévision que l'on vient de saisir compte
+  // aussitôt, comme signal (« vous l'aviez prévu ») et comme commande
+  // anticipée pour les mois qui la suivent (elle remet le cycle à zéro).
+  const featureCtx = useMemo(
+    () => createFeatureContext({ accounts, monthlySales, purchaseLines, forecasts, horizon: 1 }),
+    [accounts, monthlySales, purchaseLines, forecasts]
+  );
+  const manualForecastsByAccount = useMemo(() => {
+    const map = new Map<string, { id: string; month: number; ca: number }[]>();
+    for (const f of forecasts) {
+      if (f.kind !== "prevision" || f.source !== "manuel") continue;
+      const list = map.get(f.account_id) ?? [];
+      list.push({ id: f.id, month: monthIndex(f.year, f.month), ca: f.ca_prevu ?? 0 });
+      map.set(f.account_id, list);
+    }
+    return map;
+  }, [forecasts]);
+
+  /**
+   * Chances que le compte commande le mois de cette prévision. Seules les
+   * prévisions saisies à la main sur les mois d'avant (à partir du mois en
+   * cours) sont tenues pour acquises : une prévision passée non réalisée
+   * n'est pas une commande, et une ligne générée par le modèle ne doit pas
+   * se nourrir elle-même. Rien n'est calculé sur un mois clos.
+   */
+  const chanceDeCommande = useCallback(
+    (f: AccountForecast): { probability: number; features: Features } | null => {
+      if (!probabilityModel) return null;
+      const mIdx = monthIndex(f.year, f.month);
+      if (mIdx < nowIdx) return null;
+      const anticipated: AnticipatedOrder[] = (manualForecastsByAccount.get(f.account_id) ?? [])
+        .filter((o) => o.id !== f.id && o.month >= nowIdx && o.month < mIdx)
+        .map((o) => ({ month: o.month, ca: o.ca }));
+      return probabilityForMonth(probabilityModel, featureCtx, f.account_id, mIdx, anticipated);
+    },
+    [probabilityModel, featureCtx, manualForecastsByAccount, nowIdx]
+  );
+
+  // Rendez-vous (visites, appels) posés dans Planning › Semaine, par compte
+  // et par mois : une prévision sans rendez-vous en face est signalée.
+  const appointments = useMemo(() => appointmentsByAccountMonth(planningEvents), [planningEvents]);
+  const rendezVousPour = useCallback(
+    (accountId: string, year: number, month: number) => appointments.get(appointmentKey(accountId, monthIndex(year, month))) ?? [],
+    [appointments]
+  );
 
   // ── Mission par compte : une recommandation concrète à mener (référence à
   // proposer selon le modèle du persona, ou à défaut l'action du score), pour
@@ -666,6 +744,15 @@ export function PilotageBoard({
     await supabase.from("account_forecasts").update({ commentaire }).eq("id", id);
   }
 
+  async function updateForecastContactMode(id: string, contact_mode: ForecastContactMode | null) {
+    // Une prévision sans rendez-vous n'est pas forcément une erreur : la
+    // commande peut se prendre par mail ou par téléphone. On note comment,
+    // et l'alerte s'éteint — sans toucher à la source de la ligne.
+    setForecasts((prev) => prev.map((f) => (f.id === id ? { ...f, contact_mode } : f)));
+    const supabase = createClient();
+    await supabase.from("account_forecasts").update({ contact_mode }).eq("id", id);
+  }
+
   async function createForecastComment(accountId: string, year: number, month: number, commentaire: string) {
     // Un compte qui a commandé sans avoir été prévu n'a pas de ligne en base
     // pour porter le commentaire — on en crée une (0 boîte/0 €, manuelle),
@@ -695,6 +782,8 @@ export function PilotageBoard({
         const account = accountById.get(f.account_id);
         const accHcps = hcpsByAccount.get(f.account_id) ?? [];
         const allocation = allocateToHcps(accHcps, f.boites_prevues ?? 0, f.ca_prevu ?? 0);
+        const chance = chanceDeCommande(f);
+        const rdv = rendezVousPour(f.account_id, year, month);
         return {
           Mois: `${MONTHS_LONG[month - 1]} ${year}`,
           Compte: account?.name ?? "—",
@@ -703,6 +792,14 @@ export function PilotageBoard({
           "Boîtes prévues": f.boites_prevues ?? 0,
           "CA prévu (€)": f.ca_prevu ?? 0,
           "CA réalisé (€)": realiseByAccountMonth.get(`${f.account_id}-${year}-${month}`) ?? 0,
+          "Chance de commande": chance ? Math.round(chance.probability * 100) / 100 : "",
+          "Rendez-vous": rdv.length > 0
+            ? rdv.map((r) => `${APPOINTMENT_LABEL[r.type]} le ${r.day}`).join(" ; ")
+            : f.contact_mode
+              ? CONTACT_MODE_LABEL[f.contact_mode]
+              : monthIndex(year, month) >= nowIdx
+                ? "Aucun"
+                : "",
           Mission: account ? missionForAccount(account) : "",
           "Médecins (répartition)": allocation.map((h) => `${h.name} (${h.boites} b · ${Math.round(h.ca)} €)`).join(" ; "),
           Note: f.note ?? "",
@@ -712,7 +809,7 @@ export function PilotageBoard({
 
     const sheet = XLSX.utils.json_to_sheet(rows);
     sheet["!cols"] = [
-      { wch: 14 }, { wch: 30 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 35 }, { wch: 50 }, { wch: 40 },
+      { wch: 14 }, { wch: 30 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 22 }, { wch: 35 }, { wch: 50 }, { wch: 40 },
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, "Prévisionnel");
@@ -943,59 +1040,10 @@ export function PilotageBoard({
 
       {/* ── Colonnes mois ─────────────────────────────────────────── */}
       <div>
-        <div className="mb-3 flex items-center justify-end gap-2">
-          <button
-            onClick={autoFillPortfolio}
-            disabled={autoFilling || periodePassee}
-            title={
-              periodePassee
-                ? "Période entièrement écoulée : générer y créerait des prévisions pour des mois déjà facturés. Revenez sur le mois courant pour planifier."
-                : "Remplit automatiquement le prévisionnel de tout le portefeuille sur la période affichée, à partir de la saisonnalité des commandes passées (ou du score/silence à défaut d'historique) — n'écrase jamais un mois déjà renseigné"
-            }
-            className="mr-auto flex items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-60"
-          >
-            {autoFilling ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
-            Générer le prévisionnel du portefeuille
-          </button>
-          <button
-            onClick={exportToExcel}
-            title="Exporte le prévisionnel affiché (période et tri en cours) au format Excel"
-            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-muted"
-          >
-            <FileDown size={13} />
-            Exporter Excel
-          </button>
-          <span className="text-xs text-muted-foreground">Trier les comptes :</span>
-          <select
-            value={cardSort}
-            onChange={(e) => setCardSort(e.target.value as CardSort)}
-            className={cn(fieldClass, "px-2 text-xs")}
-          >
-            <option value="ca">CA prévu</option>
-            <option value="boites">Boîtes prévues</option>
-            <option value="score">Score</option>
-            <option value="silence">Silence</option>
-            <option value="nom">Nom</option>
-          </select>
-          <span className="text-xs text-muted-foreground">Horizon :</span>
-          {([1, 3, 6, 12, 24] as const).map((h) => (
-            <button
-              key={h}
-              onClick={() => setHorizon(h)}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
-                horizon === h
-                  ? "border-primary bg-primary-50 text-primary-700"
-                  : "border-border text-muted-foreground hover:bg-surface-muted"
-              }`}
-            >
-              {h === 1 ? "1 mois" : h === 3 ? "Trimestre (3 mois)" : h === 6 ? "Semestre (6 mois)" : h === 12 ? "Année (12 mois)" : "2 ans (24 mois)"}
-            </button>
-          ))}
-        </div>
-
-        {/* ── Choix du mois de départ ───────────────────────────────── */}
+        {/* ── Choix du mois ─────────────────────────────────────────────
+            En tête, avant tout le reste : c'est le premier geste du pilotage. */}
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">Période à partir de :</span>
+          <span className="text-xs font-medium text-foreground">{horizon === 1 ? "Mois affiché :" : "À partir de :"}</span>
           <div className="flex items-center gap-1">
             <button
               type="button"
@@ -1080,6 +1128,56 @@ export function PilotageBoard({
             </span>
           )}
         </div>
+        <div className="mb-3 flex items-center justify-end gap-2">
+          <button
+            onClick={autoFillPortfolio}
+            disabled={autoFilling || periodePassee}
+            title={
+              periodePassee
+                ? "Période entièrement écoulée : générer y créerait des prévisions pour des mois déjà facturés. Revenez sur le mois courant pour planifier."
+                : "Remplit automatiquement le prévisionnel de tout le portefeuille sur la période affichée, à partir de la saisonnalité des commandes passées (ou du score/silence à défaut d'historique) — n'écrase jamais un mois déjà renseigné"
+            }
+            className="mr-auto flex items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-60"
+          >
+            {autoFilling ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+            Générer le prévisionnel du portefeuille
+          </button>
+          <button
+            onClick={exportToExcel}
+            title="Exporte le prévisionnel affiché (période et tri en cours) au format Excel"
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-surface-muted"
+          >
+            <FileDown size={13} />
+            Exporter Excel
+          </button>
+          <span className="text-xs text-muted-foreground">Trier les comptes :</span>
+          <select
+            value={cardSort}
+            onChange={(e) => setCardSort(e.target.value as CardSort)}
+            className={cn(fieldClass, "px-2 text-xs")}
+          >
+            <option value="ca">CA prévu</option>
+            <option value="boites">Boîtes prévues</option>
+            <option value="score">Score</option>
+            <option value="silence">Silence</option>
+            <option value="nom">Nom</option>
+          </select>
+          <span className="text-xs text-muted-foreground">Horizon :</span>
+          {([1, 3, 6, 12, 24] as const).map((h) => (
+            <button
+              key={h}
+              onClick={() => setHorizon(h)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                horizon === h
+                  ? "border-primary bg-primary-50 text-primary-700"
+                  : "border-border text-muted-foreground hover:bg-surface-muted"
+              }`}
+            >
+              {h === 1 ? "1 mois" : h === 3 ? "Trimestre (3 mois)" : h === 6 ? "Semestre (6 mois)" : h === 12 ? "Année (12 mois)" : "2 ans (24 mois)"}
+            </button>
+          ))}
+        </div>
+
         <div
           className={`grid grid-cols-1 gap-3 ${
             horizon === 1
@@ -1103,6 +1201,14 @@ export function PilotageBoard({
           const idx = monthIndex(year, month);
           const moisEcoule = idx < nowIdx;
           const moisCourant = idx === nowIdx;
+          // Sur un mois à venir : combien de prévisions n'ont ni rendez-vous
+          // ni mode de contact renseigné, et ce que pèse le prévu une fois
+          // pondéré par les chances de commande de chaque compte.
+          const aVenir = !moisEcoule ? monthForecasts.filter((f) => !(realiseByAccountMonth.get(`${f.account_id}-${year}-${month}`) ?? 0)) : [];
+          const sansRendezVous = aVenir.filter((f) => !f.contact_mode && rendezVousPour(f.account_id, year, month).length === 0).length;
+          const caPondere = probabilityModel
+            ? aVenir.reduce((sum, f) => sum + (chanceDeCommande(f)?.probability ?? 0) * (f.ca_prevu ?? 0), 0)
+            : null;
 
           return (
             <div
@@ -1168,6 +1274,20 @@ export function PilotageBoard({
                     style={{ width: `${(objectifMonth > 0 ? atteinteObjectifMonth : atteinte) * 100}%` }}
                   />
                 </div>
+                {caPondere !== null && aVenir.length > 0 && (
+                  <div
+                    className="mt-1.5 flex items-center justify-between text-[10px] text-muted-foreground"
+                    title="CA prévu de chaque compte multiplié par ses chances de commander ce mois-ci — ce sur quoi on peut raisonnablement compter"
+                  >
+                    <span className="flex items-center gap-1"><Activity size={10} /> Pondéré par les chances</span>
+                    <span className="font-medium tabular-nums text-foreground">{formatEUR(caPondere)}</span>
+                  </div>
+                )}
+                {sansRendezVous > 0 && (
+                  <p className="mt-1.5 flex items-center gap-1 text-[10px] font-medium text-warning">
+                    <TriangleAlert size={10} /> {sansRendezVous} prévision{sansRendezVous > 1 ? "s" : ""} sans rendez-vous
+                  </p>
+                )}
               </div>
 
               <div className="flex-1 space-y-2 overflow-y-auto p-2">
@@ -1213,6 +1333,12 @@ export function PilotageBoard({
                     .sort((a, b) => b.ca - a.ca);
                   const realiseLigne = realiseByAccountMonth.get(`${account.id}-${year}-${month}`) ?? 0;
                   const commande = realiseLigne > 0;
+                  const chance = commande ? null : chanceDeCommande(f);
+                  const rdv = rendezVousPour(account.id, year, month);
+                  // Un mois clos ou une commande déjà passée : le rendez-vous
+                  // n'a plus d'importance, on n'en parle pas.
+                  const suivreContact = !moisEcoule && !commande;
+                  const ModeIcon = f.contact_mode ? CONTACT_MODE_ICON[f.contact_mode] : TriangleAlert;
                   return (
                     <div
                       key={f.id}
@@ -1285,6 +1411,68 @@ export function PilotageBoard({
                         <span>Réalisé</span>
                         <span>{commande ? `✓ ${formatEUR(realiseLigne)} commandé` : "— pas encore commandé"}</span>
                       </div>
+                      {chance && (
+                        <div
+                          className="mt-1 flex items-center justify-between text-[10px]"
+                          title={`Modèle à 1 mois — ${levelLabel("retard", chance.features.retard)} · cadence ${levelLabel("cadence", chance.features.cadence).toLowerCase()} · prévision saisie : ${levelLabel("prevision", chance.features.prevision).toLowerCase()}`}
+                        >
+                          <span className="flex items-center gap-1 text-muted-foreground/70">
+                            <Activity size={10} /> Chance de commande
+                          </span>
+                          <span
+                            className={cn(
+                              "font-semibold tabular-nums",
+                              chance.probability >= 0.6 ? "text-success" : chance.probability >= 0.3 ? "text-foreground" : "text-warning"
+                            )}
+                          >
+                            {formatPct(chance.probability)}
+                          </span>
+                        </div>
+                      )}
+                      {suivreContact &&
+                        (rdv.length > 0 ? (
+                          <p className="mt-1 flex items-center gap-1 text-[10px] font-medium text-success" title="Rendez-vous posé dans Planning › Semaine">
+                            <CalendarCheck size={10} className="shrink-0" />
+                            <span className="truncate">
+                              {APPOINTMENT_LABEL[rdv[0].type]} le {rdv[0].day}
+                              {rdv.length > 1 ? ` (+${rdv.length - 1})` : ""}
+                              {!rdv[0].confirmed ? " · à confirmer" : ""}
+                            </span>
+                          </p>
+                        ) : (
+                          <div
+                            className={cn(
+                              "mt-1 flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px]",
+                              f.contact_mode ? "bg-surface text-muted-foreground" : "bg-warning/10 text-warning"
+                            )}
+                          >
+                            <ModeIcon size={10} className="shrink-0" />
+                            <span className="flex-1 truncate font-medium">
+                              {f.contact_mode ? CONTACT_MODE_LABEL[f.contact_mode] : "Aucun rendez-vous ce mois-ci"}
+                            </span>
+                            <select
+                              value={f.contact_mode ?? ""}
+                              onChange={(e) => updateForecastContactMode(f.id, (e.target.value || null) as ForecastContactMode | null)}
+                              aria-label="Comment la commande sera prise"
+                              title="Pas de visite ni d'appel prévu ce mois-ci : indiquez comment la commande sera prise, ou calez un rendez-vous dans Semaine"
+                              className="max-w-[92px] rounded border border-transparent bg-transparent px-1 py-0.5 text-[10px] text-foreground hover:border-border focus:border-primary focus:outline-none"
+                            >
+                              <option value="">À traiter</option>
+                              <option value="appel">Appel</option>
+                              <option value="mail">Mail</option>
+                              <option value="visite">Visite à caler</option>
+                            </select>
+                            {f.contact_mode !== "appel" && f.contact_mode !== "mail" && (
+                              <Link
+                                href="/planning/semaine"
+                                title="Caler un rendez-vous dans Planning › Semaine"
+                                className="shrink-0 rounded p-0.5 hover:bg-surface-muted hover:text-primary"
+                              >
+                                <CalendarPlus size={11} />
+                              </Link>
+                            )}
+                          </div>
+                        ))}
                       <p className="mt-1 flex items-start gap-1 text-[10px] font-medium text-primary-700">
                         <Target size={10} className="mt-0.5 shrink-0" />
                         {missionForAccount(account)}

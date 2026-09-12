@@ -9,6 +9,7 @@ import type {
   ForecastKind,
   Hcp,
   HcpSponsorship,
+  PlanningEvent,
   SectorObjective,
 } from "@/types/database";
 
@@ -85,6 +86,10 @@ export async function getActions(db: Db, types?: AccountAction["type"][]): Promi
 
 export async function getHcps(db: Db): Promise<HcpLite[]> {
   return fetchAll<HcpLite>(() => db.from("hcps").select("id, account_id, name, rpps, potentiel_boites"));
+}
+
+export async function getPlanningEvents(db: Db): Promise<PlanningEvent[]> {
+  return fetchAll<PlanningEvent>(() => db.from("planning_events").select("*"), { orderBy: "start_at" });
 }
 
 export async function getSponsorships(db: Db): Promise<HcpSponsorship[]> {
