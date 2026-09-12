@@ -280,6 +280,40 @@ dans `lib/__tests__/probability.test.ts` (dont l'absence de fuite du futur,
 la supériorité sur le taux de base et la projection avec commandes
 anticipées).
 
+### Mesurer le modèle sur les données réelles
+
+```bash
+npm run eval:probability -- --data <dossier>
+```
+
+Le dossier contient quatre exports JSON de Supabase (`accounts.json`,
+`monthly_sales.json`, `purchases.json`, `forecasts.json` — colonnes
+attendues en tête de `scripts/evaluate-probability.ts`). Le script ne
+touche pas à la base. Il donne :
+
+1. **l'évaluation interne**, celle qu'affiche l'onglet Analyse (fenêtre
+   des 6 derniers mois tenue à l'écart de l'apprentissage) ;
+2. **un test en aveugle à origines glissantes** : le modèle est réappris
+   à chaque mois T du passé avec les seules données connues à T, puis
+   confronté aux commandes réellement passées dans (T, T+H]. Les chiffres
+   sont donnés pour tous les comptes et pour les seuls comptes ayant déjà
+   commandé — la question ne se pose vraiment que pour eux, et c'est là
+   que le modèle est le plus dur à battre. Une règle naïve (part des 12
+   derniers mois avec commande) sert de point de comparaison ;
+3. les poids appris par niveau de critère ;
+4. le taux de réalisation des lignes du prévisionnel (saisies / générées).
+
+Mesuré le 12 septembre 2026 (550 comptes, 104 ayant commandé, ventes de
+janvier 2024 à août 2026), en aveugle, sur les comptes ayant déjà
+commandé : AUC 0,78 / 0,81 / 0,83 à 1 / 3 / 6 mois ; les 10 % de comptes
+les mieux classés commandent à 50 % / 81 % / 88 % contre 14 % / 33 % / 48 %
+au hasard ; gain de Brier sur le taux de base 21 % / 44 % / 58 %. À 3 mois
+le modèle est bien calibré jusqu'à 70 % ; au-delà il surestime un peu
+(annonce 75–86 %, observe 57–73 %). À 1 mois il ne fait pas mieux que la
+règle naïve en score de Brier, seulement en classement. Le critère
+« prévision saisie » n'a encore aucun poids : les prévisions manuelles
+datent de juillet 2026, aucune n'est encore observable à l'apprentissage.
+
 ## Navigation : cinq entrées
 
 Douze écrans ont été regroupés en cinq entrées ; les sous-écrans sont des
@@ -366,6 +400,13 @@ Carte choroplèthe SVG des 12 départements AURA (Ain, Allier, Ardèche, Cantal,
   efface cinq colonnes sur **tous** les comptes. Elle exige
   `{ "confirm": "cleanup-pas" }` dans le corps de la requête ; une fois le
   nettoyage fait une bonne fois, la route peut être supprimée.
+- **Le générateur de prévisionnel ne filtre pas par chance de commande.**
+  Sur juillet et août 2026, 81 lignes générées se sont réalisées à 2,5 %
+  (4,9 % à ± 1 mois) ; le modèle de probabilité donnait à ces comptes 7 %
+  de chances en moyenne, et ses propres comptes à 30 % ou plus ont commandé
+  à 25–27 %. Brancher `predictMonthlyForecast` sur la probabilité (ne pas
+  générer sous un seuil, ou pondérer le CA) est la prochaine amélioration
+  la plus rentable — voir `npm run eval:probability`.
 - **`lib/forecast.ts` (910 lignes) et `PilotageBoard.tsx` (1622 lignes)**
   restent les deux plus gros fichiers du projet. Le premier est maintenant
   couvert par des tests, donc découpable sans risque — par signal, plutôt

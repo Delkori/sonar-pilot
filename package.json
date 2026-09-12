@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "TZ=Europe/Paris node --import tsx --test 'lib/**/__tests__/*.test.ts'"
+    "test": "TZ=Europe/Paris node --import tsx --test 'lib/**/__tests__/*.test.ts'",
+    "eval:probability": "TZ=Europe/Paris npx tsx scripts/evaluate-probability.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",
