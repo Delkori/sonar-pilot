@@ -69,7 +69,7 @@ Puis sur [vercel.com](https://vercel.com) :
 
 ## Procédure d'import Excel
 
-1. Aller dans **Paramètres › Import / Admin** (dernière entrée de la navigation).
+1. Aller dans **Paramètres › Import / Admin**.
 2. Déposer le fichier **PAS Q3 2026 - RHONE ALPES.xlsx** (obligatoire — onglet `SUIVI COMPTES` lu automatiquement).
 3. Déposer en complément le fichier **KPI RHONE ALPES ...xlsx** (optionnel — apporte ville, code postal, statut, commercial).
 4. Lancer l'import : chaque ligne est validée avant écriture, les erreurs (CODE SAP manquant, doublon, segment invalide...) sont listées sans bloquer le reste de l'import.
@@ -236,7 +236,7 @@ directement.
 
 ## Probabilités de commande
 
-Page **Probabilités** (menu Analyser) : la chance que chaque compte commande
+Onglet **Analyse › Probabilités** : la chance que chaque compte commande
 dans les 1, 3 ou 6 prochains mois, apprise sur l'historique réel du
 portefeuille — pas un barème à poids fixes.
 
@@ -270,7 +270,21 @@ planification reste dans Pilotage. Module : `lib/probability.ts`, tests
 dans `lib/__tests__/probability.test.ts` (dont l'absence de fuite du futur
 et la supériorité sur le taux de base).
 
-## Pilotage — période affichée
+## Navigation : cinq entrées
+
+Douze écrans ont été regroupés en cinq entrées ; les sous-écrans sont des
+onglets, chacun restant une route à part entière (URL partageable, bouton
+précédent, données chargées par onglet seulement).
+
+| Entrée | Onglets | Anciennes adresses (redirigées) |
+|---|---|---|
+| Dashboard | — | |
+| Planning | Mois · Semaine | `/pilotage`, `/relances` |
+| Comptes | Liste · Carte · Produits (+ fiche `/comptes/[id]`) | `/mapping`, `/matrice` |
+| Analyse | Probabilités · SonarScore · Personas · Concurrence | `/probabilites`, `/sonarscore`, `/personas`, `/sponsoring` |
+| Paramètres | Objectifs, personas, import, correspondances | `/admin/*` |
+
+## Planning › Mois — période affichée
 
 Le tableau des prévisions part par défaut du mois en cours, sur l'horizon
 choisi (1 / 3 / 6 / 12 / 24 mois). Le mois de départ se règle librement, y
@@ -289,7 +303,7 @@ désactivé : il y créerait des prévisions pour des mois déjà facturés. La
 saisie reste possible (glisser une opportunité dans le mois, ou passer par la
 fiche compte, qui accepte n'importe quel mois).
 
-## Module Mapping
+## Comptes › Carte
 
 Carte choroplèthe SVG des 12 départements AURA (Ain, Allier, Ardèche, Cantal, Drôme, Isère, Loire, Haute-Loire, Puy-de-Dôme, Rhône, Savoie, Haute-Savoie), colorée selon l'écart objectif/réalisé, avec les comptes géocodés superposés en points cliquables (taille selon segment). Filtres segment/statut, clic sur un département pour isoler la zone, panneau latéral pour ouvrir la fiche compte.
 

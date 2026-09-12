@@ -1,4 +1,3 @@
-import { PageShell } from "@/components/layout/PageShell";
 import { PersonaClient } from "@/components/personas/PersonaClient";
 import type { PersonaAccountRow } from "@/components/personas/PersonaClient";
 import { createClient } from "@/lib/supabase/server";
@@ -89,11 +88,9 @@ export default async function PersonasPage() {
     });
 
   return (
-    <PageShell
-      title="Personas"
-      subtitle="Profils d'achat type par spécialité — pour orienter les recommandations et préparer les trimestres"
-    >
+    <>
+      <p className="text-sm text-muted-foreground">Profils d&apos;achat type par spécialité — pour orienter les recommandations et préparer les trimestres</p>
       <PersonaClient models={models} rows={rows} />
-    </PageShell>
+    </>
   );
 }

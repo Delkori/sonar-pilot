@@ -8,15 +8,9 @@ import {
   CalendarClock,
   ChevronsLeft,
   ChevronsRight,
-  Fingerprint,
-  Gamepad2,
-  Grid3x3,
-  HandCoins,
   LayoutDashboard,
   LogOut,
-  Map,
   Menu,
-  Percent,
   Radar,
   Settings,
   Users,
@@ -43,29 +37,15 @@ type NavGroup = { title: string; items: NavItem[] };
 
 const GROUPS: NavGroup[] = [
   {
-    title: "Piloter",
+    // Un seul groupe : à cinq entrées, des rubriques n'apporteraient que du
+    // bruit. Les sous-écrans vivent en onglets dans chaque hub.
+    title: "",
     items: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard, hint: "Vue d'ensemble du secteur" },
-      { href: "/pilotage", label: "Pilotage", icon: Gamepad2, hint: "Opportunités et objectifs par mois" },
-      { href: "/relances", label: "Planning", icon: CalendarClock, hint: "Semaine de visites et d'appels" },
-    ],
-  },
-  {
-    title: "Analyser",
-    items: [
-      { href: "/comptes", label: "Comptes", icon: Users, hint: "Référentiel et fiches client" },
-      { href: "/mapping", label: "Mapping AURA", icon: Map, hint: "Lecture géographique du secteur" },
-      { href: "/matrice", label: "Matrice produit", icon: Grid3x3, hint: "Qui achète quoi" },
-      { href: "/sonarscore", label: "SonarScore", icon: Activity, hint: "Scoring comportemental (bêta)" },
-      { href: "/probabilites", label: "Probabilités", icon: Percent, hint: "Chances de commande par compte et par critère" },
-      { href: "/personas", label: "Personas", icon: Fingerprint, hint: "Profils d'achat par spécialité" },
-      { href: "/sponsoring", label: "Sponsoring", icon: HandCoins, hint: "Concurrence et Transparence Santé" },
-    ],
-  },
-  {
-    title: "Administrer",
-    items: [
-      { href: "/parametres", label: "Paramètres", icon: Settings, hint: "Objectifs, import, personas" },
+      { href: "/planning", label: "Planning", icon: CalendarClock, hint: "Le mois à planifier, la semaine à tenir" },
+      { href: "/comptes", label: "Comptes", icon: Users, hint: "Liste, carte et matrice produit" },
+      { href: "/analyse", label: "Analyse", icon: Activity, hint: "Probabilités, SonarScore, personas, concurrence" },
+      { href: "/parametres", label: "Paramètres", icon: Settings, hint: "Objectifs, import, correspondances" },
     ],
   },
 ];
@@ -114,7 +94,7 @@ export function Sidebar() {
     <nav className="flex-1 space-y-5 overflow-y-auto px-2 py-2" aria-label="Navigation principale">
       {GROUPS.map((group) => (
         <div key={group.title}>
-          {expanded && (
+          {expanded && group.title && (
             <p className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
               {group.title}
             </p>
@@ -219,9 +199,11 @@ export function Sidebar() {
             <nav className="flex-1 space-y-5 overflow-y-auto px-2 py-2" aria-label="Navigation principale">
               {GROUPS.map((group) => (
                 <div key={group.title}>
-                  <p className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                    {group.title}
-                  </p>
+                  {group.title && (
+                    <p className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                      {group.title}
+                    </p>
+                  )}
                   <ul className="space-y-0.5">
                     {group.items.map(({ href, label, icon: Icon }) => {
                       const active = isActive(pathname, href);

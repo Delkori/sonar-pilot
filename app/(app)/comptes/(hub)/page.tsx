@@ -1,4 +1,3 @@
-import { PageShell } from "@/components/layout/PageShell";
 import { Card } from "@/components/ui/Card";
 import { AccountsTable } from "@/components/comptes/AccountsTable";
 import { createClient } from "@/lib/supabase/server";
@@ -19,7 +18,7 @@ export default async function ComptesPage({
   const recurrence = Object.fromEntries(recurrenceByAccount(monthlySales));
 
   return (
-    <PageShell title="Comptes" subtitle={`${accounts.length} compte(s) — secteur Auvergne-Rhône-Alpes`}>
+    <>
       <Card className="overflow-hidden">
         <AccountsTable
           accounts={accounts}
@@ -29,6 +28,6 @@ export default async function ComptesPage({
           initialRecurrence={recuParam ?? "all"}
         />
       </Card>
-    </PageShell>
+    </>
   );
 }

@@ -1,4 +1,3 @@
-import { PageShell } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { ProspectsTable } from "@/components/sponsoring/ProspectsTable";
 import type { ProspectRow } from "@/components/sponsoring/ProspectsTable";
@@ -21,14 +20,15 @@ const CONCURRENT_LABS = new Set(["Teoxane"]); // pour distinguer votre labo des 
 export default async function SponsoringPage() {
   if (!nexoraConfigured()) {
     return (
-      <PageShell title="Sponsoring & concurrence" subtitle="Base Transparence Santé (Nexora)">
+      <>
+        <p className="text-sm text-muted-foreground">Base Transparence Santé (Nexora)</p>
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             Connexion Nexora non configurée. Ajoutez <code>NEXORA_SUPABASE_URL</code> et{" "}
             <code>NEXORA_SUPABASE_ANON_KEY</code> (ou service role) dans les variables d&apos;environnement Vercel.
           </CardContent>
         </Card>
-      </PageShell>
+      </>
     );
   }
 
@@ -56,10 +56,8 @@ export default async function SponsoringPage() {
   const absents = prospects.filter((p) => !p.dansSalesforce).length;
 
   return (
-    <PageShell
-      title="Sponsoring & concurrence"
-      subtitle="Base Transparence Santé — médecins sponsorisés et investissement des laboratoires sur votre secteur"
-    >
+    <>
+      <p className="text-sm text-muted-foreground">Base Transparence Santé — médecins sponsorisés et investissement des laboratoires sur votre secteur</p>
         {amounts.length === 0 && prospects.length === 0 && (
           <Card>
             <CardContent className="py-4 text-sm text-muted-foreground">
@@ -118,6 +116,6 @@ export default async function SponsoringPage() {
           </CardHeader>
           <ProspectsTable rows={prospects} />
       </Card>
-    </PageShell>
+    </>
   );
 }

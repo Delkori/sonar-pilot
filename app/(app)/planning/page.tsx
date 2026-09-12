@@ -1,4 +1,4 @@
-import { PageShell } from "@/components/layout/PageShell";
+import { PageContent } from "@/components/layout/PageShell";
 import { PilotageBoard } from "@/components/pilotage/PilotageBoard";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -27,10 +27,8 @@ export default async function PilotagePage() {
   ]);
 
   return (
-    <PageShell
-      title="Pilotage"
-      subtitle="Planifiez le secteur : dashboard, opportunités à glisser dans les mois, suivi prévu/réalisé"
-    >
+    <PageContent>
+      <p className="text-sm text-muted-foreground">Opportunités à glisser dans les mois, prévisionnel généré ou saisi, suivi prévu / réalisé.</p>
       <PilotageBoard
         accounts={accounts}
         initialForecasts={forecasts}
@@ -40,6 +38,6 @@ export default async function PilotagePage() {
         sectorObjectives={sectorObjectives}
         purchaseLines={purchaseLines}
       />
-    </PageShell>
+    </PageContent>
   );
 }

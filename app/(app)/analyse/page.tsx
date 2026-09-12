@@ -1,4 +1,3 @@
-import { PageShell } from "@/components/layout/PageShell";
 import { ProbabilityClient } from "@/components/probabilites/ProbabilityClient";
 import { createClient } from "@/lib/supabase/server";
 import { getAccounts, getMonthlySales, getPurchaseLines } from "@/lib/data/queries";
@@ -14,11 +13,9 @@ export default async function ProbabilitesPage() {
   ]);
 
   return (
-    <PageShell
-      title="Probabilités de commande"
-      subtitle="Chances qu'un compte commande dans les prochains mois, apprises sur l'historique réel du portefeuille — critère par critère, avec la fiabilité mesurée"
-    >
+    <>
+      <p className="text-sm text-muted-foreground">Chances qu&apos;un compte commande dans les prochains mois, apprises sur l&apos;historique réel du portefeuille — critère par critère, avec la fiabilité mesurée</p>
       <ProbabilityClient accounts={accounts} monthlySales={monthlySales} purchaseLines={purchaseLines} />
-    </PageShell>
+    </>
   );
 }

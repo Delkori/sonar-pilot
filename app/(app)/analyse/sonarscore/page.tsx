@@ -1,4 +1,3 @@
-import { PageShell } from "@/components/layout/PageShell";
 import { SonarScoreClient } from "@/components/sonarscore/SonarScoreClient";
 import { createClient } from "@/lib/supabase/server";
 import { getAccounts, getPurchaseLines } from "@/lib/data/queries";
@@ -10,11 +9,9 @@ export default async function SonarScorePage() {
   const [accounts, purchases] = await Promise.all([getAccounts(supabase), getPurchaseLines(supabase)]);
 
   return (
-    <PageShell
-      title="SonarScore"
-      subtitle="Scoring comportemental (bêta) — RFM-S, vélocités de réapprovisionnement, matrice contrat et prévision d'achat, en coexistence avec le score de ciblage"
-    >
+    <>
+      <p className="text-sm text-muted-foreground">Scoring comportemental (bêta) — RFM-S, vélocités de réapprovisionnement, matrice contrat et prévision d&apos;achat, en coexistence avec le score de ciblage</p>
       <SonarScoreClient accounts={accounts} purchases={purchases} />
-    </PageShell>
+    </>
   );
 }

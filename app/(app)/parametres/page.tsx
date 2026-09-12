@@ -70,7 +70,7 @@ export default async function ParametresPage() {
       <Section id="import" title="Import / Admin">
         {pendingCount > 0 && (
           <Link
-            href="/admin/correspondances"
+            href="/parametres/correspondances"
             className="mb-4 flex items-center gap-3 rounded-xl border border-warning/30 bg-warning/5 px-5 py-4 text-sm hover:bg-warning/10"
           >
             <AlertTriangle size={18} className="shrink-0 text-warning" />

@@ -1,6 +1,5 @@
 import { readFile } from "fs/promises";
 import path from "path";
-import { PageShell } from "@/components/layout/PageShell";
 import { AuraMap } from "@/components/mapping/AuraMap";
 import { createClient } from "@/lib/supabase/server";
 import { getAccountProducts, getAccounts, getHcps, getMonthlySales } from "@/lib/data/queries";
@@ -47,10 +46,7 @@ export default async function MappingPage() {
     .sort((a, b) => b.accountIds.length - a.accountIds.length);
 
   return (
-    <PageShell
-      title="Mapping Auvergne-Rhône-Alpes"
-      subtitle="Lecture géographique du secteur — préparation de tournée terrain"
-    >
+    <>
       <AuraMap
         geo={geo}
         accounts={accounts}
@@ -59,6 +55,6 @@ export default async function MappingPage() {
         monthlySales={monthlySales}
         sponsoringLabs={sponsoringLabs}
       />
-    </PageShell>
+    </>
   );
 }
