@@ -284,6 +284,12 @@ précédent, données chargées par onglet seulement).
 | Analyse | Probabilités · SonarScore · Personas · Concurrence | `/probabilites`, `/sonarscore`, `/personas`, `/sponsoring` |
 | Paramètres | Objectifs, personas, import, correspondances | `/admin/*` |
 
+**Recherche globale.** Le champ en tête de la barre latérale (raccourci
+⌘K / Ctrl+K) cherche un compte par nom, code SAP ou ville et ouvre sa
+fiche — ↑ ↓ pour choisir, Entrée pour ouvrir. C'est le geste le plus
+fréquent de la journée ; il ne demandait auparavant pas moins de trois
+écrans.
+
 ## Planning › Mois — période affichée
 
 Le tableau des prévisions part par défaut du mois en cours, sur l'horizon

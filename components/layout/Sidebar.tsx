@@ -12,12 +12,14 @@ import {
   LogOut,
   Menu,
   Radar,
+  Search,
   Settings,
   Users,
   X,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AccountSearch } from "@/components/layout/AccountSearch";
 
 /**
  * Navigation principale.
@@ -60,6 +62,21 @@ export function Sidebar() {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Jeton de focus pour la recherche : ⌘K / Ctrl+K, ou l'icône de la barre
+  // repliée, déplient la barre et posent le curseur dans le champ.
+  const [searchFocus, setSearchFocus] = useState(0);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setExpanded(true);
+        setSearchFocus((n) => n + 1);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Préférence lue après hydratation : la lire pendant le rendu ferait
   // diverger le HTML serveur du HTML client.
@@ -194,6 +211,9 @@ export function Sidebar() {
                 <X size={18} />
               </button>
             </div>
+            <div className="px-2 pt-2">
+              <AccountSearch />
+            </div>
             {/* Le tiroir mobile est toujours déplié : masquer les libellés sur
                 tactile reproduirait exactement le problème qu'on corrige. */}
             <nav className="flex-1 space-y-5 overflow-y-auto px-2 py-2" aria-label="Navigation principale">
@@ -248,6 +268,26 @@ export function Sidebar() {
         )}
       >
         {brand}
+        {expanded ? (
+          <div className="px-2 pt-2">
+            <AccountSearch focusToken={searchFocus} />
+          </div>
+        ) : (
+          <div className="px-2 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setExpanded(true);
+                setSearchFocus((n) => n + 1);
+              }}
+              title="Rechercher un compte (⌘K)"
+              aria-label="Rechercher un compte"
+              className="flex h-10 w-full items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-muted hover:text-foreground"
+            >
+              <Search size={19} />
+            </button>
+          </div>
+        )}
         {nav}
         <button
           type="button"
