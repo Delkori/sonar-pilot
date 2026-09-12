@@ -11,7 +11,7 @@ import { fieldClass } from "@/lib/ui-classes";
 import { cn, formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { buildProbabilityModel, CRITERIA } from "@/lib/probability";
-import type { AccountProbability, Horizon, ProbabilityModel, SaleRow } from "@/lib/probability";
+import type { AccountProbability, ForecastSignalRow, Horizon, ProbabilityModel, SaleRow } from "@/lib/probability";
 import type { PurchaseLine } from "@/lib/sonarscore/velocity";
 import { monthIndex, MONTHS_SHORT } from "@/lib/dates";
 import type { Account } from "@/types/database";
@@ -79,10 +79,13 @@ export function ProbabilityClient({
   accounts,
   monthlySales,
   purchaseLines,
+  forecasts = [],
 }: {
   accounts: Account[];
   monthlySales: SaleRow[];
   purchaseLines: PurchaseLine[];
+  /** Prévisions saisies dans Planning — critère « vous l'aviez prévu ». */
+  forecasts?: ForecastSignalRow[];
 }) {
   const [horizon, setHorizon] = useState<Horizon>(3);
   const [search, setSearch] = useState("");
@@ -94,8 +97,8 @@ export function ProbabilityClient({
   // centaines de millisecondes sur un portefeuille de plusieurs centaines de
   // comptes — voir le banc de mesure dans le commit qui introduit le modèle.
   const model = useMemo(
-    () => buildProbabilityModel({ accounts, monthlySales, purchaseLines, horizon }),
-    [accounts, monthlySales, purchaseLines, horizon]
+    () => buildProbabilityModel({ accounts, monthlySales, purchaseLines, forecasts, horizon }),
+    [accounts, monthlySales, purchaseLines, forecasts, horizon]
   );
 
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a] as const)), [accounts]);

@@ -20,7 +20,7 @@ import { formatEUR, formatNumber } from "@/lib/utils";
 import { monthIndex } from "@/lib/dates";
 import { availableYears, revenueByAccountYear, revenueForYear } from "@/lib/revenue";
 import { buildProbabilityModel } from "@/lib/probability";
-import { getAccounts, getMonthlySales, getPurchaseLines } from "@/lib/data/queries";
+import { getAccounts, getForecasts, getMonthlySales, getPurchaseLines } from "@/lib/data/queries";
 import { OrderProbabilityCard } from "@/components/comptes/OrderProbabilityCard";
 import type { Account, AccountAction, AccountForecast, AccountProduct, Hcp } from "@/types/database";
 
@@ -32,7 +32,7 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
 
   // Six lectures indépendantes : en série elles cumulaient leurs latences
   // avant le premier octet de la fiche.
-  const [accountRes, actionsRes, productsRes, forecastsRes, hcpsRes, monthlyRes, allAccounts, allSales, allLines] =
+  const [accountRes, actionsRes, productsRes, forecastsRes, hcpsRes, monthlyRes, allAccounts, allSales, allLines, allForecasts] =
     await Promise.all([
       supabase.from("accounts").select("*").eq("id", id).maybeSingle(),
       supabase.from("account_actions").select("*").eq("account_id", id).order("created_at", { ascending: false }),
@@ -45,6 +45,7 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
       getAccounts(supabase),
       getMonthlySales(supabase),
       getPurchaseLines(supabase),
+      getForecasts(supabase, "prevision"),
     ]);
 
   if (!accountRes.data) notFound();
@@ -78,6 +79,7 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
     accounts: allAccounts,
     monthlySales: allSales,
     purchaseLines: allLines,
+    forecasts: allForecasts,
     horizon: 3,
   });
   const probability = probabilityModel.accounts.find((r) => r.accountId === id) ?? null;

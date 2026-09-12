@@ -12,13 +12,28 @@ import { median } from "@/lib/stats";
  *
  * Principe : chaque (compte, mois passé) est un exemple. On observe l'état
  * du compte à ce mois-là (cadence, retard dans son cycle, activité récente,
- * tendance, saisonnalité, segment, tier, référence attendue) en n'utilisant
- * que ce qui était connu à l'époque, puis on regarde s'il a commandé dans
- * les N mois suivants. Sur des milliers d'exemples de ce type, on mesure
- * pour chaque critère la fréquence réelle de commande — c'est ce que la
- * page « Probabilités » affiche critère par critère — et on les combine en
- * une probabilité par compte (naïve bayésienne, puis recalibrée sur une
- * fenêtre temporelle tenue à l'écart de l'apprentissage).
+ * tendance, saisonnalité, segment, tier, référence attendue, prévision
+ * saisie) en n'utilisant que ce qui était connu à l'époque, puis on regarde
+ * s'il a commandé dans les N mois suivants. Sur des milliers d'exemples de
+ * ce type, on mesure pour chaque critère la fréquence réelle de commande —
+ * c'est ce que l'onglet « Probabilités » affiche critère par critère — et
+ * on les combine en une probabilité par compte par régression logistique
+ * régularisée, puis recalibrée sur une fenêtre temporelle tenue à l'écart
+ * de l'apprentissage.
+ *
+ * Pourquoi une régression plutôt qu'une combinaison naïve des taux : les
+ * critères sont corrélés (cadence, retard et activité récente racontent en
+ * partie la même chose). Additionner leurs effets comme s'ils étaient
+ * indépendants surcompte, au point de classer un compte décroché depuis
+ * six mois au niveau d'un compte actif. La régression apprend les poids
+ * conjointement : un critère redondant se partage l'effet au lieu de
+ * l'empiler.
+ *
+ * Les prévisions saisies à la main dans Planning entrent à deux titres :
+ * comme critère appris (« vous aviez prévu une commande » — dont l'histo-
+ * rique dit à quel point vos prévisions se réalisent), et comme commandes
+ * anticipées quand on projette un mois futur : une prévision posée en
+ * octobre remet le compteur du cycle à zéro pour novembre.
  *
  * Tout est explicable : la probabilité d'un compte se décompose en facteurs
  * dont chacun renvoie à un taux observé sur des comptes comparables. Et tout
@@ -35,6 +50,16 @@ export interface SaleRow {
   ca: number;
 }
 
+/** Prévision de commande saisie ou générée — seules les manuelles comptent. */
+export interface ForecastSignalRow {
+  account_id: string;
+  year: number;
+  month: number;
+  source: "auto" | "manuel";
+  created_at: string;
+  ca_prevu: number | null;
+}
+
 export type CriterionKey =
   | "cadence"
   | "retard"
@@ -43,7 +68,8 @@ export type CriterionKey =
   | "saison"
   | "segment"
   | "tier"
-  | "produit";
+  | "produit"
+  | "prevision";
 
 export interface CriterionMeta {
   key: CriterionKey;
@@ -147,6 +173,16 @@ export const CRITERIA: CriterionMeta[] = [
       { value: "sans_donnees", label: "Pas de détail produit" },
     ],
   },
+  {
+    key: "prevision",
+    label: "Prévision saisie",
+    description:
+      "Vous aviez vous-même prévu une commande sur cette période (prévisionnel saisi dans Planning). Le taux observé dit à quel point vos prévisions se réalisent.",
+    levels: [
+      { value: "oui", label: "Oui" },
+      { value: "non", label: "Non" },
+    ],
+  },
 ];
 
 export type Features = Record<CriterionKey, string>;
@@ -232,6 +268,10 @@ export interface ProbabilityModel {
   /** Somme des probabilités = nombre de comptes attendus en commande. */
   expectedOrderingAccounts: number;
   expectedCa: number;
+  /** Poids appris, une colonne par (critère, niveau) puis l'ordonnée à l'origine — sérialisable. */
+  weights: number[];
+  /** Recalibration de Platt : p = σ(a·z + b). */
+  platt: { a: number; b: number };
 }
 
 // ── Préparation des données ──────────────────────────────────────────────
@@ -251,6 +291,8 @@ interface AccountHistory {
   orderedMonths: number[];
 }
 
+const EMPTY_HISTORY: AccountHistory = { caByMonth: new Map(), orderedMonths: [] };
+
 function buildHistories(sales: SaleRow[]): Map<string, AccountHistory> {
   const map = new Map<string, AccountHistory>();
   for (const s of sales) {
@@ -264,10 +306,23 @@ function buildHistories(sales: SaleRow[]): Map<string, AccountHistory> {
   return map;
 }
 
+/** Commande anticipée : une prévision posée, traitée comme réelle pour projeter un mois futur. */
+export interface AnticipatedOrder {
+  /** Index absolu du mois. */
+  month: number;
+  ca: number;
+}
+
+/** Historique réel augmenté des commandes anticipées (les mois déjà réels priment). */
+function effectiveHistory(h: AccountHistory | undefined, anticipated: AnticipatedOrder[] | undefined): AccountHistory {
+  if (!anticipated || anticipated.length === 0) return h ?? EMPTY_HISTORY;
+  const caByMonth = new Map(h?.caByMonth ?? []);
+  for (const a of anticipated) if (!caByMonth.has(a.month) && a.ca >= 0) caByMonth.set(a.month, Math.max(a.ca, 1));
+  return { caByMonth, orderedMonths: [...caByMonth.keys()].sort((a, b) => a - b) };
+}
+
 /** Mois commandés ≤ t — la vue « telle qu'elle était à l'époque ». */
-function orderedUpTo(h: AccountHistory | undefined, t: number): number[] {
-  if (!h) return [];
-  // orderedMonths est trié : on s'arrête au premier mois > t.
+function orderedUpTo(h: AccountHistory, t: number): number[] {
   const out: number[] = [];
   for (const m of h.orderedMonths) {
     if (m > t) break;
@@ -276,8 +331,7 @@ function orderedUpTo(h: AccountHistory | undefined, t: number): number[] {
   return out;
 }
 
-function sumCa(h: AccountHistory | undefined, from: number, to: number): number {
-  if (!h) return 0;
+function sumCa(h: AccountHistory, from: number, to: number): number {
   let s = 0;
   for (const m of h.orderedMonths) {
     if (m < from) continue;
@@ -340,17 +394,37 @@ function productSignalAt(lines: PurchaseLine[], t: number, horizon: Horizon): Pr
   return { known, due };
 }
 
-interface Context {
+interface ManualForecast {
+  month: number;
+  /** Mois (index absolu) où la prévision a été saisie. */
+  createdIdx: number;
+  ca: number;
+}
+
+export interface FeatureContext {
+  horizon: Horizon;
+  asOfIdx: number;
+  minMonth: number;
   histories: Map<string, AccountHistory>;
   accountById: Map<string, Account>;
-  minMonth: number;
-  horizon: Horizon;
+  manualForecasts: Map<string, ManualForecast[]>;
   productAt: (t: number) => ProductSignal;
 }
 
-function featuresAt(accountId: string, t: number, ctx: Context): Features {
+export interface FeatureOptions {
+  /** Prévisions posées à traiter comme des commandes réelles — projection d'un mois futur. */
+  anticipated?: AnticipatedOrder[];
+  /**
+   * `asOfCreation` (apprentissage) : une prévision ne compte que si elle
+   * existait déjà au mois de référence. `all` (scoring) : toute prévision
+   * saisie compte, y compris posée à l'instant.
+   */
+  forecastKnowledge?: "asOfCreation" | "all";
+}
+
+export function featuresAt(accountId: string, t: number, ctx: FeatureContext, options: FeatureOptions = {}): Features {
   const account = ctx.accountById.get(accountId);
-  const h = ctx.histories.get(accountId);
+  const h = effectiveHistory(ctx.histories.get(accountId), options.anticipated);
   const ordered = orderedUpTo(h, t);
   const last = ordered.length > 0 ? ordered[ordered.length - 1] : null;
 
@@ -376,7 +450,7 @@ function featuresAt(accountId: string, t: number, ctx: Context): Features {
   else {
     let oui = false;
     for (let k = 1; k <= ctx.horizon; k++) {
-      if (h?.caByMonth.has(t + k - 12)) {
+      if (h.caByMonth.has(t + k - 12)) {
         oui = true;
         break;
       }
@@ -393,6 +467,11 @@ function featuresAt(accountId: string, t: number, ctx: Context): Features {
   const signal = ctx.productAt(t);
   const produit = !signal.known.has(accountId) ? "sans_donnees" : signal.due.has(accountId) ? "oui" : "non";
 
+  const knowledge = options.forecastKnowledge ?? "asOfCreation";
+  const prevue = (ctx.manualForecasts.get(accountId) ?? []).some(
+    (f) => f.month > t && f.month <= t + ctx.horizon && (knowledge === "all" || f.createdIdx <= t)
+  );
+
   return {
     cadence,
     retard: retardLevel(cadence, gap),
@@ -402,6 +481,7 @@ function featuresAt(accountId: string, t: number, ctx: Context): Features {
     segment,
     tier,
     produit,
+    prevision: prevue ? "oui" : "non",
   };
 }
 
@@ -429,11 +509,7 @@ function activeColumns(features: Features): number[] {
   return cols;
 }
 
-interface Model {
-  weights: Float64Array;
-}
-
-function dot(weights: Float64Array, cols: number[]): number {
+function dot(weights: ArrayLike<number>, cols: number[]): number {
   let z = 0;
   for (const j of cols) z += weights[j];
   return z;
@@ -474,9 +550,9 @@ function solve(H: Float64Array[], g: Float64Array): Float64Array {
  * Les vecteurs d'entrée sont creux (un niveau actif par critère), ce qui
  * rend chaque itération très bon marché malgré la matrice hessienne.
  */
-function trainLogistic(examples: Example[]): Model {
+function trainLogistic(examples: Example[]): Float64Array {
   const weights = new Float64Array(DIM);
-  if (examples.length === 0) return { weights };
+  if (examples.length === 0) return weights;
   const rows = examples.map((e) => ({ cols: activeColumns(e.features), y: e.ordered ? 1 : 0 }));
 
   for (let iter = 0; iter < 30; iter++) {
@@ -505,16 +581,12 @@ function trainLogistic(examples: Example[]): Model {
     }
     if (maxStep < 1e-6) break;
   }
-  return { weights };
+  return weights;
 }
 
-function levelWeight(model: Model, key: CriterionKey, value: string): number {
+function levelWeight(weights: ArrayLike<number>, key: CriterionKey, value: string): number {
   const j = COLUMN_INDEX.get(`${key}|${value}`);
-  return j === undefined ? 0 : model.weights[j];
-}
-
-function rawLogit(model: Model, features: Features): number {
-  return dot(model.weights, activeColumns(features));
+  return j === undefined ? 0 : weights[j];
 }
 
 /** Comptage descriptif par critère et niveau. */
@@ -548,10 +620,8 @@ const clamp = (p: number) => Math.min(0.99, Math.max(0.01, p));
 /**
  * Recalibration de Platt : p = σ(a·z + b), (a, b) ajustés par maximum de
  * vraisemblance (Newton) sur des exemples que l'apprentissage n'a pas vus.
- * Les critères sont corrélés entre eux (cadence, retard et activité disent
- * en partie la même chose), ce qui rend la combinaison naïve trop sûre
- * d'elle : deux paramètres suffisent à ramener les probabilités à leur
- * fréquence réelle.
+ * Deux paramètres suffisent à ramener les probabilités à leur fréquence
+ * réelle sans toucher au classement.
  */
 function fitPlatt(points: { z: number; y: boolean }[]): { a: number; b: number } {
   let a = 1;
@@ -637,6 +707,8 @@ export interface BuildOptions {
   accounts: Account[];
   monthlySales: SaleRow[];
   purchaseLines?: PurchaseLine[];
+  /** Prévisions de commande (`kind = prevision`) ; seules les manuelles sont utilisées. */
+  forecasts?: ForecastSignalRow[];
   horizon: Horizon;
   /** Mois de référence pour le scoring (défaut : mois en cours). */
   asOf?: { year: number; month: number };
@@ -644,8 +716,8 @@ export interface BuildOptions {
   validationMonths?: number;
 }
 
-/** Exemples (compte × mois de référence) avec leur étiquette, sans fuite du futur. */
-export function buildExamples(opts: BuildOptions): { examples: Example[]; ctx: Context; asOfIdx: number } {
+/** Contexte de calcul des critères — réutilisable pour projeter des mois futurs. */
+export function createFeatureContext(opts: Omit<BuildOptions, "validationMonths">): FeatureContext {
   const horizon = opts.horizon;
   const asOfIdx = opts.asOf ? monthIndex(opts.asOf.year, opts.asOf.month) : currentMonthIndex();
   const histories = buildHistories(opts.monthlySales);
@@ -653,6 +725,18 @@ export function buildExamples(opts: BuildOptions): { examples: Example[]; ctx: C
 
   const allMonths = opts.monthlySales.filter((s) => s.ca > 0).map((s) => monthIndex(s.year, s.month));
   const minMonth = allMonths.length > 0 ? Math.min(...allMonths) : asOfIdx;
+
+  const manualForecasts = new Map<string, ManualForecast[]>();
+  for (const f of opts.forecasts ?? []) {
+    if (f.source !== "manuel") continue;
+    const list = manualForecasts.get(f.account_id) ?? [];
+    list.push({
+      month: monthIndex(f.year, f.month),
+      createdIdx: monthIndexFromDateStr(f.created_at.slice(0, 10)),
+      ca: f.ca_prevu ?? 0,
+    });
+    manualForecasts.set(f.account_id, list);
+  }
 
   const productCache = new Map<number, ProductSignal>();
   const lines = opts.purchaseLines ?? [];
@@ -664,7 +748,13 @@ export function buildExamples(opts: BuildOptions): { examples: Example[]; ctx: C
     return sig;
   };
 
-  const ctx: Context = { histories, accountById, minMonth, horizon, productAt };
+  return { horizon, asOfIdx, minMonth, histories, accountById, manualForecasts, productAt };
+}
+
+/** Exemples (compte × mois de référence) avec leur étiquette, sans fuite du futur. */
+export function buildExamples(opts: BuildOptions): { examples: Example[]; ctx: FeatureContext; asOfIdx: number } {
+  const ctx = createFeatureContext(opts);
+  const { horizon, asOfIdx, minMonth } = ctx;
 
   // Le mois en cours est partiel : le dernier mois entièrement observé est
   // celui d'avant, et une étiquette n'est complète que si les H mois qui
@@ -677,7 +767,7 @@ export function buildExamples(opts: BuildOptions): { examples: Example[]; ctx: C
   if (lastT < firstT) return { examples, ctx, asOfIdx };
 
   for (const account of opts.accounts) {
-    const h = histories.get(account.id);
+    const h = ctx.histories.get(account.id);
     for (let t = firstT; t <= lastT; t++) {
       let ordered = false;
       if (h) {
@@ -692,6 +782,32 @@ export function buildExamples(opts: BuildOptions): { examples: Example[]; ctx: C
     }
   }
   return { examples, ctx, asOfIdx };
+}
+
+/** Probabilité calibrée pour un jeu de critères, avec un modèle déjà appris. */
+export function scoreFeatures(model: Pick<ProbabilityModel, "weights" | "platt">, features: Features): number {
+  const z = dot(model.weights, activeColumns(features));
+  return clamp(sigmoid(model.platt.a * z + model.platt.b));
+}
+
+/**
+ * Chances qu'un compte commande un mois donné (modèle à horizon 1),
+ * en traitant les prévisions posées sur les mois précédents comme des
+ * commandes anticipées — voir Planning › Mois. `anticipated` doit ne
+ * contenir que des mois strictement antérieurs à `monthIdx`.
+ */
+export function probabilityForMonth(
+  model: Pick<ProbabilityModel, "weights" | "platt">,
+  ctx: FeatureContext,
+  accountId: string,
+  monthIdx: number,
+  anticipated: AnticipatedOrder[] = []
+): { probability: number; features: Features } {
+  const features = featuresAt(accountId, monthIdx - 1, ctx, {
+    anticipated: anticipated.filter((a) => a.month < monthIdx),
+    forecastKnowledge: "all",
+  });
+  return { probability: scoreFeatures(model, features), features };
 }
 
 export function buildProbabilityModel(opts: BuildOptions): ProbabilityModel {
@@ -711,27 +827,24 @@ export function buildProbabilityModel(opts: BuildOptions): ProbabilityModel {
   const train = validationSpan > 0 ? examples.filter((e) => e.t < cutoff) : examples;
   const validation = validationSpan > 0 ? examples.filter((e) => e.t >= cutoff) : [];
 
-  const model = trainLogistic(train);
+  const weights = trainLogistic(train);
   const trainCounts = countExamples(train);
   const all = countExamples(examples);
 
   // Recalibration : on exige une fenêtre avec les deux issues représentées.
-  const validationPoints = validation.map((e) => ({ z: rawLogit(model, e.features), y: e.ordered }));
+  const validationPoints = validation.map((e) => ({ z: dot(weights, activeColumns(e.features)), y: e.ordered }));
   const enoughToCalibrate =
     validationPoints.length >= 30 && validationPoints.some((p) => p.y) && validationPoints.some((p) => !p.y);
   const platt = enoughToCalibrate ? fitPlatt(validationPoints) : { a: 1, b: 0 };
-  const calibrate = (z: number) => clamp(sigmoid(platt.a * z + platt.b));
+  const scorer = { weights: Array.from(weights), platt };
 
   const baseRateTrain =
     trainCounts.pos + trainCounts.neg > 0 ? trainCounts.pos / (trainCounts.pos + trainCounts.neg) : 0;
-  const evalPoints = validationPoints.map(({ z, y }) => ({ p: calibrate(z), y }));
+  const evalPoints = validationPoints.map(({ z, y }) => ({ p: clamp(sigmoid(platt.a * z + platt.b)), y }));
   const rawPoints = validationPoints.map(({ z, y }) => ({ p: clamp(sigmoid(z)), y }));
   const evaluation: Evaluation = {
     n: validation.length,
-    window:
-      validation.length > 0
-        ? { from: fromMonthIndex(cutoff), to: fromMonthIndex(maxT) }
-        : null,
+    window: validation.length > 0 ? { from: fromMonthIndex(cutoff), to: fromMonthIndex(maxT) } : null,
     brier: brierScore(evalPoints),
     brierRaw: brierScore(rawPoints),
     brierBase: brierScore(validation.map((e) => ({ p: baseRateTrain, y: e.ordered }))),
@@ -755,7 +868,7 @@ export function buildProbabilityModel(opts: BuildOptions): ProbabilityModel {
           label: lv.label,
           n,
           rate: n > 0 ? cell.pos / n : 0,
-          weight: levelWeight(model, c.key, lv.value),
+          weight: levelWeight(weights, c.key, lv.value),
         };
       })
       .filter((lv) => lv.n > 0),
@@ -763,16 +876,17 @@ export function buildProbabilityModel(opts: BuildOptions): ProbabilityModel {
   const levelStat = (key: CriterionKey, value: string) =>
     criteria.find((c) => c.key === key)?.levels.find((l) => l.value === value);
 
-  // Scoring à date : l'état actuel de chaque compte, avec tout l'historique.
+  // Scoring à date : l'état actuel de chaque compte, avec tout l'historique,
+  // et toute prévision saisie — même posée à l'instant.
   const accounts: AccountProbability[] = opts.accounts.map((account) => {
-    const features = featuresAt(account.id, asOfIdx, ctx);
-    const probability = calibrate(rawLogit(model, features));
-    const h = ctx.histories.get(account.id);
+    const features = featuresAt(account.id, asOfIdx, ctx, { forecastKnowledge: "all" });
+    const probability = scoreFeatures(scorer, features);
+    const h = ctx.histories.get(account.id) ?? EMPTY_HISTORY;
     const ordered = orderedUpTo(h, asOfIdx);
     const last = ordered.length > 0 ? ordered[ordered.length - 1] : null;
 
-    const recentCa = ordered.filter((m) => m > asOfIdx - 12).map((m) => h!.caByMonth.get(m) ?? 0);
-    const typicalOrderCa = median(recentCa) ?? median(ordered.map((m) => h!.caByMonth.get(m) ?? 0)) ?? 0;
+    const recentCa = ordered.filter((m) => m > asOfIdx - 12).map((m) => h.caByMonth.get(m) ?? 0);
+    const typicalOrderCa = median(recentCa) ?? median(ordered.map((m) => h.caByMonth.get(m) ?? 0)) ?? 0;
 
     const cadence = features.cadence as RecurrenceBucket | "Jamais";
     const gap = cadence === "Jamais" ? null : EXPECTED_GAP[cadence];
@@ -787,7 +901,7 @@ export function buildProbabilityModel(opts: BuildOptions): ProbabilityModel {
         level: features[c.key],
         levelLabel: meta?.label ?? features[c.key],
         rate: lv?.rate ?? baseRate,
-        weight: levelWeight(model, c.key, features[c.key]),
+        weight: levelWeight(weights, c.key, features[c.key]),
       };
     }).sort((x, y) => Math.abs(y.weight) - Math.abs(x.weight));
 
@@ -814,5 +928,7 @@ export function buildProbabilityModel(opts: BuildOptions): ProbabilityModel {
     accounts,
     expectedOrderingAccounts: accounts.reduce((s, a) => s + a.probability, 0),
     expectedCa: accounts.reduce((s, a) => s + a.expectedCa, 0),
+    weights: scorer.weights,
+    platt,
   };
 }

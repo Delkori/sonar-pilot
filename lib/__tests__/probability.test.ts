@@ -300,3 +300,103 @@ describe("signal produit", () => {
     assert.equal(examples.find((e) => e.t === M(2026, 2))!.features.produit, "non");
   });
 });
+
+describe("prévisions saisies", () => {
+  const importsProbability = () => import("@/lib/probability");
+
+  test("le critère ne voit une prévision qu'à partir du mois où elle a été saisie", async () => {
+    const { buildExamples: build } = await importsProbability();
+    const sales = [...ventes("A", chaqueMois(M(2025, 1), M(2026, 3)))];
+    const forecasts = [
+      { account_id: "A", year: 2026, month: 5, source: "manuel" as const, created_at: "2026-04-10T09:00:00Z", ca_prevu: 900 },
+    ];
+    const { examples } = build({ accounts: [compte("A")], monthlySales: sales, forecasts, horizon: 3, asOf: AS_OF });
+    const en = (y: number, m: number) => examples.find((e) => e.t === M(y, m))!;
+    // En mars, la fenêtre (avril, juin] contient mai — mais la prévision
+    // n'existait pas encore : l'apprentissage ne doit pas la connaître.
+    assert.equal(en(2026, 3).features.prevision, "non");
+    assert.equal(en(2026, 4).features.prevision, "oui", "saisie en avril, visible dès avril");
+  });
+
+  test("ignore les prévisions générées automatiquement", async () => {
+    const { buildExamples: build } = await importsProbability();
+    const sales = ventes("A", chaqueMois(M(2025, 1), M(2026, 3)));
+    const forecasts = [
+      { account_id: "A", year: 2026, month: 5, source: "auto" as const, created_at: "2026-01-10T09:00:00Z", ca_prevu: 900 },
+    ];
+    const { examples } = build({ accounts: [compte("A")], monthlySales: sales, forecasts, horizon: 3, asOf: AS_OF });
+    assert.ok(examples.every((e) => e.features.prevision === "non"));
+  });
+
+  test("au scoring, une prévision posée à l'instant compte", async () => {
+    const { buildProbabilityModel: buildModel } = await importsProbability();
+    const { accounts, sales } = portefeuille();
+    const forecasts = [
+      { account_id: "trim-1", year: 2026, month: 10, source: "manuel" as const, created_at: "2026-09-12T10:00:00Z", ca_prevu: 3000 },
+    ];
+    const model = buildModel({ accounts, monthlySales: sales, forecasts, horizon: 3, asOf: AS_OF });
+    const r = model.accounts.find((a) => a.accountId === "trim-1")!;
+    assert.equal(r.features.prevision, "oui");
+    assert.ok(model.criteria.some((c) => c.key === "prevision"));
+  });
+});
+
+describe("projection d'un mois futur", () => {
+  const importsProbability = () => import("@/lib/probability");
+
+  test("une commande anticipée remet le compteur du cycle à zéro", async () => {
+    const { createFeatureContext, featuresAt: features } = await importsProbability();
+    // Mensuel, dernière commande réelle en août 2026. Pour novembre (mois de
+    // référence octobre) : sans prévision, deux mois de silence ; avec des
+    // prévisions posées en septembre et octobre, il vient de commander.
+    const sales = ventes("A", chaqueMois(M(2025, 1), M(2026, 8)));
+    const ctx = createFeatureContext({ accounts: [compte("A")], monthlySales: sales, horizon: 1, asOf: AS_OF });
+    const sans = features("A", M(2026, 10), ctx, { forecastKnowledge: "all" });
+    const avec = features("A", M(2026, 10), ctx, {
+      forecastKnowledge: "all",
+      anticipated: [
+        { month: M(2026, 9), ca: 2000 },
+        { month: M(2026, 10), ca: 2000 },
+      ],
+    });
+    assert.equal(sans.retard, "en_retard");
+    assert.equal(avec.retard, "debut_de_cycle");
+    assert.equal(avec.cadence, "Mensuelle");
+  });
+
+  test("une commande anticipée ne remplace jamais un mois réel", async () => {
+    const { createFeatureContext, featuresAt: features } = await importsProbability();
+    const sales = ventes("A", [M(2026, 6)], 5000);
+    const ctx = createFeatureContext({ accounts: [compte("A")], monthlySales: sales, horizon: 1, asOf: AS_OF });
+    const f = features("A", M(2026, 8), ctx, { anticipated: [{ month: M(2026, 6), ca: 1 }] });
+    // Si l'anticipée avait écrasé juin (5 000 → 1), la tendance serait
+    // différente ; la cadence reste « Unique » (un seul mois, réel).
+    assert.equal(f.cadence, "Unique");
+  });
+
+  test("probabilityForMonth ne prend en compte que les anticipations antérieures au mois visé", async () => {
+    const { buildProbabilityModel: buildModel, createFeatureContext, probabilityForMonth } = await importsProbability();
+    const { accounts, sales } = portefeuille();
+    const model = buildModel({ accounts, monthlySales: sales, horizon: 1, asOf: AS_OF });
+    const ctx = createFeatureContext({ accounts, monthlySales: sales, horizon: 1, asOf: AS_OF });
+    const novembre = M(2026, 11);
+    const sans = probabilityForMonth(model, ctx, "trim-0", novembre);
+    const avec = probabilityForMonth(model, ctx, "trim-0", novembre, [{ month: M(2026, 10), ca: 3000 }]);
+    const apres = probabilityForMonth(model, ctx, "trim-0", novembre, [{ month: M(2026, 12), ca: 3000 }]);
+    assert.notEqual(sans.features.retard, avec.features.retard, "octobre anticipé change la position dans le cycle");
+    assert.deepEqual(apres.features, sans.features, "décembre est postérieur : ignoré");
+    for (const p of [sans.probability, avec.probability]) assert.ok(p > 0 && p < 1);
+  });
+
+  test("scoreFeatures reproduit exactement le scoring du modèle", async () => {
+    const { buildProbabilityModel: buildModel, createFeatureContext, featuresAt: features, scoreFeatures } =
+      await importsProbability();
+    const { accounts, sales } = portefeuille();
+    const model = buildModel({ accounts, monthlySales: sales, horizon: 3, asOf: AS_OF });
+    const ctx = createFeatureContext({ accounts, monthlySales: sales, horizon: 3, asOf: AS_OF });
+    for (const r of model.accounts) {
+      const p = scoreFeatures(model, features(r.accountId, M(2026, 9), ctx, { forecastKnowledge: "all" }));
+      assert.ok(Math.abs(p - r.probability) < 1e-12, `${r.accountId}: ${p} vs ${r.probability}`);
+    }
+  });
+});
