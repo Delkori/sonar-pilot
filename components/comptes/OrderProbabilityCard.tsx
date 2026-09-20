@@ -16,7 +16,7 @@ export function OrderProbabilityCard({ result, model }: { result: AccountProbabi
         <CardTitle>Probabilité de commande — {model.horizon} mois</CardTitle>
         <CardDescription>
           Apprise sur l&apos;historique du portefeuille ; taux de base {formatPct(model.baseRate)}.{" "}
-          <Link href="/analyse" className="text-primary hover:underline">
+          <Link href="/planning/chances" className="text-primary hover:underline">
             Voir tous les comptes
           </Link>
         </CardDescription>

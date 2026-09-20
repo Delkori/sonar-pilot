@@ -17,7 +17,12 @@ export const dynamic = "force-dynamic";
 
 const CONCURRENT_LABS = new Set(["Teoxane"]); // pour distinguer votre labo des concurrents
 
-export default async function SponsoringPage() {
+/**
+ * Prospects : les médecins de vos départements que les laboratoires
+ * sponsorisent (base Transparence Santé) et qui manquent à votre Salesforce
+ * — avec, en regard, ce que chaque laboratoire investit sur le secteur.
+ */
+export default async function ProspectsPage() {
   if (!nexoraConfigured()) {
     return (
       <>
@@ -57,7 +62,7 @@ export default async function SponsoringPage() {
 
   return (
     <>
-      <p className="text-sm text-muted-foreground">Base Transparence Santé — médecins sponsorisés et investissement des laboratoires sur votre secteur</p>
+      <p className="text-sm text-muted-foreground">Médecins sponsorisés de vos départements absents de votre Salesforce, et investissement des laboratoires sur le secteur (base Transparence Santé)</p>
         {amounts.length === 0 && prospects.length === 0 && (
           <Card>
             <CardContent className="py-4 text-sm text-muted-foreground">

@@ -6,9 +6,9 @@ import { CalendarSyncPanel } from "@/components/relances/CalendarSyncPanel";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * Hub Planning : le mois à planifier (prévisionnel, opportunités) et la
- * semaine à tenir (visites, appels). Deux anciens écrans, un seul point
- * d'entrée — l'abonnement calendrier concerne les deux, il vit ici.
+ * Hub Planning : le mois à planifier (prévisionnel, opportunités), la
+ * semaine à tenir (visites, appels) et les chances de commande qui disent
+ * chez qui aller. L'abonnement calendrier concerne l'ensemble, il vit ici.
  */
 export default async function PlanningLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -23,13 +23,14 @@ export default async function PlanningLayout({ children }: { children: React.Rea
   return (
     <PageShell
       title="Planning"
-      subtitle="Le mois à planifier, la semaine à tenir"
+      subtitle="Le mois à planifier, la semaine à tenir, les comptes qui vont commander"
       tabs={
         <Suspense>
         <HubTabs
           items={[
             { href: "/planning", label: "Mois", exact: true, hint: "Prévisionnel et opportunités à répartir sur les mois" },
             { href: "/planning/semaine", label: "Semaine", hint: "Visites, appels et temps administratif" },
+            { href: "/planning/chances", label: "Chances", hint: "Qui va commander dans les 1, 3 ou 6 mois — et pourquoi" },
           ]}
         />
         </Suspense>

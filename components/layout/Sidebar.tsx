@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity,
   CalendarClock,
   ChevronsLeft,
   ChevronsRight,
@@ -39,14 +38,16 @@ type NavGroup = { title: string; items: NavItem[] };
 
 const GROUPS: NavGroup[] = [
   {
-    // Un seul groupe : à cinq entrées, des rubriques n'apporteraient que du
-    // bruit. Les sous-écrans vivent en onglets dans chaque hub.
+    // Un seul groupe : à quatre entrées, des rubriques n'apporteraient que
+    // du bruit. Les sous-écrans vivent en onglets dans chaque hub — et
+    // l'analyse n'est plus une destination à part : les chances de commande
+    // sont dans Planning (c'est là qu'on s'en sert), les produits, personas
+    // et prospects dans Comptes.
     title: "",
     items: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard, hint: "Vue d'ensemble du secteur" },
-      { href: "/planning", label: "Planning", icon: CalendarClock, hint: "Le mois à planifier, la semaine à tenir" },
-      { href: "/comptes", label: "Comptes", icon: Users, hint: "Liste, carte et matrice produit" },
-      { href: "/analyse", label: "Analyse", icon: Activity, hint: "Probabilités, SonarScore, personas, concurrence" },
+      { href: "/planning", label: "Planning", icon: CalendarClock, hint: "Le mois, la semaine, les chances de commande" },
+      { href: "/comptes", label: "Comptes", icon: Users, hint: "Liste, carte, produits, prospects" },
       { href: "/parametres", label: "Paramètres", icon: Settings, hint: "Objectifs, import, correspondances" },
     ],
   },
