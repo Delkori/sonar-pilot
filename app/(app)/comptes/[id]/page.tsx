@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { PageShell } from "@/components/layout/PageShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { AccountActionsPanel } from "@/components/comptes/AccountActionsPanel";
-import { ForecastPanel } from "@/components/comptes/ForecastPanel";
+import { MonthlyPanels } from "@/components/comptes/MonthlyPanels";
 import { TargetingScoreCard } from "@/components/comptes/TargetingScoreCard";
 import { ObjectivesCard } from "@/components/comptes/ObjectivesCard";
 import { EditableAccountCard } from "@/components/comptes/EditableAccountCard";
@@ -182,26 +182,7 @@ export default async function FicheComptePage({ params }: { params: Promise<{ id
             <AccountActionsPanel accountId={id} initialActions={actions} />
           </Card>
 
-          <Card className="overflow-hidden">
-            <CardHeader>
-              <CardTitle>Objectifs mensuels</CardTitle>
-            </CardHeader>
-            <ForecastPanel accountId={id} account={acc} initialForecasts={forecasts} kind="objectif" />
-          </Card>
-
-          <Card className="overflow-hidden">
-            <CardHeader>
-              <CardTitle>Prévisionnel mensuel</CardTitle>
-            </CardHeader>
-            <ForecastPanel accountId={id} account={acc} initialForecasts={forecasts} kind="prevision" monthlySales={monthlySales} />
-          </Card>
-
-          <Card className="overflow-hidden">
-            <CardHeader>
-              <CardTitle>Réalisé mensuel</CardTitle>
-            </CardHeader>
-            <ForecastPanel accountId={id} account={acc} initialForecasts={forecasts} kind="realise" monthlySales={monthlySales} />
-          </Card>
+          <MonthlyPanels accountId={id} account={acc} initialForecasts={forecasts} monthlySales={monthlySales} />
 
           <OrderHistoryCard sales={monthlySales} />
 

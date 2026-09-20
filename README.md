@@ -236,7 +236,7 @@ directement.
 
 ## Probabilités de commande
 
-Onglet **Analyse › Probabilités** : la chance que chaque compte commande
+Onglet **Planning › Chances** : la chance que chaque compte commande
 dans les 1, 3 ou 6 prochains mois, apprise sur l'historique réel du
 portefeuille — pas un barème à poids fixes.
 
@@ -291,7 +291,7 @@ Le dossier contient quatre exports JSON de Supabase (`accounts.json`,
 attendues en tête de `scripts/evaluate-probability.ts`). Le script ne
 touche pas à la base. Il donne :
 
-1. **l'évaluation interne**, celle qu'affiche l'onglet Analyse (fenêtre
+1. **l'évaluation interne**, celle qu'affiche l'onglet Chances (fenêtre
    des 6 derniers mois tenue à l'écart de l'apprentissage) ;
 2. **un test en aveugle à origines glissantes** : le modèle est réappris
    à chaque mois T du passé avec les seules données connues à T, puis
@@ -303,7 +303,7 @@ touche pas à la base. Il donne :
 3. les poids appris par niveau de critère ;
 4. le taux de réalisation des lignes du prévisionnel (saisies / générées).
 
-L'onglet Analyse affiche la fiabilité mesurée **sur les comptes ayant déjà
+L'onglet Chances affiche la fiabilité mesurée **sur les comptes ayant déjà
 commandé** (`evaluationClients`) dès que la fenêtre en compte au moins 30 :
 l'évaluation globale, qui inclut les comptes sans aucune vente que le modèle
 écarte sans mérite, flatte l'AUC (0,94 contre 0,8).
@@ -319,19 +319,33 @@ règle naïve en score de Brier, seulement en classement. Le critère
 « prévision saisie » n'a encore aucun poids : les prévisions manuelles
 datent de juillet 2026, aucune n'est encore observable à l'apprentissage.
 
-## Navigation : cinq entrées
+## Navigation : quatre entrées, sept onglets
 
-Douze écrans ont été regroupés en cinq entrées ; les sous-écrans sont des
+Douze écrans ont été regroupés en quatre entrées ; les sous-écrans sont des
 onglets, chacun restant une route à part entière (URL partageable, bouton
-précédent, données chargées par onglet seulement).
+précédent, données chargées par onglet seulement). Le principe : une entrée
+par geste de gestion du secteur, pas par famille de données. L'ancien hub
+« Analyse » a été dissous — les chances de commande servent à planifier,
+elles vivent dans Planning ; produits, personas et prospects servent à
+préparer une visite, ils vivent dans Comptes.
 
 | Entrée | Onglets | Anciennes adresses (redirigées) |
 |---|---|---|
 | Dashboard | — | |
-| Planning | Mois · Semaine | `/pilotage`, `/relances` |
-| Comptes | Liste · Carte · Produits (+ fiche `/comptes/[id]`) | `/mapping`, `/matrice` |
-| Analyse | Probabilités · SonarScore · Personas · Concurrence | `/probabilites`, `/sonarscore`, `/personas`, `/sponsoring` |
-| Paramètres | Objectifs, personas, import, correspondances | `/admin/*` |
+| Planning | Mois · Semaine · Chances | `/pilotage`, `/relances`, `/probabilites`, `/analyse` |
+| Comptes | Liste · Carte · Produits · Prospects (+ fiche `/comptes/[id]`) | `/mapping`, `/matrice`, `/personas`, `/sponsoring`, `/analyse/*` |
+| Paramètres | Objectifs, personas, import (+ correspondances) | `/admin/*` |
+
+- **Chances** (ex-Probabilités) : qui va commander dans les 1, 3 ou 6 mois,
+  critère par critère, avec la fiabilité mesurée. Le SonarScore (bêta) n'est
+  plus un onglet : c'est un outil avancé, accessible par un lien en bas de
+  Chances (`/planning/chances/sonarscore`).
+- **Produits** réunit la matrice produit (qui a acheté quoi, références vs
+  N-1) et les personas (modèle d'achat par spécialité, références à proposer
+  à chaque compte) : c'est la même question de préparation de visite.
+- **Prospects** (ex-Concurrence) : les médecins sponsorisés de vos
+  départements absents de votre Salesforce, et l'investissement des
+  laboratoires sur le secteur.
 
 **Recherche globale.** Le champ en tête de la barre latérale (raccourci
 ⌘K / Ctrl+K) cherche un compte par nom, code SAP ou ville et ouvre sa
@@ -407,6 +421,14 @@ et la même recherche, et un lien vers `/comptes?tier=Pro` depuis le
 Planning arrive directement filtré. Hook : `lib/hooks/useUrlFilter.ts`
 (écrit l'URL sans rechargement) ; les onglets de hub reportent la chaîne de
 requête.
+
+## Fiche compte — mois par mois
+
+Les trois lectures mensuelles du compte (prévisionnel, objectifs, réalisé)
+tiennent dans une seule carte « Mois par mois », avec un sélecteur, au lieu
+de trois cartes de douze lignes empilées qui faisaient défiler la fiche sur
+trois écrans. Les trois panneaux restent montés : une saisie en cours ne
+disparaît pas de l'écran quand on change de vue.
 
 ## Comptes › Carte
 
