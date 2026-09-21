@@ -39,7 +39,15 @@ import {
   Wand2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
-import { currentMonthIndex, fromMonthIndex, monthIndex, monthsFrom, MONTHS_LONG } from "@/lib/dates";
+import {
+  currentMonthIndex,
+  fromMonthIndex,
+  monthIndex,
+  monthsFrom,
+  quarterOf,
+  quarterStartIndex,
+  MONTHS_LONG,
+} from "@/lib/dates";
 import { revenueByAccountYear, revenueForYear } from "@/lib/revenue";
 import { createFeatureContext, CRITERIA, probabilityForMonth } from "@/lib/probability";
 import type { AnticipatedOrder, Features, ProbabilityModel } from "@/lib/probability";
@@ -117,10 +125,19 @@ export function PilotageBoard({
   // mois en cours, ce qui interdisait de revenir sur un trimestre écoulé
   // pour confronter le prévisionnel au réalisé.
   const nowIdx = useMemo(() => currentMonthIndex(), []);
-  const [startIdx, setStartIdx] = useState(nowIdx);
+  // Début du trimestre calendaire en cours (juillet si on est en septembre) —
+  // l'horizon par défaut est Trimestre : le premier affichage doit déjà être
+  // calé sur un vrai trimestre, pas sur le mois du jour tel quel.
+  const nowQuarterStartIdx = useMemo(() => quarterStartIndex(nowIdx), [nowIdx]);
+  const [startIdx, setStartIdx] = useState(() => (horizon === 3 ? nowQuarterStartIdx : nowIdx));
 
   const months = useMemo(() => monthsFrom(startIdx, horizon), [startIdx, horizon]);
   const surLeMoisCourant = startIdx === nowIdx;
+  // En horizon Trimestre, « la période actuelle » se juge au trimestre
+  // (startIdx déjà calé sur son premier mois), pas à l'égalité stricte avec
+  // le mois du jour — sur un compte en septembre, le trimestre en cours
+  // démarre en juillet, jamais égal à `nowIdx`.
+  const surLaPeriodeCourante = horizon === 3 ? startIdx === nowQuarterStartIdx : surLeMoisCourant;
   // Période entièrement écoulée : la génération y produirait des « prévisions »
   // pour des mois déjà facturés.
   const periodePassee = startIdx + horizon - 1 < nowIdx;
@@ -145,8 +162,18 @@ export function PilotageBoard({
 
   const debut = fromMonthIndex(startIdx);
 
-  function allerA(index: number) {
-    setStartIdx(Math.min(Math.max(index, minIdx), maxIdx));
+  /**
+   * Se place sur `index`. En horizon Trimestre, n'importe quel mois exact
+   * choisi (mars, dans un sélecteur qui liste les douze mois) retombe sur
+   * le début du vrai trimestre calendaire qui le contient (janvier) : le
+   * choix reste libre, mais « trimestre » désigne toujours janvier-février-
+   * mars, avril-mai-juin, etc., jamais une fenêtre glissante de 3 mois qui
+   * démarrerait n'importe où.
+   */
+  function allerA(index: number, forceQuarterSnap = horizon === 3) {
+    const clamped = Math.min(Math.max(index, minIdx), maxIdx);
+    const resolved = forceQuarterSnap ? Math.max(quarterStartIndex(clamped), minIdx) : clamped;
+    setStartIdx(resolved);
   }
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a] as const)), [accounts]);
 
@@ -367,19 +394,24 @@ export function PilotageBoard({
 
   // « ce trimestre » ne veut plus rien dire dès qu'on se place ailleurs que
   // sur le mois courant : on nomme alors la période telle qu'elle est.
-  const periodLabel = surLeMoisCourant
-    ? horizon === 1
-      ? "ce mois"
-      : horizon === 3
-        ? "ce trimestre"
-        : horizon === 6
-          ? "ce semestre"
-          : horizon === 12
-            ? "cette année"
-            : "les 2 prochaines années"
-    : horizon === 1
-      ? `${MONTHS_LONG[debut.month - 1].toLowerCase()} ${debut.year}`
-      : `${horizon} mois à partir de ${MONTHS_LONG[debut.month - 1].toLowerCase()} ${debut.year}`;
+  // En horizon Trimestre, `debut` est toujours calé sur un vrai trimestre
+  // calendaire (janvier, avril, juillet ou octobre — voir `allerA`) : le
+  // libellé peut donc nommer le trimestre exact (« T3 2026 ») plutôt que
+  // la formulation vague d'une fenêtre de « 3 mois à partir de ».
+  const periodLabel =
+    horizon === 3
+      ? `T${quarterOf(debut.month)} ${debut.year}${surLaPeriodeCourante ? " (en cours)" : ""}`
+      : surLeMoisCourant
+        ? horizon === 1
+          ? "ce mois"
+          : horizon === 6
+            ? "ce semestre"
+            : horizon === 12
+              ? "cette année"
+              : "les 2 prochaines années"
+        : horizon === 1
+          ? `${MONTHS_LONG[debut.month - 1].toLowerCase()} ${debut.year}`
+          : `${horizon} mois à partir de ${MONTHS_LONG[debut.month - 1].toLowerCase()} ${debut.year}`;
 
   const accountSegment = useMemo(
     () => new Map(accounts.map((a) => [a.id, a.segment] as const)),
@@ -1067,14 +1099,16 @@ export function PilotageBoard({
         {/* ── Choix du mois ─────────────────────────────────────────────
             En tête, avant tout le reste : c'est le premier geste du pilotage. */}
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-foreground">{horizon === 1 ? "Mois affiché :" : "À partir de :"}</span>
+          <span className="text-xs font-medium text-foreground">
+            {horizon === 1 ? "Mois affiché :" : horizon === 3 ? "Trimestre :" : "À partir de :"}
+          </span>
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => allerA(startIdx - 1)}
+              onClick={() => allerA(startIdx - (horizon === 3 ? 3 : 1))}
               disabled={startIdx <= minIdx}
-              aria-label="Mois précédent"
-              title="Mois précédent"
+              aria-label={horizon === 3 ? "Trimestre précédent" : "Mois précédent"}
+              title={horizon === 3 ? "Trimestre précédent" : "Mois précédent"}
               className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ChevronLeft size={15} />
@@ -1082,7 +1116,8 @@ export function PilotageBoard({
             <select
               value={debut.month}
               onChange={(e) => allerA(monthIndex(debut.year, Number(e.target.value)))}
-              aria-label="Mois de départ"
+              aria-label={horizon === 3 ? "Mois de référence du trimestre" : "Mois de départ"}
+              title={horizon === 3 ? "Choisissez n'importe quel mois : le trimestre calendaire qui le contient s'affiche" : undefined}
               className={cn(fieldClass, "px-2 text-xs")}
             >
               {MONTHS_LONG.map((libelle, i) => (
@@ -1105,44 +1140,55 @@ export function PilotageBoard({
             </select>
             <button
               type="button"
-              onClick={() => allerA(startIdx + 1)}
+              onClick={() => allerA(startIdx + (horizon === 3 ? 3 : 1))}
               disabled={startIdx >= maxIdx}
-              aria-label="Mois suivant"
-              title="Mois suivant"
+              aria-label={horizon === 3 ? "Trimestre suivant" : "Mois suivant"}
+              title={horizon === 3 ? "Trimestre suivant" : "Mois suivant"}
               className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ChevronRight size={15} />
             </button>
           </div>
+          {horizon === 3 && (
+            <span className="text-xs text-muted-foreground">
+              Quel que soit le mois choisi, le trimestre calendaire complet qui le contient s&apos;affiche.
+            </span>
+          )}
 
           {/* Décalage d'une période entière — le geste le plus courant quand on
-              compare un trimestre au précédent. */}
-          <button
-            type="button"
-            onClick={() => allerA(startIdx - horizon)}
-            disabled={startIdx - horizon < minIdx}
-            title={`Reculer de ${horizon} mois`}
-            className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            − {horizon} mois
-          </button>
-          <button
-            type="button"
-            onClick={() => allerA(startIdx + horizon)}
-            disabled={startIdx + horizon > maxIdx}
-            title={`Avancer de ${horizon} mois`}
-            className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            + {horizon} mois
-          </button>
+              compare un trimestre au précédent. Redondant avec les chevrons en
+              horizon Trimestre (les deux avancent d'un trimestre) : gardé pour
+              les autres horizons, où le pas est plus grand qu'un simple mois. */}
+          {horizon !== 3 && (
+            <>
+              <button
+                type="button"
+                onClick={() => allerA(startIdx - horizon)}
+                disabled={startIdx - horizon < minIdx}
+                title={`Reculer de ${horizon} mois`}
+                className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                − {horizon} mois
+              </button>
+              <button
+                type="button"
+                onClick={() => allerA(startIdx + horizon)}
+                disabled={startIdx + horizon > maxIdx}
+                title={`Avancer de ${horizon} mois`}
+                className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                + {horizon} mois
+              </button>
+            </>
+          )}
 
-          {!surLeMoisCourant && (
+          {!surLaPeriodeCourante && (
             <button
               type="button"
               onClick={() => allerA(nowIdx)}
               className="flex items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-2.5 py-1.5 text-xs font-medium text-primary-700 transition-colors hover:bg-primary-100"
             >
-              <CalendarClock size={13} /> Revenir au mois courant
+              <CalendarClock size={13} /> {horizon === 3 ? "Revenir au trimestre en cours" : "Revenir au mois courant"}
             </button>
           )}
 
@@ -1211,7 +1257,14 @@ export function PilotageBoard({
           {([1, 3, 6, 12, 24] as const).map((h) => (
             <button
               key={h}
-              onClick={() => setHorizon(h)}
+              onClick={() => {
+                setHorizon(h);
+                // Passer sur Trimestre recale aussitôt le mois affiché sur
+                // le début du trimestre calendaire en cours (allerA(index,
+                // true) force le calage — la valeur par défaut du paramètre
+                // se base sur l'ancien `horizon`, pas encore à jour ici).
+                if (h === 3) allerA(startIdx, true);
+              }}
               className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
                 horizon === h
                   ? "border-primary bg-primary-50 text-primary-700"

@@ -16,15 +16,12 @@ import { SortableTh } from "@/components/ui/SortableTh";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import type { Account, AccountForecast, ForecastKind } from "@/types/database";
 import { Plus, Trash2, Loader2, Sparkles, CalendarRange, CalendarPlus, DownloadCloud } from "lucide-react";
-import { MONTHS_SHORT } from "@/lib/dates";
+import { MONTHS_SHORT, quarterOf } from "@/lib/dates";
 
 
 type Period = "mois" | "trimestre" | "semestre" | "annee";
 type SortKey = "period" | "boites" | "ca";
 
-function quarterOf(month: number) {
-  return Math.ceil(month / 3);
-}
 function semesterOf(month: number) {
   return month <= 6 ? 1 : 2;
 }

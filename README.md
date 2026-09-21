@@ -367,6 +367,16 @@ trimestre écoulé à son réalisé, mois par mois.
 - les bornes proposées vont de la plus ancienne donnée connue (vente réelle
   ou prévision saisie) à deux ans devant.
 
+**Horizon Trimestre = vrai trimestre calendaire.** Janvier-février-mars est
+le premier, avril-juin le deuxième, juillet-septembre le troisième,
+octobre-décembre le quatrième (`lib/dates.ts` : `quarterOf`,
+`quarterStartIndex` — testés, seule définition du trimestre dans
+l'application). Le sélecteur mois reste libre : choisir n'importe quel mois
+(mars, par exemple) affiche le trimestre calendaire complet qui le contient
+(janvier-février-mars), jamais une fenêtre glissante de 3 mois qui
+démarrerait sur le mois cliqué. Les flèches `‹`/`›` avancent alors d'un
+trimestre entier, et le libellé nomme le trimestre exact (« T3 2026 »).
+
 Chaque colonne indique si le mois est **en cours** ou **clos**. Sur une
 période entièrement écoulée, « Générer le prévisionnel du portefeuille » est
 désactivé : il y créerait des prévisions pour des mois déjà facturés. La

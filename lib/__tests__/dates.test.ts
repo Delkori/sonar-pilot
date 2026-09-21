@@ -11,6 +11,9 @@ import {
   monthLong,
   monthShort,
   monthsFrom,
+  quarterOf,
+  quarterStartIndex,
+  quarterStartMonth,
   toDateStr,
   weeksSince,
   DAY_MS,
@@ -156,5 +159,38 @@ describe("monthsFrom", () => {
   test("currentMonthIndex situe bien le mois en cours", () => {
     const now = new Date(2026, 8, 11); // septembre 2026
     assert.equal(currentMonthIndex(now), monthIndex(2026, 9));
+  });
+});
+
+describe("trimestre calendaire", () => {
+  test("quarterOf : janvier-février-mars sont le premier trimestre, etc.", () => {
+    assert.deepEqual(
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(quarterOf),
+      [1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4]
+    );
+  });
+
+  test("quarterStartMonth renvoie janvier, avril, juillet ou octobre", () => {
+    assert.equal(quarterStartMonth(1), 1);
+    assert.equal(quarterStartMonth(3), 1);
+    assert.equal(quarterStartMonth(4), 4);
+    assert.equal(quarterStartMonth(9), 7);
+    assert.equal(quarterStartMonth(12), 10);
+  });
+
+  test("quarterStartIndex fait retomber n'importe quel mois sur le début de son trimestre", () => {
+    // Choisir mars, comme janvier ou février, ramène tous au même trimestre :
+    // celui de janvier — la définition ne dépend pas du mois exact cliqué.
+    const janvier = monthIndex(2026, 1);
+    for (const m of [1, 2, 3]) assert.equal(quarterStartIndex(monthIndex(2026, m)), janvier);
+    const octobre = monthIndex(2026, 10);
+    for (const m of [10, 11, 12]) assert.equal(quarterStartIndex(monthIndex(2026, m)), octobre);
+  });
+
+  test("quarterStartIndex traverse correctement le changement d'année", () => {
+    // Décembre 2025 et janvier 2026 sont dans des trimestres différents,
+    // pas confondus par une arithmétique modulo mal recalée sur l'année.
+    assert.equal(quarterStartIndex(monthIndex(2025, 12)), monthIndex(2025, 10));
+    assert.equal(quarterStartIndex(monthIndex(2026, 1)), monthIndex(2026, 1));
   });
 });

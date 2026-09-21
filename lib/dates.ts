@@ -114,3 +114,31 @@ export function currentMonthIndex(now: Date = new Date()): number {
 export function monthsFrom(startIndex: number, count: number): { year: number; month: number }[] {
   return Array.from({ length: Math.max(count, 0) }, (_, i) => fromMonthIndex(startIndex + i));
 }
+
+/**
+ * Trimestre calendaire (1 à 4) d'un mois — janvier-février-mars = 1,
+ * avril-mai-juin = 2, juillet-août-septembre = 3, octobre-novembre-
+ * décembre = 4. Seule définition du trimestre dans l'application ;
+ * `lib/data`/écrans qui parlent de « trimestre » doivent passer par ici,
+ * pas recalculer leur propre découpage.
+ */
+export function quarterOf(month: number): number {
+  return Math.ceil(month / 3);
+}
+
+/** Premier mois (1, 4, 7 ou 10) du trimestre calendaire contenant `month`. */
+export function quarterStartMonth(month: number): number {
+  return (quarterOf(month) - 1) * 3 + 1;
+}
+
+/**
+ * Index absolu du premier mois du trimestre calendaire contenant `monthIdx`.
+ * Sert à faire retomber n'importe quel mois choisi (mars, par ex.) sur le
+ * début du trimestre réel qui le contient (janvier) — le pilotage affiche
+ * ainsi toujours un vrai trimestre calendaire, quel que soit le mois exact
+ * sur lequel on clique.
+ */
+export function quarterStartIndex(monthIdx: number): number {
+  const { year, month } = fromMonthIndex(monthIdx);
+  return monthIndex(year, quarterStartMonth(month));
+}
