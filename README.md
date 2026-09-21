@@ -422,6 +422,37 @@ Planning arrive directement filtré. Hook : `lib/hooks/useUrlFilter.ts`
 (écrit l'URL sans rechargement) ; les onglets de hub reportent la chaîne de
 requête.
 
+## Dashboard — choisir ce qu'on y voit
+
+Le Dashboard est une grille de widgets dont chacun choisit la composition,
+depuis « Choisir les widgets » : cocher ce qu'on veut voir, ordonner (flèches
+ou glisser-déposer), largeur demi ou pleine, et trois préréglages —
+**Terrain** (la semaine, les chances, les prioritaires, les relances),
+**Pilotage** (courbe, objectif, contrats, top et flop, évolutions),
+**Complet**. La mise en page est enregistrée pour l'utilisateur
+(`user_preferences.dashboard_layout`, migration `0021`, une ligne par
+utilisateur protégée par RLS) : elle le suit d'un appareil à l'autre.
+
+Registre des widgets, normalisation et opérations dans
+`lib/dashboard-layout.ts` (testé) : une préférence ancienne ou corrompue
+retombe sur la mise en page proposée, un widget retiré du code disparaît,
+un widget nouveau apparaît masqué. La mise en page proposée met en tête ce
+qu'un responsable de secteur regarde chaque matin :
+
+- **Chiffres clés** : CA réalisé et rythme vs N-1, objectif, écart,
+  potentiel à capter ;
+- **Cette semaine** : rendez-vous des sept prochains jours (Planning ›
+  Semaine) et prévisions du mois sans rendez-vous ni mode de contact ;
+- **Chances de commande** : les dix comptes non perdus les plus probables à
+  trois mois, avec le CA attendu — le modèle est calculé côté serveur ;
+- puis courbe mensuelle, comptes prioritaires, relances en retard, comptes
+  perdus, objectif annuel, récurrence, saisie rapide, contrats.
+
+Les widgets sans données (courbe sans historique mensuel, contrats sans
+compte sous contrat, sponsoring sans Nexora) se retirent d'eux-mêmes et le
+panneau l'indique. Le filtre période et le filtre département, en tête,
+s'appliquent à tous les widgets.
+
 ## Fiche compte — mois par mois
 
 Les trois lectures mensuelles du compte (prévisionnel, objectifs, réalisé)

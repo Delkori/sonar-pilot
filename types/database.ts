@@ -220,6 +220,13 @@ export type PlanningEvent = {
   updated_at: string;
 };
 
+/** Préférences par utilisateur — `dashboard_layout` est normalisé par lib/dashboard-layout.ts. */
+export type UserPreferences = {
+  user_id: string;
+  dashboard_layout: unknown | null;
+  updated_at: string;
+};
+
 export type AccountProductPurchase = {
   id: string;
   account_id: string;
@@ -254,6 +261,7 @@ export type Database = {
       sector_objectives: Table<SectorObjective>;
       planning_events: Table<PlanningEvent>;
       account_product_purchases: Table<AccountProductPurchase>;
+      user_preferences: Table<UserPreferences>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

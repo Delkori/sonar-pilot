@@ -100,6 +100,12 @@ export async function getSectorObjectives(db: Db): Promise<SectorObjective[]> {
   return fetchAll<SectorObjective>(() => db.from("sector_objectives").select("*"));
 }
 
+/** Mise en page du dashboard de l'utilisateur connecté (brute — à normaliser). */
+export async function getDashboardLayout(db: Db): Promise<unknown> {
+  const { data } = await db.from("user_preferences").select("dashboard_layout").maybeSingle();
+  return data?.dashboard_layout ?? null;
+}
+
 /** Nombre de correspondances de nom restant à arbitrer manuellement. */
 export async function getPendingMatchCount(db: Db): Promise<number> {
   const { count } = await db

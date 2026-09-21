@@ -1,13 +1,19 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { PageContent } from "@/components/layout/PageShell";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { PriorityAccountsTable } from "@/components/dashboard/PriorityAccountsTable";
 import { QuickActionCard } from "@/components/dashboard/QuickActionCard";
 import { DepartmentBreakdown } from "@/components/dashboard/DepartmentBreakdown";
 import { InteractiveMonthlyChart } from "@/components/dashboard/InteractiveMonthlyChart";
-import { CustomizableLayout, type LayoutBlock } from "@/components/dashboard/CustomizableLayout";
+import { DashboardGrid } from "@/components/dashboard/DashboardGrid";
+import { useDashboardLayout } from "@/components/dashboard/useDashboardLayout";
+import { WeekAheadCard, type PlanningEventLite } from "@/components/dashboard/WeekAheadCard";
+import { OrderChancesCard, type ChanceRow } from "@/components/dashboard/OrderChancesCard";
+import type { DashboardLayout, WidgetId } from "@/lib/dashboard-layout";
+import { appointmentKey, appointmentsByAccountMonth } from "@/lib/appointments";
 import { TopFlopClientsCard } from "@/components/dashboard/TopFlopClientsCard";
 import { ProductSalesComparison, type ProductRow } from "@/components/dashboard/ProductSalesComparison";
 import { AnnualObjectiveCard } from "@/components/dashboard/AnnualObjectiveCard";
@@ -17,7 +23,7 @@ import type { CompetitorAmount } from "@/lib/nexora/queries";
 import { formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { DEPT_NAMES, departmentCodeOf } from "@/lib/geo";
 import { availableYears, referenceYears, revenueByAccountYear, revenueForYear } from "@/lib/revenue";
-import { MONTHS_SHORT } from "@/lib/dates";
+import { monthIndex, MONTHS_SHORT } from "@/lib/dates";
 import { suggestMonthlyForecast } from "@/lib/forecast";
 import { computeTargetingScore, ACTION_META } from "@/lib/scoring";
 import type { ActionCode } from "@/lib/scoring";
@@ -54,6 +60,8 @@ interface ForecastRow {
   month: number;
   boites_prevues: number | null;
   ca_prevu: number | null;
+  /** Présent sur les prévisions réelles, absent des objectifs secteur remis au même format. */
+  contact_mode?: string | null;
 }
 
 export function DashboardClient({
@@ -64,6 +72,11 @@ export function DashboardClient({
   objectifs,
   competitorAmounts = [],
   lastImportLabel,
+  chances,
+  chancesHorizon,
+  planningEvents,
+  today,
+  initialLayout,
 }: {
   accounts: Account[];
   monthlySales: MonthlySale[];
@@ -72,7 +85,14 @@ export function DashboardClient({
   objectifs: ForecastRow[];
   competitorAmounts?: CompetitorAmount[];
   lastImportLabel: string;
+  chances: ChanceRow[];
+  chancesHorizon: number;
+  planningEvents: PlanningEventLite[];
+  /** Jour de Paris, `YYYY-MM-DD`, décidé par le serveur. */
+  today: string;
+  initialLayout: DashboardLayout;
 }) {
+  const { layout, update: updateLayout, status: layoutStatus } = useDashboardLayout(initialLayout);
   // Années proposées et année par défaut déduites des données, plus jamais
   // écrites en dur : une liste figée à [2024, 2025, 2026] cessait d'afficher
   // l'année en cours au 1er janvier 2027.
@@ -351,10 +371,296 @@ export function DashboardClient({
       ? `CA réalisé YTD ${year} (à fin ${MONTHS_SHORT[ytdPace.cutoffMonth - 1]})`
       : `CA réalisé ${year}`;
 
+  const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a] as const)), [accounts]);
+
+  // Prévisions du mois en cours ni commandées, ni pourvues d'un rendez-vous
+  // ou d'un mode de contact — même règle que Planning › Mois.
+  const sansRendezVous = useMemo(() => {
+    const [ty, tm] = today.split("-").map(Number);
+    const idx = monthIndex(ty, tm);
+    const rdv = appointmentsByAccountMonth(planningEvents);
+    const commande = new Set(monthlySales.filter((s) => s.year === ty && s.month === tm && s.ca > 0).map((s) => s.account_id));
+    return forecasts
+      .filter((f) => f.year === ty && f.month === tm && !f.contact_mode && !commande.has(f.account_id) && filteredAccountIds.has(f.account_id))
+      .filter((f) => !rdv.has(appointmentKey(f.account_id, idx)))
+      .map((f) => ({ account: accountById.get(f.account_id), ca: f.ca_prevu ?? 0 }))
+      .filter((x): x is { account: Account; ca: number } => !!x.account)
+      .sort((a, b) => b.ca - a.ca);
+  }, [today, planningEvents, monthlySales, forecasts, filteredAccountIds, accountById]);
+
+  const chancesFiltrees = selectedDept ? chances.filter((c) => filteredAccountIds.has(c.accountId)) : chances;
+
+  // ── Widgets : un nœud par identifiant du registre (lib/dashboard-layout),
+  // `null` quand les données présentes ne permettent rien d'afficher.
+  const widgets: Record<WidgetId, ReactNode | null> = {
+    kpis: (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          label={displayedCaLabel}
+          value={formatEUR(displayedCa)}
+          trend={
+            month === null && ytdPace !== null
+              ? `${formatEUR(ytdPace.prev)} en ${year - 1} à la même période` +
+                (ytdPace.growth !== null
+                  ? ` — ${ytdPace.growth >= 0 ? "avance" : "retard"} de ${formatPct(Math.abs(ytdPace.growth))}`
+                  : "")
+              : undefined
+          }
+          tone={
+            month === null && ytdPace?.growth !== null && ytdPace !== null
+              ? ytdPace.growth! >= 0
+                ? "positive"
+                : "negative"
+              : "default"
+          }
+          icon={TrendingUp}
+        />
+        {hasObjectifData ? (
+          <>
+            <KpiCard
+              label="Objectif CA (période)"
+              value={formatEUR(objectifCaSelected)}
+              trend={atteinteCa !== null ? `${formatPct(atteinteCa)} atteint` : undefined}
+              tone={atteinteCa !== null && atteinteCa >= 1 ? "positive" : "default"}
+              icon={Target}
+            />
+            <KpiCard
+              label="Écart vs objectif"
+              value={`${ecartCa > 0 ? "+" : ""}${formatEUR(ecartCa)}`}
+              tone={ecartCa < 0 ? "negative" : "positive"}
+              icon={AlertTriangle}
+            />
+          </>
+        ) : (
+          <>
+            <KpiCard label="Taux de pénétration" value={formatPct(tauxPenetration)} trend={`${clientsActifs} actifs sur ${filteredAccounts.length}`} icon={Percent} />
+            <KpiCard label="Comptes à risque" value={formatNumber(clientsAlerte.length)} tone="negative" icon={AlertTriangle} />
+          </>
+        )}
+        <KpiCard
+          label="CA potentiel à capter"
+          value={formatEUR(caPotentielTotal)}
+          trend={`Potentiel total secteur : ${formatEUR(caPotentielGlobal)}`}
+          icon={Wallet}
+        />
+      </div>
+    ),
+    semaine: <WeekAheadCard events={planningEvents} accountById={accountById} today={today} sansRendezVous={sansRendezVous} />,
+    chances: <OrderChancesCard rows={chancesFiltrees} horizon={chancesHorizon} />,
+    "monthly-chart": hasMonthlyData ? (
+      <InteractiveMonthlyChart
+        year={year}
+        caByMonth={caByMonthOfYear}
+        objectifByMonth={objectifByMonthOfYear}
+        forecastByMonth={forecastByMonthOfYear.ca}
+        selectedMonth={month}
+        onSelectMonth={setMonth}
+      />
+    ) : null,
+    "annual-objective": <AnnualObjectiveCard caByMonth={caByMonthOfYear} objectifByMonth={objectifByMonthOfYear} year={year} />,
+    recurrence: <OrderRecurrenceCard monthlySales={monthlySales} accountIds={filteredAccountIds} />,
+    competitor: competitorAmounts.length > 0 ? <CompetitorShareCard amounts={competitorAmounts} /> : null,
+    department: (
+      <DepartmentBreakdown accounts={accounts} caForAccount={caForYear} selectedDept={selectedDept} onSelectDept={setSelectedDept} />
+    ),
+    "action-distribution": (
+      <Card>
+        <CardHeader>
+          <CardTitle>Répartition par action recommandée</CardTitle>
+          <CardDescription>Calculée en direct depuis le score de ciblage — {filteredAccounts.length} comptes</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {actionDistribution.map((b) => (
+              <div key={b.code} className="rounded-lg border border-border p-3" style={{ borderTopColor: b.meta.color, borderTopWidth: 3 }}>
+                <p className="text-lg font-semibold text-foreground">{b.count}</p>
+                <p className="text-xs text-muted-foreground">{b.meta.label}</p>
+                {b.caNonCapte > 0 && <p className="mt-1 text-[10px] text-muted-foreground">{formatEUR(b.caNonCapte)}</p>}
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    ),
+    "secondary-kpis": (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard label="CA moyen / compte actif" value={formatEUR(caMoyenParCompteActif)} icon={TrendingUp} />
+        <KpiCard label="Concentration segment A" value={formatPct(concentrationSegmentA)} icon={Crown} />
+        <KpiCard label="Clients actifs" value={formatNumber(clientsActifs)} icon={Users} />
+        <KpiCard label="Comptes à risque" value={formatNumber(clientsAlerte.length)} tone="negative" icon={AlertTriangle} />
+      </div>
+    ),
+    tiers: hasTierData ? (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Suivi Premium / Pro / Pro+</CardTitle>
+            <CardDescription>Comptes sous contrat de partenariat — CA {year} vs potentiel</CardDescription>
+          </div>
+          <Crown size={18} className="text-primary" />
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {tierStats.map((t) => {
+              const atteinte = t.potentiel > 0 ? Math.min(t.ca / t.potentiel, 1) : 0;
+              return (
+                <div key={t.tier} className="rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-foreground">{t.tier}</span>
+                    <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                      {t.count} compte(s)
+                    </span>
+                  </div>
+                  <p className="mt-2 text-lg font-semibold text-foreground">{formatEUR(t.ca)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Objectif {formatNumber(t.objectif)} boîtes · Potentiel {formatEUR(t.potentiel)}
+                  </p>
+                  <div className="mt-2 h-1.5 rounded-full bg-surface-muted">
+                    <div
+                      className={`h-1.5 rounded-full ${atteinte >= 0.75 ? "bg-success" : "bg-primary"}`}
+                      style={{ width: `${atteinte * 100}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-[10px] text-muted-foreground">{formatPct(atteinte)} du potentiel capté</p>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    ) : null,
+    "quick-actions": <QuickActionCard accounts={filteredAccounts} />,
+    management: (
+      <Card>
+        <CardHeader>
+          <CardTitle>Segments</CardTitle>
+          <CardDescription>Comptes et CA {year} par segment</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Comptes suivis</span>
+            <span className="font-medium">{formatNumber(filteredAccounts.length)}</span>
+          </div>
+          {(["A", "B", "C", "D", "E"] as const).map((seg) => (
+            <div key={seg} className="flex justify-between">
+              <span className="text-muted-foreground">Segment {seg}</span>
+              <span className="font-medium">
+                {filteredAccounts.filter((a) => a.segment === seg).length} · {formatEUR(caParSegment[seg])}
+              </span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    ),
+    priority: (
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between">
+          <div>
+            <CardTitle>Comptes prioritaires</CardTitle>
+            <CardDescription>Score de ciblage le plus élevé — recalculé en direct</CardDescription>
+          </div>
+          <button
+            onClick={generatePriorityForecasts}
+            disabled={generatingForecasts}
+            title="Propose un prévisionnel 3 mois pour ces comptes prioritaires"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
+          >
+            {generatingForecasts ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            Générer le prévisionnel
+          </button>
+        </CardHeader>
+        {forecastGenerationResult && <p className="px-5 pb-2 text-xs text-muted-foreground">{forecastGenerationResult}</p>}
+        <PriorityAccountsTable accounts={priorityAccounts} />
+      </Card>
+    ),
+    movers: (
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <MoversCard title={`Top 5 croissance (${anneePrecedente} → ${derniereAnnee})`} rows={topCroissance} tone="positive" />
+        <MoversCard title={`Top 5 déclin (${anneePrecedente} → ${derniereAnnee})`} rows={topDeclin} tone="negative" />
+      </div>
+    ),
+    "top-flop": (
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <TopFlopClientsCard
+          title={`Top 10 clients (CA ${anneeEnCours} YTD)`}
+          rows={top10Clients2026}
+          tone="positive"
+          anneeCourante={anneeEnCours}
+          anneePrecedente={derniereAnnee}
+        />
+        <TopFlopClientsCard
+          title={`Flop 10 clients (CA ${anneeEnCours} YTD vs ${derniereAnnee})`}
+          rows={flop10Clients2026}
+          tone="negative"
+          anneeCourante={anneeEnCours}
+          anneePrecedente={derniereAnnee}
+        />
+      </div>
+    ),
+    lost: (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Comptes perdus</CardTitle>
+            <CardDescription>Statut Lost, triés par CA {derniereAnnee} (le plus à regagner en premier)</CardDescription>
+          </div>
+          <UserX size={18} className="text-danger" />
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {lostAccounts.length === 0 && <p className="text-sm text-muted-foreground">Aucun compte perdu 🎉</p>}
+          {lostAccounts.map((a) => (
+            <div key={a.id} className="flex items-center justify-between text-sm">
+              <div>
+                <Link href={`/comptes/${a.id}`} className="text-foreground hover:text-primary">
+                  {a.name}
+                </Link>
+                {a.last_order_date && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    dernière commande {new Date(a.last_order_date).toLocaleDateString("fr-FR")}
+                  </span>
+                )}
+              </div>
+              <span className="text-muted-foreground">{formatEUR(caAnnee(a, derniereAnnee))}</span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    ),
+    overdue: (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Relances en retard</CardTitle>
+            <CardDescription>Comptes actifs sans appel depuis plus de 60 jours</CardDescription>
+          </div>
+          <PhoneMissed size={18} className="text-warning" />
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {overdueCallAccounts.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              {filteredAccounts.some((a) => a.days_since_last_call !== null)
+                ? "Rien en retard, bien joué."
+                : "Importez le fichier Appels pour activer ce suivi."}
+            </p>
+          )}
+          {overdueCallAccounts.map((a) => (
+            <div key={a.id} className="flex items-center justify-between text-sm">
+              <Link href={`/comptes/${a.id}`} className="text-foreground hover:text-primary">
+                {a.name}
+              </Link>
+              <span className="text-warning">{a.days_since_last_call} j</span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    ),
+    products: products.length > 0 ? <ProductSalesComparison products={products} filteredAccountIds={filteredAccountIds} /> : null,
+  };
+
   return (
     <div>
-      {/* Barre de contrôle / filtres */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface px-8 py-3">
+      {/* Barre de contrôle : période et département, valables pour tous les widgets. */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-surface px-4 py-3 sm:px-6 lg:px-8">
         <div className="flex flex-wrap items-center gap-4">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Période</span>
           <div className="flex gap-1">
@@ -382,7 +688,7 @@ export function DashboardClient({
                   month === null ? "bg-primary-100 text-primary-700" : "text-muted-foreground hover:bg-surface-muted"
                 }`}
               >
-                Vue annuelle
+                Année
               </button>
               {monthsForYear.map((m) => (
                 <button
@@ -397,25 +703,21 @@ export function DashboardClient({
               ))}
             </div>
           ) : (
-            <span className="border-l border-border pl-4 text-xs text-muted-foreground">
-              Détail mensuel indisponible
-            </span>
+            <span className="border-l border-border pl-4 text-xs text-muted-foreground">Détail mensuel indisponible</span>
           )}
         </div>
 
-        {/* Filtre départemental */}
         <div className="flex items-center gap-2">
           <MapPin size={16} className="text-primary" />
           <select
             value={selectedDept ?? ""}
             onChange={(e) => setSelectedDept(e.target.value || null)}
+            aria-label="Département"
             className="rounded-md border border-border bg-surface px-3 py-1 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
           >
             <option value="">Tous les départements ({accounts.length} comptes)</option>
             {Object.entries(DEPT_NAMES).map(([code, name]) => {
-              const count = accounts.filter(
-                (a) => (a.department_code || (a.postal_code ? a.postal_code.slice(0, 2) : "")) === code
-              ).length;
+              const count = accounts.filter((a) => departmentCodeOf(a) === code).length;
               if (count === 0) return null;
               return (
                 <option key={code} value={code}>
@@ -425,352 +727,20 @@ export function DashboardClient({
             })}
           </select>
           {selectedDept && (
-            <button
-              onClick={() => setSelectedDept(null)}
-              className="text-xs text-primary underline hover:text-primary-700"
-            >
+            <button onClick={() => setSelectedDept(null)} className="text-xs text-primary underline hover:text-primary-700">
               Effacer
             </button>
           )}
         </div>
       </div>
 
-      <main className="px-8 py-6 space-y-6">
+      <PageContent>
         <p className="text-xs text-muted-foreground">
           {lastImportLabel} · {filteredAccounts.length} comptes analysés
           {selectedDept ? ` dans le département ${selectedDept} (${DEPT_NAMES[selectedDept] ?? ""})` : " sur le secteur AURA"}
         </p>
-
-        {/* Ligne 1 : KPI Majeurs */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <KpiCard
-            label="CA potentiel à capter"
-            value={formatEUR(caPotentielTotal)}
-            trend={`Potentiel total secteur : ${formatEUR(caPotentielGlobal)}`}
-            icon={Wallet}
-          />
-          <KpiCard
-            label={displayedCaLabel}
-            value={formatEUR(displayedCa)}
-            trend={
-              month === null && ytdPace !== null
-                ? `${formatEUR(ytdPace.prev)} en ${year - 1} à la même période` +
-                  (ytdPace.growth !== null
-                    ? ` — ${ytdPace.growth >= 0 ? "avance" : "retard"} de ${formatPct(Math.abs(ytdPace.growth))}`
-                    : "")
-                : undefined
-            }
-            tone={
-              month === null && ytdPace?.growth !== null && ytdPace !== null
-                ? ytdPace.growth! >= 0
-                  ? "positive"
-                  : "negative"
-                : "default"
-            }
-            icon={TrendingUp}
-          />
-          {hasObjectifData ? (
-            <>
-              <KpiCard
-                label="Objectif CA (période)"
-                value={formatEUR(objectifCaSelected)}
-                trend={atteinteCa !== null ? `${formatPct(atteinteCa)} atteint` : undefined}
-                tone={atteinteCa !== null && atteinteCa >= 1 ? "positive" : "default"}
-                icon={Target}
-              />
-              <KpiCard
-                label="Écart vs objectif"
-                value={`${ecartCa > 0 ? "+" : ""}${formatEUR(ecartCa)}`}
-                tone={ecartCa < 0 ? "negative" : "positive"}
-                icon={AlertTriangle}
-              />
-            </>
-          ) : (
-            <>
-              <KpiCard label="Taux de Pénétration" value={formatPct(tauxPenetration)} trend={`${clientsActifs} actifs sur ${filteredAccounts.length}`} icon={Percent} />
-              <KpiCard label="Comptes à risque" value={formatNumber(clientsAlerte.length)} tone="negative" icon={AlertTriangle} />
-            </>
-          )}
-        </div>
-
-        {/* Blocs réordonnables : l'utilisateur choisit lui-même leur ordre */}
-        <CustomizableLayout
-          storageKey="dashboard-block-order-v1"
-          blocks={([
-            hasMonthlyData && {
-              id: "monthly-chart",
-              label: "Graphique mensuel",
-              node: (
-                <InteractiveMonthlyChart
-                  year={year}
-                  caByMonth={caByMonthOfYear}
-                  objectifByMonth={objectifByMonthOfYear}
-                  forecastByMonth={forecastByMonthOfYear.ca}
-                  selectedMonth={month}
-                  onSelectMonth={setMonth}
-                />
-              ),
-            },
-            {
-              id: "objectif-recurrence",
-              label: "Objectif annuel & récurrence des commandes",
-              node: (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <AnnualObjectiveCard caByMonth={caByMonthOfYear} objectifByMonth={objectifByMonthOfYear} year={year} />
-                  <OrderRecurrenceCard monthlySales={monthlySales} accountIds={filteredAccountIds} />
-                </div>
-              ),
-            },
-            {
-              id: "competitor-share",
-              label: "Sponsoring — Teoxane vs concurrents",
-              node: <CompetitorShareCard amounts={competitorAmounts} />,
-            },
-            {
-              id: "department-breakdown",
-              label: "Synthèse départementale",
-              node: (
-                <DepartmentBreakdown
-                  accounts={accounts}
-                  caForAccount={caForYear}
-                  selectedDept={selectedDept}
-                  onSelectDept={setSelectedDept}
-                />
-              ),
-            },
-            {
-              id: "action-distribution",
-              label: "Répartition par action recommandée",
-              node: (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Répartition par action recommandée</CardTitle>
-                    <CardDescription>Calculée en direct depuis le score de ciblage — {filteredAccounts.length} comptes</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-                      {actionDistribution.map((b) => (
-                        <div key={b.code} className="rounded-lg border border-border p-3" style={{ borderTopColor: b.meta.color, borderTopWidth: 3 }}>
-                          <p className="text-lg font-semibold text-foreground">{b.count}</p>
-                          <p className="text-xs text-muted-foreground">{b.meta.label}</p>
-                          {b.caNonCapte > 0 && <p className="mt-1 text-[10px] text-muted-foreground">{formatEUR(b.caNonCapte)}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              ),
-            },
-            {
-              id: "secondary-kpis",
-              label: "KPIs secondaires",
-              node: (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <KpiCard label="CA moyen / compte actif" value={formatEUR(caMoyenParCompteActif)} icon={TrendingUp} />
-                  <KpiCard label="Concentration Segment A" value={formatPct(concentrationSegmentA)} icon={Crown} />
-                  <KpiCard label="Clients actifs" value={formatNumber(clientsActifs)} icon={Users} />
-                  <KpiCard label="Comptes à risque" value={formatNumber(clientsAlerte.length)} tone="negative" icon={AlertTriangle} />
-                </div>
-              ),
-            },
-            hasTierData && {
-              id: "tier-tracking",
-              label: "Suivi Premium / Pro / Pro+",
-              node: (
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between">
-                    <div>
-                      <CardTitle>Suivi Premium / Pro / Pro+</CardTitle>
-                      <CardDescription>Comptes sous contrat de partenariat — CA {year} vs potentiel</CardDescription>
-                    </div>
-                    <Crown size={18} className="text-primary" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                      {tierStats.map((t) => {
-                        const atteinte = t.potentiel > 0 ? Math.min(t.ca / t.potentiel, 1) : 0;
-                        return (
-                          <div key={t.tier} className="rounded-lg border border-border p-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-semibold text-foreground">{t.tier}</span>
-                              <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
-                                {t.count} compte(s)
-                              </span>
-                            </div>
-                            <p className="mt-2 text-lg font-semibold text-foreground">{formatEUR(t.ca)}</p>
-                            <p className="text-xs text-muted-foreground">
-                              Objectif {formatNumber(t.objectif)} boîtes · Potentiel {formatEUR(t.potentiel)}
-                            </p>
-                            <div className="mt-2 h-1.5 rounded-full bg-surface-muted">
-                              <div
-                                className={`h-1.5 rounded-full ${atteinte >= 0.75 ? "bg-success" : "bg-primary"}`}
-                                style={{ width: `${atteinte * 100}%` }}
-                              />
-                            </div>
-                            <p className="mt-1 text-[10px] text-muted-foreground">{formatPct(atteinte)} du potentiel capté</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
-              ),
-            },
-            {
-              id: "quick-actions-priority",
-              label: "Actions rapides, vue management & comptes prioritaires",
-              node: (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                  <div className="space-y-4 lg:col-span-1">
-                    <QuickActionCard accounts={filteredAccounts} />
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Vue management</CardTitle>
-                        <CardDescription>Synthèse du portefeuille</CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-3 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Comptes suivis</span>
-                          <span className="font-medium">{formatNumber(filteredAccounts.length)}</span>
-                        </div>
-                        {(["A", "B", "C", "D", "E"] as const).map((seg) => (
-                          <div key={seg} className="flex justify-between">
-                            <span className="text-muted-foreground">Segment {seg}</span>
-                            <span className="font-medium">
-                              {filteredAccounts.filter((a) => a.segment === seg).length} · {formatEUR(caParSegment[seg])}
-                            </span>
-                          </div>
-                        ))}
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  <Card className="lg:col-span-2">
-                    <CardHeader className="flex flex-row items-start justify-between">
-                      <div>
-                        <CardTitle>Comptes prioritaires</CardTitle>
-                        <CardDescription>Score de ciblage le plus élevé — recalculé en direct</CardDescription>
-                      </div>
-                      <button
-                        onClick={generatePriorityForecasts}
-                        disabled={generatingForecasts}
-                        title="Propose un prévisionnel 3 mois pour ces comptes prioritaires"
-                        className="flex shrink-0 items-center gap-1.5 rounded-lg border border-primary-100 bg-primary-50 px-3 py-1.5 text-xs font-medium text-primary-700 hover:bg-primary-100 disabled:opacity-50"
-                      >
-                        {generatingForecasts ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                        Générer le prévisionnel
-                      </button>
-                    </CardHeader>
-                    {forecastGenerationResult && (
-                      <p className="px-5 pb-2 text-xs text-muted-foreground">{forecastGenerationResult}</p>
-                    )}
-                    <PriorityAccountsTable accounts={priorityAccounts} />
-                  </Card>
-                </div>
-              ),
-            },
-            {
-              id: "movers",
-              label: "Top croissance & déclin",
-              node: (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <MoversCard title="Top 5 croissance (Évol. 24→25)" rows={topCroissance} tone="positive" />
-                  <MoversCard title="Top 5 déclin (Évol. 24→25)" rows={topDeclin} tone="negative" />
-                </div>
-              ),
-            },
-            {
-              id: "top-flop-2026",
-              label: `Top 10 / Flop 10 clients — CA ${anneeEnCours} vs ${derniereAnnee}`,
-              node: (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <TopFlopClientsCard
-                    title={`Top 10 clients (CA ${anneeEnCours} YTD)`}
-                    rows={top10Clients2026}
-                    tone="positive"
-                    anneeCourante={anneeEnCours}
-                    anneePrecedente={derniereAnnee}
-                  />
-                  <TopFlopClientsCard
-                    title={`Flop 10 clients (CA ${anneeEnCours} YTD vs ${derniereAnnee})`}
-                    rows={flop10Clients2026}
-                    tone="negative"
-                    anneeCourante={anneeEnCours}
-                    anneePrecedente={derniereAnnee}
-                  />
-                </div>
-              ),
-            },
-            {
-              id: "lost-overdue",
-              label: "Comptes perdus & relances en retard",
-              node: (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                      <div>
-                        <CardTitle>Comptes perdus</CardTitle>
-                        <CardDescription>Statut Lost, triés par CA 2025 (le plus à regagner en premier)</CardDescription>
-                      </div>
-                      <UserX size={18} className="text-danger" />
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      {lostAccounts.length === 0 && <p className="text-sm text-muted-foreground">Aucun compte perdu 🎉</p>}
-                      {lostAccounts.map((a) => (
-                        <div key={a.id} className="flex items-center justify-between text-sm">
-                          <div>
-                            <Link href={`/comptes/${a.id}`} className="text-foreground hover:text-primary">
-                              {a.name}
-                            </Link>
-                            {a.last_order_date && (
-                              <span className="ml-2 text-xs text-muted-foreground">
-                                dernière commande {new Date(a.last_order_date).toLocaleDateString("fr-FR")}
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-muted-foreground">{formatEUR(caAnnee(a, derniereAnnee))}</span>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                      <div>
-                        <CardTitle>Relances en retard</CardTitle>
-                        <CardDescription>Comptes actifs sans appel depuis plus de 60 jours</CardDescription>
-                      </div>
-                      <PhoneMissed size={18} className="text-warning" />
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      {overdueCallAccounts.length === 0 && (
-                        <p className="text-sm text-muted-foreground">
-                          {filteredAccounts.some((a) => a.days_since_last_call !== null)
-                            ? "Rien en retard, bien joué."
-                            : "Importez le fichier Appels pour activer ce suivi."}
-                        </p>
-                      )}
-                      {overdueCallAccounts.map((a) => (
-                        <div key={a.id} className="flex items-center justify-between text-sm">
-                          <Link href={`/comptes/${a.id}`} className="text-foreground hover:text-primary">
-                            {a.name}
-                          </Link>
-                          <span className="text-warning">{a.days_since_last_call} j</span>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                </div>
-              ),
-            },
-            {
-              id: "product-comparison",
-              label: "Comparatif ventes produits vs année précédente",
-              node: <ProductSalesComparison products={products} filteredAccountIds={filteredAccountIds} />,
-            },
-          ] as (LayoutBlock | false)[]).filter((b): b is LayoutBlock => !!b)}
-        />
-      </main>
+        <DashboardGrid layout={layout} onChange={updateLayout} status={layoutStatus} render={(id) => widgets[id]} />
+      </PageContent>
     </div>
   );
 }
