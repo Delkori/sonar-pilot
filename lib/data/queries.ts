@@ -10,6 +10,7 @@ import type {
   Hcp,
   HcpSponsorship,
   PlanningEvent,
+  Sector,
   SectorObjective,
 } from "@/types/database";
 
@@ -98,6 +99,18 @@ export async function getSponsorships(db: Db): Promise<HcpSponsorship[]> {
 
 export async function getSectorObjectives(db: Db): Promise<SectorObjective[]> {
   return fetchAll<SectorObjective>(() => db.from("sector_objectives").select("*"));
+}
+
+/**
+ * Secteur (territoire) de l'utilisateur connecté — RLS ne renvoie que sa
+ * propre ligne `profiles`, donc `maybeSingle` ; `null` si le compte n'a pas
+ * encore été rattaché à un secteur (voir README › Secteurs).
+ */
+export async function getCurrentSector(db: Db): Promise<Sector | null> {
+  const { data: profile } = await db.from("profiles").select("sector_id").maybeSingle();
+  if (!profile) return null;
+  const { data: sector } = await db.from("sectors").select("*").eq("id", profile.sector_id).maybeSingle();
+  return sector ?? null;
 }
 
 /** Mise en page du dashboard de l'utilisateur connecté (brute — à normaliser). */

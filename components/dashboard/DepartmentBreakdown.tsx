@@ -17,6 +17,7 @@ interface DepartmentBreakdownProps {
   caForAccount: (account: Account) => number;
   selectedDept: string | null;
   onSelectDept: (dept: string | null) => void;
+  sectorName?: string | null;
 }
 
 export function DepartmentBreakdown({
@@ -24,6 +25,7 @@ export function DepartmentBreakdown({
   caForAccount,
   selectedDept,
   onSelectDept,
+  sectorName = null,
 }: DepartmentBreakdownProps) {
   const deptStats = useMemo(() => {
     const map = new Map<
@@ -77,7 +79,7 @@ export function DepartmentBreakdown({
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
-          <CardTitle>Répartition par Département (Auvergne-Rhône-Alpes)</CardTitle>
+          <CardTitle>Répartition par Département{sectorName ? ` (${sectorName})` : ""}</CardTitle>
           <CardDescription>
             Performance commerciale et potentiel non capté par département du secteur. Cliquez sur un département pour filtrer.
           </CardDescription>

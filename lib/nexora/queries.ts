@@ -1,12 +1,6 @@
 import "server-only";
 import { createNexoraClient } from "@/lib/supabase/nexora";
 
-// Départements du secteur (AURA + Saône-et-Loire, Nièvre).
-export const SECTEUR_DEPTS = [
-  "01", "03", "07", "15", "26", "38", "42", "43", "63", "69", "73", "74", "71", "58",
-];
-export const SECTEUR_REGION = "Auvergne-Rhône-Alpes";
-
 export interface CompetitorAmount {
   nom_labo: string;
   montant: number;

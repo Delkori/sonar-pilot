@@ -3,14 +3,9 @@ import { ProspectsTable } from "@/components/sponsoring/ProspectsTable";
 import type { ProspectRow } from "@/components/sponsoring/ProspectsTable";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/supabase/fetchAll";
+import { getCurrentSector } from "@/lib/data/queries";
 import { formatEUR } from "@/lib/utils";
-import {
-  nexoraConfigured,
-  getCompetitorAmounts,
-  getProspects,
-  SECTEUR_DEPTS,
-  SECTEUR_REGION,
-} from "@/lib/nexora/queries";
+import { nexoraConfigured, getCompetitorAmounts, getProspects } from "@/lib/nexora/queries";
 import type { Hcp } from "@/types/database";
 
 export const dynamic = "force-dynamic";
@@ -38,11 +33,13 @@ export default async function ProspectsPage() {
   }
 
   const supabase = await createClient();
+  const sector = await getCurrentSector(supabase);
+  const sectorLabel = sector?.name ?? "votre secteur";
 
   const [hcpRows, amounts, prospectsRaw] = await Promise.all([
     fetchAll<Pick<Hcp, "rpps">>(() => supabase.from("hcps").select("rpps")),
-    getCompetitorAmounts(SECTEUR_REGION),
-    getProspects({ depts: SECTEUR_DEPTS, onlySponso: true, onlyEsth: true, limit: 500 }),
+    getCompetitorAmounts(sector?.nexora_region ?? null),
+    getProspects({ depts: sector?.department_codes ?? null, onlySponso: true, onlyEsth: true, limit: 500 }),
   ]);
   const hcpRpps = new Set(hcpRows.map((h) => h.rpps).filter((r): r is string => !!r));
 
@@ -66,7 +63,7 @@ export default async function ProspectsPage() {
         {amounts.length === 0 && prospects.length === 0 && (
           <Card>
             <CardContent className="py-4 text-sm text-muted-foreground">
-              Connexion Nexora configurée, mais aucune donnée renvoyée pour {SECTEUR_REGION} — soit la base
+              Connexion Nexora configurée, mais aucune donnée renvoyée pour {sectorLabel} — soit la base
               Transparence Santé n&apos;a rien à déclarer sur ce secteur, soit les fonctions <code>sonar_*</code>{" "}
               ont changé côté Nexora. Voir les logs serveur Vercel (recherche &quot;[nexora]&quot;) pour le détail.
             </CardContent>
@@ -74,7 +71,7 @@ export default async function ProspectsPage() {
         )}
         <Card>
           <CardHeader>
-            <CardTitle>Investissement des laboratoires — {SECTEUR_REGION}</CardTitle>
+            <CardTitle>Investissement des laboratoires — {sectorLabel}</CardTitle>
             <CardDescription>
               Montant total sponsorisé par labo sur le secteur (avantages + rémunérations + conventions). Concurrents :{" "}
               {formatEUR(totalConcurrents)}.

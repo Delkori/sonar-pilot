@@ -2,7 +2,7 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { AuraMap } from "@/components/mapping/AuraMap";
 import { createClient } from "@/lib/supabase/server";
-import { getAccountProducts, getAccounts, getHcps, getMonthlySales } from "@/lib/data/queries";
+import { getAccountProducts, getAccounts, getCurrentSector, getHcps, getMonthlySales } from "@/lib/data/queries";
 import { getLabsByRpps } from "@/lib/nexora/queries";
 
 export const dynamic = "force-dynamic";
@@ -10,13 +10,23 @@ export const dynamic = "force-dynamic";
 export default async function MappingPage() {
   const supabase = await createClient();
 
-  const [accounts, products, hcps, monthlySales, geoRaw] = await Promise.all([
+  const [accounts, products, hcps, monthlySales, sector] = await Promise.all([
     getAccounts(supabase),
     getAccountProducts(supabase),
     getHcps(supabase),
     getMonthlySales(supabase),
-    readFile(path.join(process.cwd(), "public/geo/aura-departements.json"), "utf-8"),
+    getCurrentSector(supabase),
   ]);
+
+  if (!sector?.geojson_path) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Aucun fond de carte configuré pour ce secteur — ajoutez un fichier dans <code>public/geo/</code> et
+        renseignez <code>sectors.geojson_path</code>.
+      </p>
+    );
+  }
+  const geoRaw = await readFile(path.join(process.cwd(), "public/geo", sector.geojson_path), "utf-8");
   const geo = JSON.parse(geoRaw);
 
   // Comptes dont un médecin rattaché est sponsorisé par un labo donné

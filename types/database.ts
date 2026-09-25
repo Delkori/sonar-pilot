@@ -53,6 +53,7 @@ export type Account = {
   objectif_filler: number | null;
   objectif_cosmetique: number | null;
   persona: string | null;
+  sector_id: string;
   created_at: string;
   updated_at: string;
 };
@@ -68,6 +69,7 @@ export type Import = {
   rows_success: number;
   rows_error: number;
   log: { row: number; message: string }[];
+  sector_id: string;
 };
 
 export type AccountAction = {
@@ -79,6 +81,7 @@ export type AccountAction = {
   done: boolean;
   created_by: string | null;
   created_at: string;
+  sector_id: string;
 };
 
 export type AccountProduct = {
@@ -92,6 +95,7 @@ export type AccountProduct = {
   growth_rate_pct: number | null;
   period: string | null;
   updated_at: string;
+  sector_id: string;
 };
 
 export type TerritoryObjective = {
@@ -102,6 +106,7 @@ export type TerritoryObjective = {
   objectif_boites: number;
   quarter: string;
   updated_at: string;
+  sector_id: string;
 };
 
 export type AccountMonthlySale = {
@@ -111,6 +116,7 @@ export type AccountMonthlySale = {
   month: number;
   ca: number;
   updated_at: string;
+  sector_id: string;
 };
 
 export type ForecastKind = "objectif" | "prevision" | "realise";
@@ -133,6 +139,7 @@ export type AccountForecast = {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  sector_id: string;
 };
 
 export type NameAlias = {
@@ -141,6 +148,7 @@ export type NameAlias = {
   account_id: string;
   confidence: number | null;
   created_at: string;
+  sector_id: string;
 };
 
 export type NameMatchCandidate = {
@@ -152,6 +160,7 @@ export type NameMatchCandidate = {
   status: "pending" | "confirmed" | "rejected";
   created_at: string;
   updated_at: string;
+  sector_id: string;
 };
 
 export type Hcp = {
@@ -172,6 +181,7 @@ export type Hcp = {
   persona: string | null;
   created_at: string;
   updated_at: string;
+  sector_id: string;
 };
 
 export type HcpSponsorship = {
@@ -188,6 +198,7 @@ export type HcpSponsorship = {
   source: string;
   created_at: string;
   updated_at: string;
+  sector_id: string;
 };
 
 export type SectorObjective = {
@@ -197,11 +208,13 @@ export type SectorObjective = {
   objectif_ca: number;
   objectif_boites: number;
   updated_at: string;
+  sector_id: string;
 };
 
 export type CalendarFeedToken = {
   token: string;
   created_at: string;
+  sector_id: string;
 };
 
 export type PlanningEventType = "visite" | "visite_prospect" | "appel" | "admin";
@@ -218,6 +231,7 @@ export type PlanningEvent = {
   confirmed: boolean;
   created_at: string;
   updated_at: string;
+  sector_id: string;
 };
 
 /** Préférences par utilisateur — `dashboard_layout` est normalisé par lib/dashboard-layout.ts. */
@@ -235,6 +249,25 @@ export type AccountProductPurchase = {
   qty: number;
   value_eur: number;
   invoice_number: string | null;
+  created_at: string;
+  sector_id: string;
+};
+
+/** Un territoire (AURA, Languedoc...). Un commercial appartient à un seul secteur (`profiles`). */
+export type Sector = {
+  id: string;
+  slug: string;
+  name: string;
+  department_codes: string[];
+  nexora_region: string | null;
+  geojson_path: string | null;
+  created_at: string;
+};
+
+/** Rattachement d'un utilisateur Supabase Auth à son secteur. */
+export type Profile = {
+  user_id: string;
+  sector_id: string;
   created_at: string;
 };
 
@@ -262,6 +295,8 @@ export type Database = {
       planning_events: Table<PlanningEvent>;
       account_product_purchases: Table<AccountProductPurchase>;
       user_preferences: Table<UserPreferences>;
+      sectors: Table<Sector>;
+      profiles: Table<Profile>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

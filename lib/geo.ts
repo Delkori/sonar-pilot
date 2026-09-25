@@ -1,7 +1,10 @@
 import type { Account } from "@/types/database";
 
 /**
- * Référentiel des départements couverts par le secteur. Vivait dans
+ * Référentiel de libellés département — code INSEE → nom, indépendant du
+ * secteur (deux secteurs peuvent chacun avoir des comptes dans des
+ * départements différents ; c'est `sectors.department_codes`, pas cette
+ * table, qui dit lesquels appartiennent à quel secteur). Vivait dans
  * `components/dashboard/DepartmentBreakdown.tsx`, ce qui obligeait les
  * pages serveur et la carte à importer un composant client pour lire une
  * simple table de libellés.
@@ -10,8 +13,11 @@ export const DEPT_NAMES: Record<string, string> = {
   "01": "Ain",
   "03": "Allier",
   "07": "Ardèche",
+  "11": "Aude",
+  "13": "Bouches-du-Rhône",
   "15": "Cantal",
   "26": "Drôme",
+  "34": "Hérault",
   "38": "Isère",
   "42": "Loire",
   "43": "Haute-Loire",
@@ -21,6 +27,7 @@ export const DEPT_NAMES: Record<string, string> = {
   "71": "Saône-et-Loire",
   "73": "Savoie",
   "74": "Haute-Savoie",
+  "84": "Vaucluse",
 };
 
 /** Code département d'un compte : colonne dédiée, sinon préfixe du code postal. */

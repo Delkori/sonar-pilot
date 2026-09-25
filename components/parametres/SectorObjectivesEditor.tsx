@@ -44,7 +44,7 @@ export function SectorObjectivesEditor({ initial }: { initial: SectorObjective[]
     };
     setRows((prev) => {
       const others = prev.filter((r) => !(r.year === year && r.month === month));
-      return [...others, { id: existing?.id ?? `${year}-${month}`, updated_at: "", ...merged }];
+      return [...others, { id: existing?.id ?? `${year}-${month}`, sector_id: "", updated_at: "", ...merged }];
     });
     const supabase = createClient();
     startTransition(async () => {
@@ -64,7 +64,7 @@ export function SectorObjectivesEditor({ initial }: { initial: SectorObjective[]
     }));
     setRows((prev) => {
       const others = prev.filter((r) => r.year !== year);
-      return [...others, ...payload.map((p) => ({ id: `${p.year}-${p.month}`, updated_at: "", ...p }))];
+      return [...others, ...payload.map((p) => ({ id: `${p.year}-${p.month}`, sector_id: "", updated_at: "", ...p }))];
     });
     const supabase = createClient();
     startTransition(async () => {

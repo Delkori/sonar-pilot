@@ -20,13 +20,17 @@ export async function GET(req: NextRequest) {
   const supabase = createAdminClient();
   const { data: tokenRow } = await supabase
     .from("calendar_feed_tokens")
-    .select("token")
+    .select("token, sector_id")
     .eq("token", token)
     .maybeSingle();
 
   if (!tokenRow) {
     return NextResponse.json({ error: "Jeton invalide" }, { status: 401 });
   }
+  // Client service-role : contourne RLS, donc chaque requête ci-dessous
+  // filtre elle-même par le secteur du jeton — sans quoi ce flux mélangerait
+  // les comptes/actions/prévisions/planning de tous les secteurs.
+  const sectorId = tokenRow.sector_id;
 
   // Quatre lectures indépendantes, désormais en parallèle et paginées : au
   // delà de 1000 lignes, les pages suivantes d'actions/prévisions/événements
@@ -53,11 +57,14 @@ export async function GET(req: NextRequest) {
   };
 
   const [accountsRaw, actions, forecasts, planningEvents] = await Promise.all([
-    fetchAll<AccountLite>(() => supabase.from("accounts").select("id, name, last_order_date, potentiel_boites")),
+    fetchAll<AccountLite>(() =>
+      supabase.from("accounts").select("id, name, last_order_date, potentiel_boites").eq("sector_id", sectorId)
+    ),
     fetchAll<ActionLite>(() =>
       supabase
         .from("account_actions")
         .select("id, account_id, type, content, due_date")
+        .eq("sector_id", sectorId)
         .not("due_date", "is", null)
         .eq("done", false)
     ),
@@ -65,10 +72,14 @@ export async function GET(req: NextRequest) {
       supabase
         .from("account_forecasts")
         .select("id, account_id, year, month, boites_prevues, ca_prevu, note")
+        .eq("sector_id", sectorId)
         .eq("kind", "prevision")
     ),
     fetchAll<PlanningLite>(() =>
-      supabase.from("planning_events").select("id, account_id, type, title, note, start_at, end_at")
+      supabase
+        .from("planning_events")
+        .select("id, account_id, type, title, note, start_at, end_at")
+        .eq("sector_id", sectorId)
     ),
   ]);
 

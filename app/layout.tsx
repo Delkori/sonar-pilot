@@ -9,7 +9,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "Sonar Pilot",
-  description: "Cockpit de pilotage commercial — secteur Auvergne-Rhône-Alpes",
+  description: "Cockpit de pilotage commercial",
 };
 
 export default function RootLayout({

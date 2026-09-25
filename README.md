@@ -1,6 +1,6 @@
 # Sonar Pilot
 
-Cockpit de pilotage commercial pour le secteur **Auvergne-Rhône-Alpes**, construit à partir du PAS Q3 2026. Application indépendante (aucun lien technique avec Nexora), inspirée uniquement de son identité visuelle.
+Cockpit de pilotage commercial multi-secteurs, construit à partir du PAS Q3 2026. Application indépendante (aucun lien technique avec Nexora), inspirée uniquement de son identité visuelle.
 
 ## Stack
 
@@ -53,6 +53,53 @@ npm run dev
 3. Récupérez `Project URL`, `anon public key` et `service_role key` dans Project Settings → API, à mettre dans `.env.local` (et dans Vercel pour prod).
 4. Activez l'authentification email (Auth → Providers) pour protéger l'accès à l'app — RLS est déjà activé sur toutes les tables et n'autorise que les utilisateurs authentifiés.
 
+## Secteurs — un commercial, un territoire
+
+Un même déploiement peut servir plusieurs commerciaux, chacun sur son
+secteur, sans jamais voir les comptes/ventes/planning des autres. Deux
+tables portent ce cloisonnement :
+
+- `sectors` — un territoire (`slug`, `name`, `department_codes` pour le
+  filtre Nexora et la future page Objectifs par territoire, `nexora_region`
+  quand le secteur correspond à une région officielle unique, `geojson_path`
+  pour le fond de carte de Comptes › Carte, sous `public/geo/`).
+- `profiles` — rattache un utilisateur Supabase Auth (`auth.users.id`) à un
+  seul `sectors.id`.
+
+Chaque table métier (`accounts`, `imports`, `account_actions`,
+`account_forecasts`...) porte une colonne `sector_id`, remplie
+automatiquement à l'écriture par la fonction SQL `current_sector_id()` (le
+secteur du `profiles` de l'utilisateur connecté) — le code applicatif n'a
+jamais à la préciser. RLS n'autorise la lecture et l'écriture que des lignes
+du secteur de l'utilisateur connecté ; voir la migration
+`supabase/migrations/0022_sectors.sql`.
+
+**Ajouter un secteur et un commercial** (aucune ligne de code, tout se fait
+dans le SQL Editor Supabase, avec le rôle `postgres` qui contourne RLS) :
+
+```sql
+-- 1. Le secteur (si ce n'est pas déjà l'un des deux secteurs seedés par la
+--    migration 0022 — 'aura' et 'languedoc').
+insert into sectors (slug, name, department_codes, nexora_region, geojson_path)
+values ('nouveau-secteur', 'Nom affiché', array['XX','YY'], null, null);
+
+-- 2. Le compte : Authentication → Users → Add user (email + mot de passe),
+--    dans le dashboard Supabase.
+
+-- 3. Le rattachement, une fois le compte créé :
+insert into profiles (user_id, sector_id)
+select u.id, s.id
+from auth.users u, sectors s
+where u.email = 'email-de-la-personne@exemple.fr'
+  and s.slug = 'nouveau-secteur';
+```
+
+Sans fond de carte GeoJSON (`geojson_path`), Comptes › Carte affiche un
+message au lieu de planter — ajoutez un fichier `public/geo/<slug>.json`
+(même format que `aura-departements.json` : `FeatureCollection` de
+`Feature` avec `properties: {code, nom}`) puis référencez-le sur la ligne
+`sectors` correspondante.
+
 ## Déploiement GitHub → Vercel
 
 ```bash
@@ -103,7 +150,7 @@ components/layout/    # PageShell (gabarit de page), Sidebar, TopBar
 components/ui/        # Card, Button, Field, Table, Badge, ScoreBadge, SortableTh
 supabase/migrations/  # schéma SQL versionné
 types/database.ts     # types TypeScript du schéma (`supabase gen types typescript`)
-public/geo/           # GeoJSON des départements Auvergne-Rhône-Alpes (carte Mapping)
+public/geo/           # GeoJSON des départements par secteur (carte Comptes › Carte, un fichier par sectors.geojson_path)
 ```
 
 ## Conventions à respecter
@@ -473,7 +520,7 @@ disparaît pas de l'écran quand on change de vue.
 
 ## Comptes › Carte
 
-Carte choroplèthe SVG des 12 départements AURA (Ain, Allier, Ardèche, Cantal, Drôme, Isère, Loire, Haute-Loire, Puy-de-Dôme, Rhône, Savoie, Haute-Savoie), colorée selon l'écart objectif/réalisé, avec les comptes géocodés superposés en points cliquables (taille selon segment). Filtres segment/statut, clic sur un département pour isoler la zone, panneau latéral pour ouvrir la fiche compte.
+Carte choroplèthe SVG des départements du secteur (fond de carte propre à chaque secteur, voir « Secteurs » — 14 départements pour AURA : Ain, Allier, Ardèche, Cantal, Drôme, Isère, Loire, Haute-Loire, Nièvre, Puy-de-Dôme, Rhône, Saône-et-Loire, Savoie, Haute-Savoie), colorée selon l'écart objectif/réalisé, avec les comptes géocodés superposés en points cliquables (taille selon segment). Filtres segment/statut, clic sur un département pour isoler la zone, panneau latéral pour ouvrir la fiche compte.
 
 ## Points ouverts connus
 
@@ -493,6 +540,6 @@ Carte choroplèthe SVG des 12 départements AURA (Ain, Allier, Ardèche, Cantal,
 
 ## Prochaines évolutions envisagées (non codées)
 
-- Territoires "gamifiés" avec objectifs par zone et jauge de progression (table `territory_objectives` déjà prête en base).
+- Territoires "gamifiés" avec objectifs par zone et jauge de progression (table `territory_objectives` déjà prête en base, et désormais scindée par secteur — voir « Secteurs » ci-dessus).
 - Synchronisation automatique Google Sheets → Supabase (en remplacement de l'import manuel), une fois le mapping de colonnes stabilisé.
-- Authentification multi-commerciaux avec rôles si le secteur est partagé.
+- Écran d'administration pour créer un secteur et rattacher un commercial sans passer par le SQL Editor Supabase (aujourd'hui : voir « Secteurs » ci-dessus).

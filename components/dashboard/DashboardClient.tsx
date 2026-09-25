@@ -71,6 +71,7 @@ export function DashboardClient({
   forecasts,
   objectifs,
   competitorAmounts = [],
+  sectorName = null,
   lastImportLabel,
   chances,
   chancesHorizon,
@@ -84,6 +85,7 @@ export function DashboardClient({
   forecasts: ForecastRow[];
   objectifs: ForecastRow[];
   competitorAmounts?: CompetitorAmount[];
+  sectorName?: string | null;
   lastImportLabel: string;
   chances: ChanceRow[];
   chancesHorizon: number;
@@ -461,7 +463,13 @@ export function DashboardClient({
     recurrence: <OrderRecurrenceCard monthlySales={monthlySales} accountIds={filteredAccountIds} />,
     competitor: competitorAmounts.length > 0 ? <CompetitorShareCard amounts={competitorAmounts} /> : null,
     department: (
-      <DepartmentBreakdown accounts={accounts} caForAccount={caForYear} selectedDept={selectedDept} onSelectDept={setSelectedDept} />
+      <DepartmentBreakdown
+        accounts={accounts}
+        caForAccount={caForYear}
+        selectedDept={selectedDept}
+        onSelectDept={setSelectedDept}
+        sectorName={sectorName}
+      />
     ),
     "action-distribution": (
       <Card>
@@ -737,7 +745,9 @@ export function DashboardClient({
       <PageContent>
         <p className="text-xs text-muted-foreground">
           {lastImportLabel} · {filteredAccounts.length} comptes analysés
-          {selectedDept ? ` dans le département ${selectedDept} (${DEPT_NAMES[selectedDept] ?? ""})` : " sur le secteur AURA"}
+          {selectedDept
+            ? ` dans le département ${selectedDept} (${DEPT_NAMES[selectedDept] ?? ""})`
+            : ` sur le secteur${sectorName ? ` ${sectorName}` : ""}`}
         </p>
         <DashboardGrid layout={layout} onChange={updateLayout} status={layoutStatus} render={(id) => widgets[id]} />
       </PageContent>

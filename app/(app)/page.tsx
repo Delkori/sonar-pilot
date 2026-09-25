@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   getAccounts,
   getAccountProducts,
+  getCurrentSector,
   getDashboardLayout,
   getForecasts,
   getLastImportLabel,
@@ -13,7 +14,7 @@ import {
   getPurchaseLines,
   getSectorObjectives,
 } from "@/lib/data/queries";
-import { getCompetitorAmounts, SECTEUR_REGION } from "@/lib/nexora/queries";
+import { getCompetitorAmounts } from "@/lib/nexora/queries";
 import { buildProbabilityModel } from "@/lib/probability";
 import { normalizeLayout } from "@/lib/dashboard-layout";
 import { parisDateParts } from "@/lib/appointments";
@@ -27,7 +28,7 @@ export default async function DashboardPage() {
 
   // Requêtes indépendantes : en série, la page attendait la somme des
   // latences Supabase avant le premier octet.
-  const [accounts, monthlySales, products, forecasts, sectorObjectives, lastImportLabel, purchaseLines, planningEvents, layoutRaw] =
+  const [accounts, monthlySales, products, forecasts, sectorObjectives, lastImportLabel, purchaseLines, planningEvents, layoutRaw, sector] =
     await Promise.all([
       getAccounts(supabase),
       getMonthlySales(supabase),
@@ -38,6 +39,7 @@ export default async function DashboardPage() {
       getPurchaseLines(supabase),
       getPlanningEvents(supabase),
       getDashboardLayout(supabase),
+      getCurrentSector(supabase),
     ]);
 
   // Objectifs du secteur (saisis dans Paramètres) — remis au format
@@ -50,7 +52,7 @@ export default async function DashboardPage() {
     ca_prevu: o.objectif_ca,
   }));
 
-  const competitorAmounts = await getCompetitorAmounts(SECTEUR_REGION);
+  const competitorAmounts = await getCompetitorAmounts(sector?.nexora_region ?? null);
 
   // Chances de commande à 3 mois : le modèle s'apprend ici, seules les
   // lignes de tête (sérialisables) partent au navigateur.
@@ -74,7 +76,7 @@ export default async function DashboardPage() {
   const today = `${now.year}-${String(now.month).padStart(2, "0")}-${String(now.day).padStart(2, "0")}`;
 
   return (
-    <PageShell title="Dashboard" subtitle="Secteur Auvergne-Rhône-Alpes" bare>
+    <PageShell title="Dashboard" subtitle={sector ? `Secteur ${sector.name}` : undefined} bare>
       <DashboardClient
         accounts={accounts}
         monthlySales={monthlySales}
@@ -82,6 +84,7 @@ export default async function DashboardPage() {
         forecasts={forecasts}
         objectifs={objectifs}
         competitorAmounts={competitorAmounts}
+        sectorName={sector?.name ?? null}
         lastImportLabel={lastImportLabel}
         chances={chances}
         chancesHorizon={HORIZON_CHANCES}

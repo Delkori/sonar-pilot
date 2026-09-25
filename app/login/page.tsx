@@ -37,7 +37,7 @@ export default function LoginPage() {
           </div>
           <div className="text-center">
             <h1 className="text-lg font-semibold text-foreground">Sonar Pilot</h1>
-            <p className="text-sm text-muted-foreground">Cockpit commercial Auvergne-Rhône-Alpes</p>
+            <p className="text-sm text-muted-foreground">Cockpit de pilotage commercial</p>
           </div>
         </div>
 
