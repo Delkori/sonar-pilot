@@ -283,9 +283,11 @@ directement.
 
 ## Probabilités de commande
 
-Onglet **Planning › Chances** : la chance que chaque compte commande
-dans les 1, 3 ou 6 prochains mois, apprise sur l'historique réel du
-portefeuille — pas un barème à poids fixes.
+Onglet **Plan d'actions › Chances** : la chance que chaque compte commande
+d'ici un mois choisi librement (« Simuler jusqu'à … »), apprise sur
+l'historique réel du portefeuille — pas un barème à poids fixes. Le
+sélecteur nomme le mois explicitement (« octobre 2026 », pas « 1 mois ») :
+la fenêtre va toujours du mois prochain jusqu'au mois choisi.
 
 **Comment c'est appris.** Chaque (compte, mois passé) est une situation. On
 observe l'état du compte à ce mois-là en n'utilisant que ce qui était connu
@@ -389,8 +391,8 @@ préparer une visite, ils vivent dans Comptes.
 | Comptes | Liste · Carte · Produits · Prospects (+ fiche `/comptes/[id]`) | `/mapping`, `/matrice`, `/personas`, `/sponsoring`, `/analyse/*` |
 | Paramètres | Objectifs, personas, import (+ correspondances) | `/admin/*` |
 
-- **Chances** (ex-Probabilités) : qui va commander dans les 1, 3 ou 6 mois,
-  critère par critère, avec la fiabilité mesurée. Le SonarScore (bêta) n'est
+- **Chances** (ex-Probabilités) : qui va commander d'ici un mois choisi
+  librement, critère par critère, avec la fiabilité mesurée. Le SonarScore (bêta) n'est
   plus un onglet : c'est un outil avancé, accessible par un lien en bas de
   Chances (`/planning/chances/sonarscore`).
 - **Produits** réunit la matrice produit (qui a acheté quoi, références vs

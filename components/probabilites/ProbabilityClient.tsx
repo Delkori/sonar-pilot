@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
-import { SegmentedControl } from "@/components/ui/Button";
 import { SortableTh } from "@/components/ui/SortableTh";
 import { TableWrap, theadRowClass } from "@/components/ui/Table";
 import { SegmentBadge } from "@/components/ui/Badge";
@@ -12,15 +11,22 @@ import { fieldClass } from "@/lib/ui-classes";
 import { cn, formatEUR, formatNumber, formatPct } from "@/lib/utils";
 import { useSortableTable } from "@/lib/hooks/useSortableTable";
 import { buildProbabilityModel, CRITERIA } from "@/lib/probability";
-import type { AccountProbability, ForecastSignalRow, Horizon, ProbabilityModel, SaleRow } from "@/lib/probability";
+import type { AccountProbability, ForecastSignalRow, ProbabilityModel, SaleRow } from "@/lib/probability";
 import type { PurchaseLine } from "@/lib/sonarscore/velocity";
-import { monthIndex, MONTHS_SHORT } from "@/lib/dates";
+import { currentMonthIndex, fromMonthIndex, monthIndex, monthsFrom, MONTHS_LONG, MONTHS_SHORT } from "@/lib/dates";
 import type { Account, AccountStatus, Segment } from "@/types/database";
 import { ArrowDownRight, ArrowUpRight, Info } from "lucide-react";
 
 type SortKey = "probability" | "expectedCa" | "name" | "lastOrder" | "segment";
 
-const HORIZON_LABEL: Record<Horizon, string> = { 1: "1 mois", 3: "3 mois", 6: "6 mois" };
+/** « octobre 2026 » ou « octobre 2026 → décembre 2026 » selon la largeur de la fenêtre. */
+function windowLabel(fromIdx: number, toIdx: number): string {
+  const from = fromMonthIndex(fromIdx);
+  const fromLabel = `${MONTHS_LONG[from.month - 1]} ${from.year}`;
+  if (fromIdx === toIdx) return fromLabel;
+  const to = fromMonthIndex(toIdx);
+  return `${fromLabel} → ${MONTHS_LONG[to.month - 1]} ${to.year}`;
+}
 
 /**
  * Évaluation à afficher : celle des comptes ayant déjà commandé, dès qu'elle
@@ -159,7 +165,13 @@ export function ProbabilityClient({
   /** Prévisions saisies dans Planning — critère « vous l'aviez prévu ». */
   forecasts?: ForecastSignalRow[];
 }) {
-  const [horizon, setHorizon] = useState<Horizon>(3);
+  // Le mois choisi, pas un horizon abstrait : « jusqu'à décembre » ne laisse
+  // aucun doute, contrairement à « 3 mois » (3 mois à partir de quand ?).
+  const nowIdx = useMemo(() => currentMonthIndex(), []);
+  const targetMonths = useMemo(() => monthsFrom(nowIdx + 1, 12), [nowIdx]);
+  const [targetIdx, setTargetIdx] = useState(nowIdx + 3);
+  const horizon = targetIdx - nowIdx;
+  const currentWindowLabel = windowLabel(nowIdx + 1, targetIdx);
   const [search, setSearch] = useState("");
   const [cadence, setCadence] = useState("all");
   const [minProbability, setMinProbability] = useState(0);
@@ -235,7 +247,7 @@ export function ProbabilityClient({
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
           <div>
-            <CardTitle>Dans les {HORIZON_LABEL[horizon]} à venir</CardTitle>
+            <CardTitle>D&apos;ici {currentWindowLabel}</CardTitle>
             <CardDescription>
               Modèle appris sur {formatNumber(model.sampleSize)} situations passées (compte × mois), dont{" "}
               {formatNumber(model.trainingSize)} pour l&apos;apprentissage et {formatNumber(model.evaluation.n)} pour
@@ -246,15 +258,26 @@ export function ProbabilityClient({
               .
             </CardDescription>
           </div>
-          <SegmentedControl
-            value={String(horizon)}
-            onChange={(v) => setHorizon(Number(v) as Horizon)}
-            options={[
-              { value: "1", label: "1 mois" },
-              { value: "3", label: "3 mois" },
-              { value: "6", label: "6 mois" },
-            ]}
-          />
+          <div className="flex items-center gap-2">
+            <label htmlFor="chances-target-month" className="text-xs text-muted-foreground">
+              Simuler jusqu&apos;à
+            </label>
+            <select
+              id="chances-target-month"
+              value={targetIdx}
+              onChange={(e) => setTargetIdx(Number(e.target.value))}
+              className={fieldClass}
+            >
+              {targetMonths.map((m) => {
+                const idx = monthIndex(m.year, m.month);
+                return (
+                  <option key={idx} value={idx}>
+                    {MONTHS_LONG[m.month - 1]} {m.year}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-3 pt-0 lg:grid-cols-4">
           <Tile
@@ -291,7 +314,7 @@ export function ProbabilityClient({
         <CardHeader>
           <CardTitle>Top 10 — priorité de contact</CardTitle>
           <CardDescription>
-            Les dix comptes qui pèsent le plus dans le CA à aller chercher sur les {HORIZON_LABEL[horizon]} à venir,
+            Les dix comptes qui pèsent le plus dans le CA à aller chercher d&apos;ici {currentWindowLabel},
             classés par CA attendu (probabilité × commande type). Survolez une barre pour le détail.
           </CardDescription>
         </CardHeader>
@@ -303,7 +326,7 @@ export function ProbabilityClient({
       {/* ── Comptes ──────────────────────────────────────────────────── */}
       <Card className="overflow-hidden">
         <CardHeader>
-          <CardTitle>Comptes — probabilité de commander dans les {HORIZON_LABEL[horizon]}</CardTitle>
+          <CardTitle>Comptes — probabilité de commander d&apos;ici {currentWindowLabel}</CardTitle>
           <CardDescription>
             Chaque probabilité se décompose en facteurs : le plus favorable et le plus défavorable sont affichés, avec le
             taux de commande observé sur les comptes dans le même cas.

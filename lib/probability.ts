@@ -41,7 +41,12 @@ import { median } from "@/lib/stats";
  * mois, pour dire au commercial à quel point il peut s'y fier.
  */
 
-export type Horizon = 1 | 3 | 6;
+/**
+ * Nombre de mois de la fenêtre de prédiction — un entier positif, pas de
+ * valeurs figées : l'onglet Chances laisse choisir le mois cible librement
+ * (Planning › Mois utilise toujours 1, la génération du prévisionnel aussi).
+ */
+export type Horizon = number;
 
 export interface SaleRow {
   account_id: string;
