@@ -305,17 +305,23 @@ taux surcompte les critères corrélés (cadence, retard et activité disent en
 partie la même chose) — puis recalibrés sur les mois les plus récents, tenus
 à l'écart de l'apprentissage.
 
-**Ce que la page montre.**
-- comptes attendus en commande (somme des probabilités) et CA attendu
-  (probabilité × commande type × commandes attendues sur l'horizon) ;
-- **la probabilité selon chaque critère** : pour chaque niveau, la fréquence
-  réelle de commande observée et le nombre de situations (`n`), face au taux
-  de base ;
-- la **fiabilité** : AUC, score de Brier contre le taux de base, et la table
-  « annoncé / réellement commandé » par tranche de probabilité — quand le
-  modèle dit 60 %, combien ont commandé ?
-- le tableau des comptes, triable, avec les facteurs les plus favorable et
-  défavorable de chacun.
+**Ce que la page montre**, dans l'ordre — le compte rendu d'abord (ce qu'il
+faut savoir avant d'ouvrir le tableau), le détail du modèle en dernier :
+- **compte rendu** : comptes attendus en commande (somme des probabilités) et
+  **CA à aller chercher** (probabilité × commande type × commandes attendues
+  sur l'horizon), taux de base et fiabilité en un coup d'œil ;
+- **Top 10** : les dix comptes qui pèsent le plus dans ce CA à aller
+  chercher, en graphique, classés par CA attendu (pas par probabilité seule —
+  un compte à 40 % sur un gros volume prime sur un compte à 80 % sur un petit) ;
+- le **tableau des comptes**, triable et filtrable (recherche, segment,
+  statut, cadence, probabilité minimale, masquer les perdus), avec les
+  facteurs les plus favorable et défavorable de chacun ;
+- en détail, sous une ligne de séparation : **la probabilité selon chaque
+  critère** (pour chaque niveau, la fréquence réelle de commande observée et
+  le nombre de situations `n`, face au taux de base) et la **fiabilité** (AUC,
+  score de Brier contre le taux de base, table « annoncé / réellement
+  commandé » par tranche de probabilité — quand le modèle dit 60 %, combien
+  ont commandé ?).
 
 La fiche compte affiche la probabilité à 3 mois avec ses neuf facteurs.
 Le CA attendu est une espérance, pas une prévision ligne à ligne : la

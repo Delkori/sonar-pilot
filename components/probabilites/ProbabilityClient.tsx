@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { SegmentedControl } from "@/components/ui/Button";
 import { SortableTh } from "@/components/ui/SortableTh";
@@ -14,7 +15,7 @@ import { buildProbabilityModel, CRITERIA } from "@/lib/probability";
 import type { AccountProbability, ForecastSignalRow, Horizon, ProbabilityModel, SaleRow } from "@/lib/probability";
 import type { PurchaseLine } from "@/lib/sonarscore/velocity";
 import { monthIndex, MONTHS_SHORT } from "@/lib/dates";
-import type { Account } from "@/types/database";
+import type { Account, AccountStatus, Segment } from "@/types/database";
 import { ArrowDownRight, ArrowUpRight, Info } from "lucide-react";
 
 type SortKey = "probability" | "expectedCa" | "name" | "lastOrder" | "segment";
@@ -66,6 +67,68 @@ function ProbabilityBar({ value, baseRate, className }: { value: number; baseRat
   );
 }
 
+interface Top10Row {
+  accountId: string;
+  name: string;
+  expectedCa: number;
+  probability: number;
+}
+
+/** Tooltip au survol d'une barre — valeur en € et probabilité du compte. */
+function Top10Tooltip({ active, payload }: { active?: boolean; payload?: { payload: Top10Row }[] }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-border bg-surface px-3 py-2 text-xs shadow-lg">
+      <p className="mb-1 font-semibold text-foreground">{row.name}</p>
+      <p className="text-muted-foreground">
+        CA attendu <span className="font-medium text-foreground">{formatEUR(row.expectedCa)}</span>
+      </p>
+      <p className="text-muted-foreground">
+        Probabilité <span className="font-medium text-foreground">{formatPct(row.probability)}</span>
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Les dix comptes qui pèsent le plus dans le CA à aller chercher — classement
+ * par CA attendu (probabilité × commande type), pas par probabilité seule :
+ * un compte à 40 % sur un gros volume prime sur un compte à 80 % sur un petit.
+ */
+function Top10Chart({ rows }: { rows: Top10Row[] }) {
+  if (rows.length === 0) {
+    return <p className="text-sm text-muted-foreground">Pas encore assez de données pour un classement.</p>;
+  }
+  // Hauteur proportionnelle au nombre de lignes : un portefeuille avec moins
+  // de dix comptes actifs ne doit pas laisser un grand vide sous le graphique.
+  const height = Math.max(rows.length * 34, 120);
+  return (
+    <div style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 48, bottom: 4, left: 4 }} barCategoryGap={8}>
+          <XAxis type="number" hide />
+          <YAxis
+            type="category"
+            dataKey="name"
+            width={168}
+            tick={{ fontSize: 12, fill: "#64748B" }}
+            tickLine={false}
+            axisLine={false}
+            interval={0}
+          />
+          <RechartsTooltip content={<Top10Tooltip />} cursor={{ fill: "#EEF2FF" }} />
+          <Bar dataKey="expectedCa" radius={[0, 4, 4, 0]} maxBarSize={22}>
+            {rows.map((r) => (
+              <Cell key={r.accountId} fill="#4F46E5" />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 function FactorChip({ factor }: { factor: AccountProbability["factors"][number] }) {
   const favorable = factor.weight > 0;
   const Icon = favorable ? ArrowUpRight : ArrowDownRight;
@@ -101,6 +164,8 @@ export function ProbabilityClient({
   const [cadence, setCadence] = useState("all");
   const [minProbability, setMinProbability] = useState(0);
   const [hideLost, setHideLost] = useState(true);
+  const [segment, setSegment] = useState<Segment | "all">("all");
+  const [status, setStatus] = useState<AccountStatus | "all">("all");
 
   // Entraînement + scoring à chaque changement d'horizon : quelques
   // centaines de millisecondes sur un portefeuille de plusieurs centaines de
@@ -123,8 +188,10 @@ export function ProbabilityClient({
       .filter((r) => !hideLost || r.account.status !== "lost")
       .filter((r) => cadence === "all" || r.features.cadence === cadence)
       .filter((r) => r.probability >= minProbability)
+      .filter((r) => segment === "all" || r.account.segment === segment)
+      .filter((r) => status === "all" || r.account.status === status)
       .filter((r) => !q || r.account.name.toLowerCase().includes(q));
-  }, [model, accountById, search, cadence, minProbability, hideLost]);
+  }, [model, accountById, search, cadence, minProbability, hideLost, segment, status]);
 
   const { sorted, sortKey, dir, toggle } = useSortableTable<(typeof rows)[number], SortKey>(
     rows,
@@ -143,6 +210,24 @@ export function ProbabilityClient({
   const activeAccounts = model.accounts.filter((r) => accountById.get(r.accountId)?.status !== "lost");
   const expectedActive = activeAccounts.reduce((s, r) => s + r.probability, 0);
   const expectedCaActive = activeAccounts.reduce((s, r) => s + r.expectedCa, 0);
+
+  // Classement stable, indépendant des filtres du tableau ci-dessous : le
+  // compte rendu montre toujours la même priorité, qu'on soit en train
+  // d'explorer un sous-ensemble du portefeuille ou non.
+  const top10: Top10Row[] = useMemo(
+    () =>
+      activeAccounts
+        .filter((r) => r.expectedCa > 0)
+        .sort((a, b) => b.expectedCa - a.expectedCa)
+        .slice(0, 10)
+        .map((r) => ({
+          accountId: r.accountId,
+          name: accountById.get(r.accountId)?.name ?? r.accountId,
+          expectedCa: Math.round(r.expectedCa),
+          probability: r.probability,
+        })),
+    [activeAccounts, accountById]
+  );
 
   return (
     <div className="space-y-6">
@@ -179,9 +264,10 @@ export function ProbabilityClient({
             accent
           />
           <Tile
-            label="CA attendu"
+            label="CA à aller chercher"
             value={formatEUR(Math.round(expectedCaActive))}
             hint="probabilité × commande type × commandes attendues sur l'horizon"
+            accent
           />
           <Tile
             label="Taux de base observé"
@@ -200,101 +286,17 @@ export function ProbabilityClient({
         </CardContent>
       </Card>
 
-      {/* ── Probabilité par critère ──────────────────────────────────── */}
-      <div>
-        <div className="mb-3 flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-semibold text-foreground">Probabilité de commande selon chaque critère</h2>
-          <p className="text-xs text-muted-foreground">
-            Fréquences observées sur l&apos;historique · le trait vertical marque le taux de base ({formatPct(model.baseRate)})
-          </p>
-        </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {model.criteria.map((c) => (
-            <Card key={c.key}>
-              <CardHeader>
-                <CardTitle>{c.label}</CardTitle>
-                <CardDescription>{c.description}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2.5 pt-3">
-                {c.levels.length === 0 && <p className="text-xs text-muted-foreground">Aucune donnée.</p>}
-                {c.levels.map((lv) => (
-                  <div
-                    key={lv.value}
-                    title={`${lv.label} : ${formatPct(lv.rate)} de commande sur ${formatNumber(lv.n)} situations`}
-                  >
-                    <div className="flex items-baseline justify-between gap-2 text-xs">
-                      <span className="truncate text-foreground">{lv.label}</span>
-                      <span className="shrink-0 tabular-nums">
-                        <span className="font-semibold text-foreground">{formatPct(lv.rate)}</span>
-                        <span className="ml-1.5 text-muted-foreground">n = {formatNumber(lv.n)}</span>
-                      </span>
-                    </div>
-                    <ProbabilityBar value={lv.rate} baseRate={model.baseRate} className="mt-1" />
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Fiabilité ────────────────────────────────────────────────── */}
+      {/* ── Top 10 : où se trouve le CA à aller chercher ──────────────── */}
       <Card>
         <CardHeader>
-          <CardTitle>Fiabilité des probabilités</CardTitle>
+          <CardTitle>Top 10 — priorité de contact</CardTitle>
           <CardDescription>
-            Sur les {formatNumber(evaluation.n)} situations les plus récentes
-            {surClients ? " de comptes ayant déjà commandé" : ""}, que le modèle n&apos;a pas vues pendant
-            l&apos;apprentissage : quand il annonce « 60 % », combien ont réellement commandé ?
-            {surClients &&
-              ` Les ${formatNumber(model.evaluation.n - model.evaluationClients.n)} situations de comptes sans aucune vente sont écartées : le modèle les classe sans mérite, elles flatteraient la mesure.`}
-            {!evaluation.calibrated && " Fenêtre trop courte pour recalibrer : probabilités brutes."}
+            Les dix comptes qui pèsent le plus dans le CA à aller chercher sur les {HORIZON_LABEL[horizon]} à venir,
+            classés par CA attendu (probabilité × commande type). Survolez une barre pour le détail.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
-          {evaluation.n === 0 ? (
-            <p className="text-sm text-muted-foreground">Pas encore assez d&apos;historique pour évaluer le modèle.</p>
-          ) : (
-            <TableWrap>
-              <table className="w-full min-w-max text-sm">
-                <thead>
-                  <tr className={theadRowClass}>
-                    <th className="px-3 py-2 font-medium">Probabilité annoncée</th>
-                    <th className="px-3 py-2 text-right font-medium">Moyenne annoncée</th>
-                    <th className="px-3 py-2 text-right font-medium">Réellement commandé</th>
-                    <th className="px-3 py-2 text-right font-medium">Écart</th>
-                    <th className="px-3 py-2 text-right font-medium">Situations</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {evaluation.reliability
-                    .filter((b) => b.n > 0)
-                    .map((b) => {
-                      const ecart = b.observed - b.predicted;
-                      return (
-                        <tr key={b.from} className="border-b border-border/60 last:border-0">
-                          <td className="px-3 py-2 tabular-nums text-foreground">
-                            {Math.round(b.from * 100)} – {Math.round(b.to * 100)} %
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatPct(b.predicted)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground">{formatPct(b.observed)}</td>
-                          <td
-                            className={cn(
-                              "px-3 py-2 text-right tabular-nums",
-                              Math.abs(ecart) >= 0.15 ? "text-warning" : "text-muted-foreground"
-                            )}
-                          >
-                            {ecart > 0 ? "+" : ""}
-                            {Math.round(ecart * 100)} pts
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatNumber(b.n)}</td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </TableWrap>
-          )}
+          <Top10Chart rows={top10} />
         </CardContent>
       </Card>
 
@@ -315,6 +317,23 @@ export function ProbabilityClient({
             onChange={(e) => setSearch(e.target.value)}
             className={cn(fieldClass, "min-w-56")}
           />
+          <select value={segment} onChange={(e) => setSegment(e.target.value as Segment | "all")} className={fieldClass}>
+            <option value="all">Tous segments</option>
+            {(["A", "B", "C", "D", "E"] as const).map((s) => (
+              <option key={s} value={s}>
+                Segment {s}
+              </option>
+            ))}
+          </select>
+          <select value={status} onChange={(e) => setStatus(e.target.value as AccountStatus | "all")} className={fieldClass}>
+            <option value="all">Tous statuts</option>
+            <option value="actif">Actif</option>
+            <option value="a_risque">À risque</option>
+            <option value="a_suivre">À suivre</option>
+            <option value="new">Nouveau</option>
+            <option value="reconnected">Reconquis</option>
+            <option value="lost">Perdu</option>
+          </select>
           <select value={cadence} onChange={(e) => setCadence(e.target.value)} className={fieldClass}>
             <option value="all">Toutes cadences</option>
             {cadenceLevels.map((l) => (
@@ -403,6 +422,111 @@ export function ProbabilityClient({
             </tbody>
           </table>
         </TableWrap>
+      </Card>
+
+      {/* ── Comment le modèle raisonne (détail, sous la main courante) ── */}
+      <div className="border-t border-border pt-6">
+        <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Comment le modèle raisonne
+        </p>
+
+        {/* ── Probabilité par critère ────────────────────────────────── */}
+        <div>
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <h2 className="text-sm font-semibold text-foreground">Probabilité de commande selon chaque critère</h2>
+            <p className="text-xs text-muted-foreground">
+              Fréquences observées sur l&apos;historique · le trait vertical marque le taux de base ({formatPct(model.baseRate)})
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {model.criteria.map((c) => (
+              <Card key={c.key}>
+                <CardHeader>
+                  <CardTitle>{c.label}</CardTitle>
+                  <CardDescription>{c.description}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2.5 pt-3">
+                  {c.levels.length === 0 && <p className="text-xs text-muted-foreground">Aucune donnée.</p>}
+                  {c.levels.map((lv) => (
+                    <div
+                      key={lv.value}
+                      title={`${lv.label} : ${formatPct(lv.rate)} de commande sur ${formatNumber(lv.n)} situations`}
+                    >
+                      <div className="flex items-baseline justify-between gap-2 text-xs">
+                        <span className="truncate text-foreground">{lv.label}</span>
+                        <span className="shrink-0 tabular-nums">
+                          <span className="font-semibold text-foreground">{formatPct(lv.rate)}</span>
+                          <span className="ml-1.5 text-muted-foreground">n = {formatNumber(lv.n)}</span>
+                        </span>
+                      </div>
+                      <ProbabilityBar value={lv.rate} baseRate={model.baseRate} className="mt-1" />
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Fiabilité ────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Fiabilité des probabilités</CardTitle>
+          <CardDescription>
+            Sur les {formatNumber(evaluation.n)} situations les plus récentes
+            {surClients ? " de comptes ayant déjà commandé" : ""}, que le modèle n&apos;a pas vues pendant
+            l&apos;apprentissage : quand il annonce « 60 % », combien ont réellement commandé ?
+            {surClients &&
+              ` Les ${formatNumber(model.evaluation.n - model.evaluationClients.n)} situations de comptes sans aucune vente sont écartées : le modèle les classe sans mérite, elles flatteraient la mesure.`}
+            {!evaluation.calibrated && " Fenêtre trop courte pour recalibrer : probabilités brutes."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {evaluation.n === 0 ? (
+            <p className="text-sm text-muted-foreground">Pas encore assez d&apos;historique pour évaluer le modèle.</p>
+          ) : (
+            <TableWrap>
+              <table className="w-full min-w-max text-sm">
+                <thead>
+                  <tr className={theadRowClass}>
+                    <th className="px-3 py-2 font-medium">Probabilité annoncée</th>
+                    <th className="px-3 py-2 text-right font-medium">Moyenne annoncée</th>
+                    <th className="px-3 py-2 text-right font-medium">Réellement commandé</th>
+                    <th className="px-3 py-2 text-right font-medium">Écart</th>
+                    <th className="px-3 py-2 text-right font-medium">Situations</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {evaluation.reliability
+                    .filter((b) => b.n > 0)
+                    .map((b) => {
+                      const ecart = b.observed - b.predicted;
+                      return (
+                        <tr key={b.from} className="border-b border-border/60 last:border-0">
+                          <td className="px-3 py-2 tabular-nums text-foreground">
+                            {Math.round(b.from * 100)} – {Math.round(b.to * 100)} %
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatPct(b.predicted)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums font-medium text-foreground">{formatPct(b.observed)}</td>
+                          <td
+                            className={cn(
+                              "px-3 py-2 text-right tabular-nums",
+                              Math.abs(ecart) >= 0.15 ? "text-warning" : "text-muted-foreground"
+                            )}
+                          >
+                            {ecart > 0 ? "+" : ""}
+                            {Math.round(ecart * 100)} pts
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{formatNumber(b.n)}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </TableWrap>
+          )}
+        </CardContent>
       </Card>
 
       <p className="flex items-start gap-2 text-xs text-muted-foreground">
