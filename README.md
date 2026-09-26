@@ -379,7 +379,7 @@ préparer une visite, ils vivent dans Comptes.
 | Entrée | Onglets | Anciennes adresses (redirigées) |
 |---|---|---|
 | Dashboard | — | |
-| Planning | Mois · Semaine · Chances | `/pilotage`, `/relances`, `/probabilites`, `/analyse` |
+| Plan d'actions | Mois · Semaine · Chances | `/pilotage`, `/relances`, `/probabilites`, `/analyse` |
 | Comptes | Liste · Carte · Produits · Prospects (+ fiche `/comptes/[id]`) | `/mapping`, `/matrice`, `/personas`, `/sponsoring`, `/analyse/*` |
 | Paramètres | Objectifs, personas, import (+ correspondances) | `/admin/*` |
 

@@ -22,7 +22,7 @@ export default async function PlanningLayout({ children }: { children: React.Rea
 
   return (
     <PageShell
-      title="Planning"
+      title="Plan d'actions"
       subtitle="Le mois à planifier, la semaine à tenir, les comptes qui vont commander"
       tabs={
         <Suspense>

@@ -46,7 +46,7 @@ const GROUPS: NavGroup[] = [
     title: "",
     items: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard, hint: "Vue d'ensemble du secteur" },
-      { href: "/planning", label: "Planning", icon: CalendarClock, hint: "Le mois, la semaine, les chances de commande" },
+      { href: "/planning", label: "Plan d'actions", icon: CalendarClock, hint: "Le mois, la semaine, les chances de commande" },
       { href: "/comptes", label: "Comptes", icon: Users, hint: "Liste, carte, produits, prospects" },
       { href: "/parametres", label: "Paramètres", icon: Settings, hint: "Objectifs, import, correspondances" },
     ],
